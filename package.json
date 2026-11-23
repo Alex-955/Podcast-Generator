@@ -1,0 +1,30 @@
+{
+  "name": "ai-podcast-generator",
+  "version": "1.0.0",
+  "description": "AI 妙听播客生成器 - 将长文与公众号文章一键重构为沉浸式双人对话播客",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "podcast",
+    "tts",
+    "deepseek",
+    "edge-tts",
+    "ai"
+  ],
+  "author": "Alex",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.20.0",
+    "cheerio": "^1.2.0",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.0",
+    "express": "^5.2.1",
+    "node-edge-tts": "^1.2.10",
+    "uuid": "^14.0.2",
+    "ws": "^8.21.3"
+  }
+}

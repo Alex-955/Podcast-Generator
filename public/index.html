@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AI 妙听 - 随身双人播客生成器</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎙️</text></svg>">
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="app" class="app-container">
+    <!-- 顶部导航栏 -->
+    <header class="header">
+      <div class="logo-group">
+        <div class="logo-icon">🎙️</div>
+        <div class="logo-text">
+          <h1>AI 妙听</h1>
+          <span class="badge">双人播客</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="btnSettings" class="icon-button" title="设置 API Key">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          <span class="settings-hint-badge" id="apiKeyStatusDot"></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- 主要内容区域 (两栏设计：左侧输入/剧本，右侧播放器/字幕) -->
+    <main class="main-content">
+      <!-- 左侧：输入与剧本工作区 -->
+      <section class="panel input-panel">
+        <div class="panel-header">
+          <h2>1. 导入长文 / 公众号</h2>
+          <div class="tabs">
+            <button class="tab-btn active" data-tab="tab-url">文章链接</button>
+            <button class="tab-btn" data-tab="tab-text">直接贴文字</button>
+          </div>
+        </div>
+
+        <div class="tab-content active" id="tab-url">
+          <div class="input-group">
+            <input type="text" id="inputUrl" placeholder="粘贴微信公众号文章、知乎或新闻网页链接..." />
+            <button id="btnFetchUrl" class="btn btn-secondary">解析文章</button>
+          </div>
+          <div class="quick-samples">
+            <span class="sample-label">示例体验：</span>
+            <button class="chip" data-sample="ai">AI智能体爆发</button>
+            <button class="chip" data-sample="deepseek">DeepSeek技术剖析</button>
+            <button class="chip" data-sample="work">数字游民新工作范式</button>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-text">
+          <input type="text" id="inputTitle" placeholder="文章标题 (可选)" class="title-input" />
+          <textarea id="inputText" placeholder="粘贴任意长文本、读书笔记、行业研报或文章正文..." rows="6"></textarea>
+        </div>
+
+        <!-- 播客参数配置卡片 -->
+        <div class="config-card">
+          <div class="config-row">
+            <label>配音角色：</label>
+            <div class="role-selector">
+              <span class="role-tag host">阿泽 (男声·微软云希)</span>
+              <span class="vs-icon">🎙️</span>
+              <span class="role-tag guest">小晓 (女声·微软晓晓)</span>
+            </div>
+          </div>
+          <div class="config-row">
+            <label for="bgmSelect">背景轻音乐：</label>
+            <select id="bgmSelect" class="styled-select">
+              <option value="coffee_ambient">晨间咖啡·温暖电钢 (推荐)</option>
+              <option value="none">纯净人声 (无 BGM)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 操作按钮组 -->
+        <div class="actions-group">
+          <button id="btnOneClick" class="btn btn-primary btn-large">
+            <span class="btn-icon">⚡</span>
+            <span>一键生成双人播客</span>
+          </button>
+          <button id="btnOnlyScript" class="btn btn-outline">仅生成剧本草稿</button>
+        </div>
+
+        <!-- 进度与状态反馈 -->
+        <div id="statusContainer" class="status-container hidden">
+          <div class="status-indicator">
+            <div class="spinner"></div>
+            <span id="statusMessage">正在解析文章...</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div id="progressBar" class="progress-bar-fill" style="width: 15%"></div>
+          </div>
+        </div>
+
+        <!-- 对话剧本卡片 -->
+        <div id="scriptSection" class="script-card hidden">
+          <div class="script-header">
+            <h3>播客对话剧本</h3>
+            <div class="script-actions">
+              <button id="btnRegenerateAudio" class="btn btn-sm btn-primary">按修改后剧本重新配音</button>
+            </div>
+          </div>
+          <p id="podcastSummary" class="podcast-summary"></p>
+          <div id="dialogueList" class="dialogue-list">
+            <!-- 剧本台词条目将渲染在此 -->
+          </div>
+        </div>
+      </section>
+
+      <!-- 右侧：沉浸式播客播放器与同步高亮对话字幕 -->
+      <section class="panel player-panel">
+        <div class="podcast-cover-card">
+          <div class="cover-visual">
+            <div class="cover-avatar host-avatar">
+              <div class="avatar-circle">泽</div>
+              <span>阿泽</span>
+            </div>
+            <div class="wave-visualizer" id="waveVisualizer">
+              <div class="bar"></div>
+              <div class="bar"></div>
+              <div class="bar"></div>
+              <div class="bar"></div>
+              <div class="bar"></div>
+              <div class="bar"></div>
+              <div class="bar"></div>
+              <div class="bar"></div>
+            </div>
+            <div class="cover-avatar guest-avatar">
+              <div class="avatar-circle">晓</div>
+              <span>小晓</span>
+            </div>
+          </div>
+
+          <h2 id="currentPodcastTitle" class="now-playing-title">等待播客生成</h2>
+          <p id="currentPodcastMeta" class="now-playing-meta">点击左侧生成即可开始收听</p>
+
+          <!-- 播放控制台 -->
+          <div class="player-controls">
+            <div class="progress-container">
+              <span id="currentTime" class="time-label">00:00</span>
+              <input type="range" id="seekSlider" class="seek-slider" min="0" max="100" value="0" step="0.1">
+              <span id="totalDuration" class="time-label">00:00</span>
+            </div>
+
+            <div class="control-buttons">
+              <button id="btnRewind10" class="btn-ctrl" title="后退 10 秒">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/>
+                </svg>
+                <span class="ctrl-sub">10s</span>
+              </button>
+
+              <button id="btnPlayPause" class="btn-play" title="播放 / 暂停">
+                <svg id="playIcon" width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
+                <svg id="pauseIcon" class="hidden" width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="4" width="4" height="16"></rect>
+                  <rect x="14" y="4" width="4" height="16"></rect>
+                </svg>
+              </button>
+
+              <button id="btnForward10" class="btn-ctrl" title="快进 10 秒">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M13 17l5-5-5-5M6 17l5-5-5-5"/>
+                </svg>
+                <span class="ctrl-sub">10s</span>
+              </button>
+
+              <button id="btnSpeed" class="btn-speed" title="倍速播放">1.0x</button>
+            </div>
+
+            <div class="player-footer-tools">
+              <a id="btnDownloadAudio" class="download-link disabled" download="ai-podcast.mp3">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                下载完整音频 (MP3)
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- 实时滚动对话高亮区域 (小宇宙 / Apple Podcasts 样式) -->
+        <div class="subtitles-container">
+          <div class="subtitles-header">
+            <h3>双人对话字幕</h3>
+            <span class="subtitles-tip">逐句高亮为估算时间轴（MP3 帧计数口径），点击句子可跳转试听</span>
+          </div>
+          <div id="subtitlesList" class="subtitles-list">
+            <div class="empty-subtitles">
+              <span class="empty-icon">🎧</span>
+              <p>生成播客后，这里将同步滚动高亮主持人和嘉宾的观点交锋</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- 设置弹窗 (API Key / BaseURL / 模型自由配置) -->
+    <div id="settingsModal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>模型与 API 设置</h3>
+          <button id="btnCloseSettings" class="close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-desc">
+            默认使用 <strong>DeepSeek</strong> 生成高质量双人对话播客剧本。一期播客仅消耗约 0.005 元人民币。
+          </p>
+
+          <div class="form-group">
+            <label for="settingApiKey">DeepSeek API Key：</label>
+            <input type="password" id="settingApiKey" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx" />
+            <small class="form-tip">Key 仅保存在你的本地浏览器缓存中，不会被泄露。</small>
+          </div>
+
+          <div class="form-group">
+            <label for="settingBaseUrl">API Base URL：</label>
+            <input type="text" id="settingBaseUrl" value="https://api.deepseek.com" />
+          </div>
+
+          <div class="form-group">
+            <label for="settingModel">模型名称：</label>
+            <input type="text" id="settingModel" value="deepseek-flash" />
+          </div>
+
+          <div class="modal-note">
+            💡 已验证 DeepSeek；也可尝试其他 OpenAI 兼容接口（如阿里百炼、Kimi、硅基流动等），修改 BaseURL 与 Key 即可，兼容性未逐一验证。
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="btnSaveSettings" class="btn btn-primary">保存配置</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 隐藏的音频播放元素 -->
+    <audio id="mainAudioPlayer" preload="auto"></audio>
+    <audio id="bgmAudioPlayer" loop preload="auto"></audio>
+  </div>
+
+  <script src="inputSource.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
