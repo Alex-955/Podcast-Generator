@@ -8,6 +8,7 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
+const { getEventListeners } = require('node:events');
 const {
   extractArticle,
   extractArticleFromUrl,
@@ -187,4 +188,84 @@ test('B-F3：defaultFetcher 正常跟随同域重定向', async () => {
   const r = await defaultFetcher('https://article.example.com/a', {}, { request });
   assert.strictEqual(r.status, 200);
   assert.strictEqual(r.data, '<html>正文</html>');
+});
+
+test('预先取消时，抓取器与文章入口均直接抛 AbortError', async () => {
+  const signal = AbortSignal.abort(new Error('自定义取消原因'));
+  const unreachable = () => assert.fail('已取消，不应发起请求');
+
+  await assert.rejects(defaultFetcher(TEST_URL, {}, { signal, request: unreachable }), { name: 'AbortError' });
+  await assert.rejects(extractArticleFromUrl(TEST_URL, { signal, fetcher: unreachable }), { name: 'AbortError' });
+  await assert.rejects(extractArticle({ rawText: '文章正文' }, { signal }), { name: 'AbortError' });
+});
+
+test('抓取中途取消会中止底层请求，不换 UA 重试，也不报 502', async () => {
+  const controller = new AbortController();
+  const { signal } = controller;
+  let calls = 0;
+  let requestSignal;
+  const fetcher = (url, headers, options) => defaultFetcher(url, headers, {
+    ...options,
+    request(_url, config) {
+      calls += 1;
+      requestSignal = config.signal;
+      return new Promise((_, reject) => {
+        requestSignal.addEventListener('abort', () => reject(new Error('transport cancelled')), { once: true });
+      });
+    },
+  });
+
+  const result = extractArticle({ url: TEST_URL }, { signal, fetcher });
+  assert.notStrictEqual(requestSignal, signal);
+  assert.strictEqual(getEventListeners(signal, 'abort').length, 1);
+  controller.abort('cancel');
+  assert.strictEqual(requestSignal.aborted, true);
+  await assert.rejects(result, (error) => error.name === 'AbortError' && error.statusCode === undefined);
+  assert.strictEqual(calls, 1);
+  assert.strictEqual(getEventListeners(signal, 'abort').length, 0);
+});
+
+test('抓取完成后移除外部取消监听', async () => {
+  const controller = new AbortController();
+  let requestSignal;
+  await defaultFetcher(TEST_URL, {}, {
+    signal: controller.signal,
+    request: async (_url, config) => {
+      requestSignal = config.signal;
+      return { status: 200 };
+    },
+  });
+  assert.strictEqual(getEventListeners(controller.signal, 'abort').length, 0);
+  controller.abort();
+  assert.strictEqual(requestSignal.aborted, false);
+});
+
+test('ALLOW_INSECURE_TLS 每次发请求时读取，仅值为 1 时使用宽松 TLS Agent', async () => {
+  const original = process.env.ALLOW_INSECURE_TLS;
+  const agents = [];
+  const request = async (_url, config) => {
+    agents.push(config.httpsAgent);
+    if (agents.length === 1) {
+      process.env.ALLOW_INSECURE_TLS = '1';
+      return { status: 302, headers: { location: '/next' } };
+    }
+    return { status: 200 };
+  };
+
+  try {
+    delete process.env.ALLOW_INSECURE_TLS;
+    await defaultFetcher(TEST_URL, {}, { request });
+    await defaultFetcher(TEST_URL, {}, { request });
+    process.env.ALLOW_INSECURE_TLS = '0';
+    await defaultFetcher(TEST_URL, {}, { request });
+
+    assert.strictEqual(agents[0], undefined);
+    assert.strictEqual(agents[1].options.rejectUnauthorized, false);
+    assert.strictEqual(agents[2].options.rejectUnauthorized, false);
+    assert.notStrictEqual(agents[1], agents[2]);
+    assert.strictEqual(agents[3], undefined);
+  } finally {
+    if (original === undefined) delete process.env.ALLOW_INSECURE_TLS;
+    else process.env.ALLOW_INSECURE_TLS = original;
+  }
 });

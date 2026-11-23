@@ -111,7 +111,9 @@ async function generatePodcastScript({
   baseURL = 'https://api.deepseek.com',
   model = 'deepseek-flash',
   timeoutMs = LLM_TIMEOUT_MS,
+  signal,
 }) {
+  if (signal?.aborted) throw new DOMException('剧本生成已取消', 'AbortError');
   if (!apiKey) {
     // B-D1：配置缺失属用户输入问题（400），不冒充上游错误
     throw new InputError('缺少 API Key，请在设置中配置 DeepSeek 或百炼 API Key');
@@ -134,14 +136,15 @@ ${content}
 
   // B-F4：不使用 axios 的 timeout 选项——实测其内部 connectPhaseTimer 在连接阶段失败
   // （如拒绝连接）时不会被清理，会挟持事件循环最长 timeout 毫秒。改用自管 AbortController：
-  // unref 定时器 + finally 清理，任何失败路径都不残留定时器。
+  // finally 清理定时器和外部取消监听。
   const controller = new AbortController();
-  let deadlineFired = false;
+  const onAbort = () => controller.abort(new DOMException('剧本生成已取消', 'AbortError'));
+  signal?.addEventListener('abort', onAbort, { once: true });
+  const timeoutSeconds = Math.round(timeoutMs / 1000);
+  const timeoutMessage = `剧本生成超时（${timeoutSeconds} 秒）：文章较长时模型需要更多时间，请重试一次；若反复超时可换更快的模型或先缩短正文`;
   const deadlineTimer = setTimeout(() => {
-    deadlineFired = true;
-    controller.abort();
+    controller.abort(upstreamError(timeoutMessage));
   }, timeoutMs);
-  if (typeof deadlineTimer.unref === 'function') deadlineTimer.unref();
 
   try {
     const response = await axios.post(
@@ -163,6 +166,7 @@ ${content}
         signal: controller.signal,
       }
     );
+    controller.signal.throwIfAborted();
 
     const rawContent = response.data?.choices?.[0]?.message?.content;
     if (!rawContent) {
@@ -200,18 +204,19 @@ ${content}
       usage: response.data.usage,
     };
   } catch (error) {
+    controller.signal.throwIfAborted();
     // B-D1：已分类错误（400 输入缺失 / 502 模型输出异常）原样传递，其余统一包装为上游错误 502
     if (error && error.statusCode) {
       throw error;
     }
-    const timeoutSeconds = Math.round(timeoutMs / 1000);
-    if (deadlineFired || error.code === 'ECONNABORTED' || /timeout/i.test(error.message || '')) {
-      throw upstreamError(`剧本生成超时（${timeoutSeconds} 秒）：文章较长时模型需要更多时间，请重试一次；若反复超时可换更快的模型或先缩短正文`);
+    if (error.code === 'ECONNABORTED' || /timeout/i.test(error.message || '')) {
+      throw upstreamError(timeoutMessage);
     }
     const errorDetail = error.response?.data?.error?.message || error.message;
     throw upstreamError(`剧本生成失败: ${errorDetail}`);
   } finally {
     clearTimeout(deadlineTimer);
+    signal?.removeEventListener('abort', onAbort);
   }
 }
 

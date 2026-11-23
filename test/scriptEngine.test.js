@@ -5,7 +5,17 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
-const { normalizeDialogue } = require('../src/services/scriptEngine');
+const { getEventListeners } = require('node:events');
+const axios = require('axios');
+const { generatePodcastScript, normalizeDialogue } = require('../src/services/scriptEngine');
+
+const SCRIPT_INPUT = { content: '离线测试正文', apiKey: 'test-key' };
+
+function waitForAbort(_url, _body, { signal }) {
+  return new Promise((_, reject) => {
+    signal.addEventListener('abort', () => reject(new Error('transport cancelled')), { once: true });
+  });
+}
 
 test('B0-3：非字符串 text 整行丢弃，绝不产生 [object Object]', () => {
   const dialogue = normalizeDialogue([
@@ -75,4 +85,38 @@ test('emotion 仅在为非空字符串时保留', () => {
 test('全部无效时报错而不是返回空剧本', () => {
   assert.throws(() => normalizeDialogue([{ speaker: '阿泽', text: {} }]), /没有有效台词/);
   assert.throws(() => normalizeDialogue('不是数组'), /dialogue/);
+});
+
+test('预先取消时，剧本生成抛 AbortError 且不发请求', async (t) => {
+  const post = t.mock.method(axios, 'post', () => assert.fail('已取消，不应发起请求'));
+  const signal = AbortSignal.abort('cancel');
+  await assert.rejects(generatePodcastScript({ ...SCRIPT_INPUT, signal }), { name: 'AbortError' });
+  assert.strictEqual(post.mock.callCount(), 0);
+});
+
+test('剧本生成中途取消会中止底层请求并抛 AbortError', async (t) => {
+  const post = t.mock.method(axios, 'post', waitForAbort);
+  const controller = new AbortController();
+  const { signal } = controller;
+  const result = generatePodcastScript({ ...SCRIPT_INPUT, signal });
+  const requestSignal = post.mock.calls[0].arguments[2].signal;
+
+  assert.notStrictEqual(requestSignal, signal);
+  assert.strictEqual(getEventListeners(signal, 'abort').length, 1);
+  controller.abort(new Error('自定义取消原因'));
+  assert.strictEqual(requestSignal.aborted, true);
+  await assert.rejects(result, (error) => error.name === 'AbortError' && error.statusCode === undefined);
+  assert.strictEqual(getEventListeners(signal, 'abort').length, 0);
+});
+
+test('剧本生成超时仍报 502 并清理外部取消监听', async (t) => {
+  t.mock.method(axios, 'post', waitForAbort);
+  const { signal } = new AbortController();
+  await assert.rejects(generatePodcastScript({ ...SCRIPT_INPUT, signal, timeoutMs: 25 }), {
+    name: 'UpstreamError',
+    statusCode: 502,
+    message: /剧本生成超时/,
+  });
+  assert.strictEqual(signal.aborted, false);
+  assert.strictEqual(getEventListeners(signal, 'abort').length, 0);
 });

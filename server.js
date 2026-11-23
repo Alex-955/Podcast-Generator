@@ -1,8 +1,8 @@
 require('dotenv').config();
-// 说明：node-edge-tts 内部建立 TLS 连接、无法注入定制 agent，
-// 本机证书链（公司代理/自签 CA）会导致 UNABLE_TO_GET_ISSUER_CERT_LOCALLY，
-// 因此在服务入口临时关闭全局证书校验。仅限本地个人使用，部署到公网前必须移除。
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+if (process.env.ALLOW_INSECURE_TLS === '1') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  console.warn('⚠️  [security] ALLOW_INSECURE_TLS=1 已开启，当前进程跳过 TLS 证书校验（仅限本地代理调试）');
+}
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -13,7 +13,6 @@ const { extractArticle } = require('./src/services/extractor');
 const { generatePodcastScript, normalizeDialogue } = require('./src/services/scriptEngine');
 const { synthesizeDialogueScript, AVAILABLE_VOICES, DEFAULT_VOICES } = require('./src/services/ttsService');
 const { concatenateAudioFiles } = require('./src/services/audioMerger');
-const { generateAmbientChordsWav } = require('./src/services/bgmGenerator');
 const {
   InputError,
   validateScriptRequest,
@@ -33,20 +32,8 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // 静态资源服务
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const STORAGE_DIR = path.join(__dirname, 'public', 'podcasts');
-const BGM_DIR = path.join(__dirname, 'public', 'audio', 'bgm');
 
 if (!fs.existsSync(STORAGE_DIR)) fs.mkdirSync(STORAGE_DIR, { recursive: true });
-if (!fs.existsSync(BGM_DIR)) fs.mkdirSync(BGM_DIR, { recursive: true });
-
-// 初始化生成一份默认 BGM
-const defaultBgmPath = path.join(BGM_DIR, 'coffee_ambient.wav');
-if (!fs.existsSync(defaultBgmPath)) {
-  try {
-    generateAmbientChordsWav(defaultBgmPath, 30);
-  } catch (err) {
-    console.error('生成默认 BGM 失败:', err);
-  }
-}
 
 app.use(express.static(PUBLIC_DIR));
 

@@ -2,10 +2,6 @@ const https = require('https');
 const axios = require('axios');
 const cheerio = require('cheerio');
 
-const httpsAgent = new https.Agent({
-  rejectUnauthorized: false,
-});
-
 // 移动端微信内置浏览器 UA：微信公众号正文命中率最高
 const WECHAT_MOBILE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1 MicroMessenger/8.0.38';
@@ -57,6 +53,10 @@ function upstreamError(message) {
   const error = new Error(message);
   error.statusCode = 502;
   return error;
+}
+
+function abortError() {
+  return new DOMException('文章抓取已取消', 'AbortError');
 }
 
 /** B-F3：展开 IPv6 字面量为 8 个 16 位组（含尾部内嵌 IPv4 / IPv4-mapped 形态）；非法返回 null */
@@ -196,20 +196,26 @@ const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
 /** 单跳抓取超时（毫秒）；请求实现自带 AbortSignal，避免 axios timeout 的定时器泄漏（见 B-F4） */
 const FETCH_TIMEOUT_MS = 20000;
-async function defaultFetcher(url, headers, { request, timeoutMs = FETCH_TIMEOUT_MS } = {}) {
+async function defaultFetcher(url, headers, { request, timeoutMs = FETCH_TIMEOUT_MS, signal } = {}) {
   const send = request || ((u, cfg) => axios.get(u, cfg));
   let current = url;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    if (signal?.aborted) throw abortError();
     assertSafeFetchTarget(current); // 逐跳校验（B-F3）
     // B-F4：不使用 axios 的 timeout 选项（连接阶段失败时其内部定时器不会清理，会挟持事件循环）；
-    // 每跳自管 AbortController + unref 定时器实现单跳超时，finally 保证不残留。
+    // 每跳自管定时器，finally 清理定时器和外部取消监听。
     const controller = new AbortController();
-    const hopTimer = setTimeout(() => controller.abort(), timeoutMs);
-    if (typeof hopTimer.unref === 'function') hopTimer.unref();
+    const onAbort = () => controller.abort(abortError());
+    signal?.addEventListener('abort', onAbort, { once: true });
+    const hopTimer = setTimeout(() => {
+      controller.abort(upstreamError(`抓取失败：请求超时（单跳最多 ${Math.round(timeoutMs / 1000)} 秒）`));
+    }, timeoutMs);
     let response;
     try {
       response = await send(current, {
-        httpsAgent,
+        ...(process.env.ALLOW_INSECURE_TLS === '1' && {
+          httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        }),
         headers,
         signal: controller.signal,
         maxRedirects: 0, // 禁用 axios 自动重定向，由本循环逐跳校验
@@ -218,13 +224,13 @@ async function defaultFetcher(url, headers, { request, timeoutMs = FETCH_TIMEOUT
         validateStatus: (s) => (s >= 200 && s < 300) || (s >= 300 && s < 400),
       });
     } catch (error) {
-      if (controller.signal.aborted) {
-        throw upstreamError(`抓取失败：请求超时（单跳最多 ${Math.round(timeoutMs / 1000)} 秒）`);
-      }
+      controller.signal.throwIfAborted();
       throw error;
     } finally {
       clearTimeout(hopTimer);
+      signal?.removeEventListener('abort', onAbort);
     }
+    controller.signal.throwIfAborted();
     const status = response.status;
     if (status >= 300 && status < 400) {
       if (hop === MAX_REDIRECTS) {
@@ -243,12 +249,14 @@ async function defaultFetcher(url, headers, { request, timeoutMs = FETCH_TIMEOUT
 }
 
 /** 用指定 UA 抓取并解析页面，返回 { title, content }（content 可能为空字符串） */
-async function fetchAndParse(url, userAgent, fetcher = defaultFetcher) {
-  const response = await fetcher(url, {
+async function fetchAndParse(url, userAgent, fetcher, { signal }) {
+  const headers = {
     'User-Agent': userAgent,
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-  });
+  };
+  const response = await fetcher(url, headers, { signal });
+  if (signal?.aborted) throw abortError();
 
   const html = typeof response.data === 'string' ? response.data : String(response.data);
   assertNotWechatErrorPage(url, html);
@@ -328,6 +336,8 @@ async function fetchAndParse(url, userAgent, fetcher = defaultFetcher) {
  * 不再返回 success:false 的静默对象
  */
 async function extractArticleFromUrl(rawUrl, options = {}) {
+  const { signal } = options;
+  if (signal?.aborted) throw abortError();
   const url = assertValidUrl(rawUrl);
   assertSafeFetchTarget(url);
   const fetcher = options.fetcher || defaultFetcher;
@@ -339,10 +349,13 @@ async function extractArticleFromUrl(rawUrl, options = {}) {
   // 策略一：微信移动端 UA；抓不到足够正文时再用桌面 UA 重试一次
   for (const userAgent of [WECHAT_MOBILE_UA, DESKTOP_UA]) {
     try {
-      const { title, content } = await fetchAndParse(url, userAgent, fetcher);
+      const { title, content } = await fetchAndParse(url, userAgent, fetcher, { signal });
+      if (signal?.aborted) throw abortError();
       candidates.push({ title, content });
       if (content && content.length >= MIN_CONTENT_LENGTH) break;
     } catch (error) {
+      if (signal?.aborted) throw abortError();
+      if (error.name === 'AbortError') throw error;
       // 微信明确报错（被删除/反爬/链接失效）无需重试策略，直接抛出
       if (error.message && WECHAT_ERROR_MARKERS.some(([, msg]) => msg === error.message)) {
         error.statusCode = 502;
@@ -378,6 +391,7 @@ async function extractArticleFromUrl(rawUrl, options = {}) {
  */
 async function extractArticle({ url, rawText } = {}, options = {}) {
   if (!url && rawText && rawText.trim()) {
+    if (options.signal?.aborted) throw abortError();
     // 与抓取一致的确定性截断语义，truncated 标记贯通到界面
     const fullText = rawText.trim();
     const truncated = fullText.length > MAX_CONTENT_LENGTH;
