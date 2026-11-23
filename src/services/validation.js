@@ -6,7 +6,7 @@
  * - 上游错误（502）：抓取/LLM/TTS 失败（由各服务抛出并带 statusCode）
  * - 其他（500）：内部错误
  */
-const { AVAILABLE_VOICE_IDS } = require('./ttsService');
+const { AVAILABLE_VOICE_IDS } = require('./ttsProvider');
 
 const MAX_TITLE_LENGTH = 200;
 const MAX_CONTENT_LENGTH = 12000; // 与 extractor.MAX_CONTENT_LENGTH 一致的确定性截断语义
@@ -106,8 +106,13 @@ function validateVoiceMapping(mapping) {
 }
 
 /** 日志/错误消息脱敏：去掉 API Key 形态的凭据 */
-function redactSecrets(text) {
-  return String(text)
+function redactSecrets(text, sensitiveValues = []) {
+  let message = String(text);
+  for (const value of sensitiveValues) {
+    if (typeof value === 'string' && value) message = message.replaceAll(value, '***');
+  }
+  return message
+    .replace(/(?:Authorization|apiKey|baseURL|filePath)["']?\s*[:=]\s*["']?(?:Bearer\s+|Basic\s+)?[^\s,"'}]+/gi, '***')
     .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer ***')
     .replace(/sk-[A-Za-z0-9_-]{6,}/g, 'sk-***')
     .replace(/((?:api[-_]?key|token|secret)[\"'\s:=]+)[A-Za-z0-9._~+/-]{6,}/gi, '$1***');

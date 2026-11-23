@@ -1,6 +1,9 @@
 const fs = require('fs');
 const path = require('path');
-const { EdgeTtsAdapter } = require('./edgeTtsAdapter');
+const { setTimeout: delay } = require('node:timers/promises');
+const { TtsCancelledError } = require('./edgeTtsAdapter');
+const { DEFAULT_VOICES, AVAILABLE_VOICES, AVAILABLE_VOICE_IDS, getTtsProvider } = require('./ttsProvider');
+const { buildCacheKey } = require('./ttsCache');
 const {
   getMp3DurationSeconds,
   scanMp3Format,
@@ -9,27 +12,10 @@ const {
   SENTENCE_GAP_SECONDS,
 } = require('./mp3Utils');
 
-// 默认角色语音配置（微软神经网络语音）
-const DEFAULT_VOICES = {
-  阿泽: 'zh-CN-YunxiNeural', // 沉稳、年轻而温暖的男声（云希）
-  小晓: 'zh-CN-XiaoxiaoNeural', // 自然、有亲和力与表现力的女声（晓晓）
-};
-
-// 备选音色库（voiceMapping 白名单，见 src/services/validation.js）
-const AVAILABLE_VOICES = [
-  { id: 'zh-CN-YunxiNeural', name: '云希 (男声·温和沉稳·主持人推荐)', gender: 'male' },
-  { id: 'zh-CN-XiaoxiaoNeural', name: '晓晓 (女声·灵动自然·嘉宾推荐)', gender: 'female' },
-  { id: 'zh-CN-YunjianNeural', name: '云健 (男声·磁性解说)', gender: 'male' },
-  { id: 'zh-CN-YunyangNeural', name: '云扬 (男声·专业新闻播报)', gender: 'male' },
-  { id: 'zh-CN-XiaohanNeural', name: '晓涵 (女声·知性细腻)', gender: 'female' },
-  { id: 'zh-CN-XiaomengNeural', name: '晓梦 (女声·活泼开朗)', gender: 'female' },
-];
-
-const AVAILABLE_VOICE_IDS = AVAILABLE_VOICES.map((v) => v.id);
 const MAX_SYNTHESIS_ATTEMPTS = 3;
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function checkCancellation(signal) {
+  if (signal?.aborted) throw new TtsCancelledError();
 }
 
 /**
@@ -54,16 +40,22 @@ async function synthesizeSentence({
   rate = '+0%',
   pitch = '+0Hz',
   adapterOptions = {},
+  provider = getTtsProvider(),
+  signal,
+  onAttempt,
 }) {
+  checkCancellation(signal);
   if (typeof text !== 'string' || !text.trim()) {
     throw new Error('合成文本必须是非空字符串');
   }
 
   let lastError = null;
   for (let attempt = 1; attempt <= MAX_SYNTHESIS_ATTEMPTS; attempt += 1) {
-    const adapter = new EdgeTtsAdapter({ voice, rate, pitch, ...adapterOptions });
+    onAttempt?.(attempt);
+    checkCancellation(signal);
     try {
-      const { bytes, duration } = await adapter.synthesizeToFile(text, outputPath);
+      const { bytes, duration } = await provider.synthesizeToFile({ text, voice, outputPath, rate, pitch, signal, adapterOptions });
+      checkCancellation(signal);
       return {
         filePath: outputPath,
         fileName: path.basename(outputPath),
@@ -71,9 +63,11 @@ async function synthesizeSentence({
         duration: Math.round(duration * 1000) / 1000,
       };
     } catch (error) {
+      checkCancellation(signal);
+      if (error instanceof TtsCancelledError || error.name === 'AbortError') throw error;
       lastError = error;
       if (attempt < MAX_SYNTHESIS_ATTEMPTS) {
-        await sleep(300 * attempt); // 线性退避
+        await delay(300 * attempt, undefined, { signal }); // 线性退避
       }
     }
   }
@@ -154,59 +148,60 @@ function buildSentenceTimeline(entries, { gapSeconds = SENTENCE_GAP_SECONDS } = 
 
 /**
  * 逐句合成 + 构建精确时间轴。
- * 返回 dialogue 元素保留 filePath（server.js 负责拼接；meta 中会剔除该字段）。
+ * 返回 dialogue 元素保留 filePath（供任务引擎拼接，成品元数据只保留公开字段）。
  */
-async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping = DEFAULT_VOICES) {
+async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping = DEFAULT_VOICES, options = {}) {
+  const { provider = getTtsProvider(), cache, signal, onProgress, adapterOptions } = options;
   fs.mkdirSync(workDir, { recursive: true });
-
-  const synthEntries = [];
-  const synthMeta = [];
-  for (let index = 0; index < dialogueList.length; index += 1) {
-    const line = dialogueList[index];
+  const entries = [];
+  const totalSegments = dialogueList.length;
+  let cachedSegments = 0;
+  let reusedSegments = 0;
+  for (const [index, line] of dialogueList.entries()) {
+    const { speaker, text, rate = '+0%', pitch = '+0Hz' } = line;
+    const voice = voiceMapping[speaker] || DEFAULT_VOICES[speaker] || DEFAULT_VOICES.阿泽;
     const fileName = sentenceFileName(index);
     const outputPath = path.join(workDir, fileName);
-    // 说话人只允许归一后的阿泽/小晓（scriptEngine.normalizeDialogue 保证）
-    const voice = voiceMapping[line.speaker] || DEFAULT_VOICES[line.speaker] || DEFAULT_VOICES.阿泽;
-    const synthResult = await synthesizeSentence({
-      text: line.text,
-      voice,
-      outputPath,
-      rate: line.rate || '+0%',
-      pitch: line.pitch || '+0Hz',
+    const report = completedSegments => onProgress?.({
+      index, completedSegments, totalSegments, cachedSegments, reusedSegments, speaker, text,
     });
-    synthEntries.push({
-      filePath: synthResult.filePath,
-      fileName,
-      speaker: line.speaker,
-      text: line.text,
-      emotion: typeof line.emotion === 'string' ? line.emotion : undefined,
-    });
-    synthMeta.push({ ...synthResult, line });
+    try {
+      checkCancellation(signal);
+      report(index);
+      checkCancellation(signal);
+      const existing = fs.existsSync(outputPath) && fs.readFileSync(outputPath);
+      let fileSize;
+      if (existing && isValidMp3(existing)) {
+        reusedSegments++;
+        cachedSegments++;
+        fileSize = existing.length;
+      } else {
+        const key = cache && buildCacheKey({ provider: provider.id, model: provider.model, voice, rate, pitch, text });
+        const cached = cache?.get(key, outputPath);
+        if (cached?.hit) {
+          cachedSegments++;
+          fileSize = cached.bytes;
+        } else {
+          const result = await synthesizeSentence({ text, voice, outputPath, rate, pitch, provider, signal, adapterOptions });
+          checkCancellation(signal);
+          cache?.put(key, outputPath);
+          fileSize = result.fileSize;
+        }
+      }
+      entries.push({ filePath: outputPath, fileSize, fileName, speaker, text, emotion: line.emotion });
+      report(index + 1);
+      checkCancellation(signal);
+    } catch (error) {
+      error.segmentIndex = index;
+      throw error;
+    }
   }
 
-  const timeline = buildSentenceTimeline(synthEntries);
-
-  const dialogue = timeline.sentences.map((sentence, i) => ({
-    index: sentence.index,
-    speaker: sentence.speaker,
-    text: sentence.text,
-    ...(synthEntries[i].emotion ? { emotion: synthEntries[i].emotion } : {}),
-    startTime: sentence.startTime,
-    endTime: sentence.endTime,
-    duration: sentence.duration,
-    fileName: sentence.fileName,
-    audioUrl: sentence.audioUrl,
-    filePath: synthMeta[i].filePath,
-    fileSize: synthMeta[i].fileSize,
+  const { sentences, ...timeline } = buildSentenceTimeline(entries);
+  const dialogue = sentences.map((sentence, index) => ({
+    ...sentence, filePath: entries[index].filePath, fileSize: entries[index].fileSize,
   }));
-
-  return {
-    dialogue,
-    totalDuration: timeline.totalDuration,
-    sentenceGap: timeline.sentenceGap,
-    sentenceGapFrames: timeline.sentenceGapFrames,
-    measurement: timeline.measurement,
-  };
+  return { dialogue, ...timeline, cachedSegments, reusedSegments };
 }
 
 module.exports = {

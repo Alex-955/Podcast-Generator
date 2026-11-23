@@ -1,191 +1,135 @@
-'use strict';
-/**
- * B-D1：路由级契约与错误语义冒烟（全离线，不碰公网）。
- *
- * 覆盖：
- * - 只读路由的基本形状（health / voices / bgm-list）；
- * - 用户输入错误必须 400（extract-article 空输入、generate-script 原文是链接、
- *   synthesize-podcast 非法行/超限行）——非法行不得再被 normalizeDialogue 静默丢弃；
- * - LLM 调用失败 / 模型输出超限必须 502（死 baseURL、本地 fake LLM 返超限对话 / 非 JSON）；
- * - 缺少 API Key 属输入问题 400，不冒充上游错误。
- */
 const test = require('node:test');
-const assert = require('node:assert');
-const http = require('http');
-const app = require('../server');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { once } = require('node:events');
+const { setTimeout: delay } = require('node:timers/promises');
+const { extractArticle } = require('../src/services/extractor');
+const { makeMp3 } = require('./helpers/mp3Fixtures');
 
-let server;
-let base;
-let llmServer;
-let llmBase;
-let llmReply;
+const apiKey = 'offline-credential';
+const payload = { mode: 'text', content: '离线文章正文', apiKey };
+let root, server, base, previousEnv;
+let generate;
 
 test.before(async () => {
-  // 本地 fake LLM：OpenAI 兼容形态，应答内容由 llmReply 控制
-  llmServer = http.createServer((req, res) => {
-    let body = '';
-    req.on('data', (c) => {
-      body += c;
-    });
-    req.on('end', () => {
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify(llmReply));
-    });
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'podcast-routes-'));
+  const settings = {
+    DATA_DIR: path.join(root, 'data'), PODCASTS_DIR: path.join(root, 'external-audio'),
+    CORS_ORIGIN: 'https://one.example, https://two.example', DEEPSEEK_API_KEY: '',
+  };
+  previousEnv = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
+  Object.assign(process.env, settings);
+  const { createApp } = require('../server');
+  const app = createApp({
+    dataDir: path.join(root, 'custom-data'),
+    extractor(params) {
+      if (params.url === 'https://offline.example/fail') {
+        throw Object.assign(new Error('抓取错误 Bearer private-value'), { statusCode: 502 });
+      }
+      return extractArticle(params);
+    },
+    scriptGenerator: args => generate(args),
+    ttsProvider: {
+      id: 'offline', model: 'test',
+      synthesizeToFile({ outputPath }) {
+        const mp3 = makeMp3(10);
+        fs.writeFileSync(outputPath, mp3);
+        return { bytes: mp3.length, duration: 0.24 };
+      },
+    },
   });
-  await new Promise((r) => llmServer.listen(0, '127.0.0.1', r));
-  llmBase = `http://127.0.0.1:${llmServer.address().port}`;
-
   server = app.listen(0, '127.0.0.1');
-  await new Promise((r) => server.once('listening', r));
-  base = `http://127.0.0.1:${server.address().port}`;
+  await once(server, 'listening');
+  base = 'http://127.0.0.1:' + server.address().port;
 });
 
 test.after(async () => {
-  await new Promise((r) => server.close(r));
-  await new Promise((r) => llmServer.close(r));
-});
-
-async function get(path) {
-  const res = await fetch(base + path);
-  return { status: res.status, json: await res.json() };
-}
-
-async function post(path, body) {
-  const res = await fetch(base + path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return { status: res.status, json: await res.json() };
-}
-
-test('GET /api/health 基本形状', async () => {
-  const { status, json } = await get('/api/health');
-  assert.strictEqual(status, 200);
-  assert.strictEqual(json.status, 'ok');
-});
-
-test('GET /api/voices 返回顶层 voices 与 defaultMapping', async () => {
-  const { status, json } = await get('/api/voices');
-  assert.strictEqual(status, 200);
-  assert.strictEqual(json.success, true);
-  assert.ok(Array.isArray(json.voices) && json.voices.length > 0, 'voices 应为非空数组');
-  assert.ok(json.defaultMapping && typeof json.defaultMapping === 'object', 'defaultMapping 应为对象');
-  assert.ok(json.defaultMapping['阿泽'] && json.defaultMapping['小晓'], '默认映射应包含两位主播');
-});
-
-test('GET /api/bgm-list 返回顶层 bgmList', async () => {
-  const { status, json } = await get('/api/bgm-list');
-  assert.strictEqual(status, 200);
-  assert.strictEqual(json.success, true);
-  assert.ok(Array.isArray(json.bgmList) && json.bgmList.length > 0, 'bgmList 应为非空数组');
-});
-
-test('extract-article 空输入按用户输入错误 400', async () => {
-  const { status, json } = await post('/api/extract-article', {});
-  assert.strictEqual(status, 400);
-  assert.strictEqual(json.success, false);
-  assert.strictEqual(typeof json.error, 'string');
-});
-
-test('generate-script 原文是链接时 400（拦截裸链接当正文）', async () => {
-  const { status, json } = await post('/api/generate-script', {
-    content: 'https://example.com/some-article',
-  });
-  assert.strictEqual(status, 400);
-  assert.strictEqual(json.success, false);
-  assert.match(json.error, /链接/);
-});
-
-test('generate-script 缺少 API Key 属输入问题 400', async () => {
-  const saved = process.env.DEEPSEEK_API_KEY;
-  delete process.env.DEEPSEEK_API_KEY;
-  try {
-    const { status, json } = await post('/api/generate-script', {
-      content: '一段正常的正文内容，用于测试缺少 API Key 的错误分类。',
-    });
-    assert.strictEqual(status, 400);
-    assert.match(json.error, /API Key/);
-  } finally {
-    if (saved !== undefined) process.env.DEEPSEEK_API_KEY = saved;
+  await new Promise(resolve => server.close(resolve));
+  fs.rmSync(root, { recursive: true, force: true });
+  for (const [key, value] of Object.entries(previousEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
   }
 });
 
-test('generate-script 死 baseURL 按上游错误 502', async () => {
-  const { status, json } = await post('/api/generate-script', {
-    content: '一段正常的正文内容，用于测试死端点场景的错误分类。',
-    apiKey: 'test-key',
-    baseURL: 'http://127.0.0.1:9',
-    model: 'test-model',
+async function request(route, status, body) {
+  const res = await fetch(base + '/api/' + route, body === undefined ? {} : {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
-  assert.strictEqual(status, 502);
-  assert.strictEqual(json.success, false);
+  const json = await res.json();
+  assert.equal(res.status, status, JSON.stringify(json));
+  for (const secret of [apiKey, '"apiKey"', '"baseURL"', '"filePath"', root, 'private-value']) {
+    assert.ok(!JSON.stringify(json).includes(secret));
+  }
+  if (status >= 400) {
+    assert.equal(json.success, false);
+    assert.ok(json.error);
+  }
+  return json;
+}
+
+test('健康、文章预览、CORS 白名单与上游错误脱敏', async () => {
+  assert.equal((await request('health', 200)).status, 'ok');
+  assert.deepEqual((await request('extract-article', 200, { rawText: ' 正文 ' })).data,
+    { title: '', content: '正文', length: 2, truncated: false });
+  await request('extract-article', 400, {});
+  await request('extract-article', 400, { url: '这是正文' });
+  await request('extract-article', 400, { rawText: 42 });
+  await request('extract-article', 502, { url: 'https://offline.example/fail' });
+  for (const [origin, allowed] of [['https://one.example', true], ['https://two.example', true], ['https://other.example', false]]) {
+    const res = await fetch(base + '/api/health', { headers: { Origin: origin } });
+    assert.equal(res.headers.get('access-control-allow-origin'), allowed ? origin : null);
+  }
 });
 
-test('synthesize-podcast 非文本行 400（非法行不再被静默丢弃）', async () => {
-  const { status, json } = await post('/api/synthesize-podcast', {
-    dialogue: [
-      { speaker: '阿泽', text: '第一句正常台词' },
-      { speaker: '小晓', text: { bad: 'object' } },
-    ],
-  });
-  assert.strictEqual(status, 400);
-  assert.match(json.error, /第 2 行/);
+test('任务入参、不存在资源、非法 ID 与移除的接口', async () => {
+  for (const body of [
+    { mode: 'text', content: '正文' }, { ...payload, mode: 'unknown' },
+    { ...payload, content: 'https://example.com/a' }, { ...payload, mode: 'url', url: '非链接' },
+    { ...payload, voiceMapping: { 阿泽: 'bad' } },
+  ]) await request('tasks', 400, body);
+  for (const route of ['tasks/missing', 'podcasts/missing']) await request(route, 404);
+  for (const action of ['cancel', 'resume']) await request('tasks/missing/' + action, 404, {});
+  for (const type of ['tasks', 'podcasts']) await request(type + '/..%2Fprivate', 400);
+  for (const route of ['voices', 'bgm-list']) await request(route, 404);
+  for (const route of ['generate-script', 'synthesize-podcast', 'one-click-generate']) await request(route, 404, {});
 });
 
-test('synthesize-podcast 缺 text 行 400', async () => {
-  const { status } = await post('/api/synthesize-podcast', {
-    dialogue: [{ speaker: '阿泽' }],
+test('创建、单活冲突、取消、续跑、轮询成品、历史与外置静态音频', async () => {
+  generate = ({ signal }) => new Promise((resolve, reject) => {
+    signal.addEventListener('abort', () => reject(new Error('迟到的上游失败')), { once: true });
   });
-  assert.strictEqual(status, 400);
-});
+  const { data: task } = await request('tasks', 202, payload);
+  const route = 'tasks/' + task.id;
+  assert.equal(task.status, 'queued');
+  assert.equal((await request('tasks', 409, payload)).code, 'TASK_ALREADY_RUNNING');
+  await request(route + '/resume', 409, {});
+  assert.equal((await request(route + '/cancel', 200, {})).data.status, 'cancelled');
+  await request(route + '/cancel', 409, {});
+  assert.equal((await request(route, 200)).data.error, null);
+  await request(route + '/resume', 400, {});
 
-test('synthesize-podcast 超过 300 行上限 400', async () => {
-  const dialogue = Array.from({ length: 301 }, (_, i) => ({
-    speaker: i % 2 ? '小晓' : '阿泽',
-    text: `第 ${i + 1} 行`,
-  }));
-  const { status, json } = await post('/api/synthesize-podcast', { dialogue });
-  assert.strictEqual(status, 400);
-  assert.match(json.error, /行上限/);
-});
-
-test('one-click：模型输出超行数上限按上游错误 502', async () => {
-  llmReply = {
-    choices: [
-      {
-        message: {
-          content: JSON.stringify({
-            podcastTitle: '测试标题',
-            summary: '摘要',
-            dialogue: Array.from({ length: 301 }, (_, i) => ({
-              speaker: i % 2 ? '小晓' : '阿泽',
-              text: '好',
-            })),
-          }),
-        },
-      },
-    ],
-    usage: {},
-  };
-  const { status, json } = await post('/api/one-click-generate', {
-    rawText: '这是一段用于测试的正文内容，非空即可通过校验。',
-    apiKey: 'test-key',
-    baseURL: llmBase,
-    model: 'test-model',
-  });
-  assert.strictEqual(status, 502);
-  assert.match(json.error, /行上限/);
-});
-
-test('one-click：模型返回非 JSON 按上游错误 502', async () => {
-  llmReply = { choices: [{ message: { content: '这不是 JSON' } }], usage: {} };
-  const { status, json } = await post('/api/one-click-generate', {
-    rawText: '这是一段用于测试的正文内容，非空即可通过校验。',
-    apiKey: 'test-key',
-    baseURL: llmBase,
-    model: 'test-model',
-  });
-  assert.strictEqual(status, 502);
-  assert.match(json.error, /剧本生成失败/);
+  generate = async () => ({ podcastTitle: '路由测试', summary: '测试', dialogue: [{ speaker: '阿泽', text: '开场' }] });
+  await request(route + '/resume', 202, { apiKey });
+  let completed;
+  for (let i = 0; i < 100; i++) {
+    completed = (await request(route, 200)).data;
+    if (completed.status === 'completed') break;
+    await delay(10);
+  }
+  assert.equal(completed.status, 'completed');
+  const detail = (await request('podcasts/' + task.id, 200)).data;
+  assert.deepEqual(completed.podcast, detail);
+  assert.equal((await request('podcasts', 200)).data.items[0].id, task.id);
+  for (const url of [detail.fullAudioUrl, detail.sentences[0].audioUrl]) {
+    const res = await fetch(base + url);
+    assert.equal(res.status, 200);
+    assert.deepEqual(Buffer.from(await res.arrayBuffer()), makeMp3(10));
+  }
+  assert.ok(fs.existsSync(path.join(root, 'custom-data', 'tasks', task.id + '.json')));
+  assert.ok(fs.existsSync(path.join(root, 'external-audio', task.id, 'meta.json')));
+  await request(route + '/resume', 409, { apiKey });
+  await request(route + '/cancel', 409, {});
 });
