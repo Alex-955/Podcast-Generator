@@ -5,8 +5,7 @@ const { TtsCancelledError } = require('./edgeTtsAdapter');
 const { DEFAULT_VOICES, AVAILABLE_VOICES, AVAILABLE_VOICE_IDS, getTtsProvider } = require('./ttsProvider');
 const { buildCacheKey } = require('./ttsCache');
 const {
-  getMp3DurationSeconds,
-  scanMp3Format,
+  analyzeMp3,
   computeGap,
   isValidMp3,
   SENTENCE_GAP_SECONDS,
@@ -97,7 +96,7 @@ function buildSentenceTimeline(entries, { gapSeconds = SENTENCE_GAP_SECONDS } = 
   let format = null;
   const durations = entries.map((entry) => {
     const buffer = fs.readFileSync(entry.filePath);
-    const frame = scanMp3Format(buffer);
+    const { format: frame, durationSeconds } = analyzeMp3(buffer);
     if (!frame) {
       throw new Error(`音频片段 ${entry.fileName} 不是有效 MP3，拒绝生成时间轴`);
     }
@@ -110,11 +109,7 @@ function buildSentenceTimeline(entries, { gapSeconds = SENTENCE_GAP_SECONDS } = 
     ) {
       throw new Error(`音频片段 ${entry.fileName} 编码格式与其他片段不一致，拒绝生成时间轴`);
     }
-    const duration = getMp3DurationSeconds(buffer);
-    if (duration <= 0) {
-      throw new Error(`音频片段 ${entry.fileName} 时长无法解析`);
-    }
-    return duration;
+    return durationSeconds;
   });
 
   const gap = computeGap(format, gapSeconds);

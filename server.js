@@ -12,6 +12,7 @@ const { createTaskManager } = require('./src/services/taskManager');
 const { InputError, redactSecrets } = require('./src/services/validation');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const FRONTEND_FILES = new Set(['/index.html', '/style.css', '/app.js', '/inputSource.js']);
 
 function parsePort(value) {
   const text = value?.trim();
@@ -23,16 +24,20 @@ function parsePort(value) {
 
 function createApp(options = {}) {
   const app = express();
+  const publicDir = path.resolve(options.publicDir || PUBLIC_DIR);
   const dataDir = path.resolve(options.dataDir || process.env.DATA_DIR || path.join(__dirname, 'data'));
-  const podcastsDir = path.resolve(options.podcastsDir || process.env.PODCASTS_DIR || path.join(PUBLIC_DIR, 'podcasts'));
+  const podcastsDir = path.resolve(options.podcastsDir || process.env.PODCASTS_DIR || path.join(publicDir, 'podcasts'));
   const extractor = options.extractor || extractArticle;
   const manager = options.taskManager || createTaskManager({
     ...options, extractor, podcastsDir, tasksDir: path.join(dataDir, 'tasks'), cacheDir: path.join(dataDir, 'tts-cache'),
   });
 
   const origins = process.env.CORS_ORIGIN?.split(',').map(origin => origin.trim()).filter(Boolean);
-  if (origins?.length) app.use(cors({ origin: origins }));
-  app.use(express.json({ limit: '10mb' }));
+  if (origins?.length) {
+    app.use(cors({ origin: origins, preflightContinue: true }));
+    app.options(/^\/api\//, (req, res) => res.sendStatus(204));
+  }
+  app.use('/api', express.json({ limit: '10mb' }));
 
   app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
   app.post('/api/extract-article', async (req, res) => {
@@ -57,13 +62,11 @@ function createApp(options = {}) {
     if (!/^\/[a-zA-Z0-9_-]+\/[^/]+\.mp3$/i.test(decodeURIComponent(req.path))) return res.sendStatus(404);
     next();
   }, express.static(podcastsDir, { fallthrough: false }));
-  // Exclude aliases of the podcasts directory from the general static mount, including on macOS.
   app.use((req, res, next) => {
-    const relative = path.posix.resolve('/', decodeURIComponent(req.path));
-    if (/^\/podcasts(?:\/|$)/i.test(relative)) return res.sendStatus(404);
-    next();
+    const file = req.path === '/' ? '/index.html' : req.path;
+    if (!['GET', 'HEAD'].includes(req.method) || !FRONTEND_FILES.has(file)) return next();
+    res.sendFile(file.slice(1), { root: publicDir });
   });
-  app.use(express.static(PUBLIC_DIR));
   app.use('/api', (req, res) => res.status(404).json({ success: false, error: '接口不存在' }));
   app.use((err, req, res, next) => {
     if (res.headersSent) return next(err);

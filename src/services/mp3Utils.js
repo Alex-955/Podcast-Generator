@@ -40,6 +40,16 @@ function stripID3(buffer) {
   return buffer;
 }
 
+/** 提取供帧解析与拼接共用的音频数据，移除 ID3v2 头和可选的 128 字节 ID3v1 尾标签。 */
+function extractMp3Body(buffer) {
+  const body = stripID3(buffer);
+  const tail = body.length - 128;
+  if (tail >= 0 && body[tail] === 0x54 && body[tail + 1] === 0x41 && body[tail + 2] === 0x47) {
+    return body.subarray(0, tail);
+  }
+  return body;
+}
+
 /**
  * 解析 offset 处的 MP3 帧头（仅 Layer III）
  * @returns {object|null} 帧信息，非合法帧头时返回 null
@@ -99,17 +109,7 @@ function analyzeMp3(buffer) {
   const fail = (reason) => ({ ok: false, reason, durationSeconds: 0, frameCount: 0, format: null });
   if (!buffer || buffer.length < 4) return fail('too-short');
 
-  let body = stripID3(buffer);
-  // 容忍 ID3v1 尾部标签（末尾 128 字节以 'TAG' 开头）
-  if (
-    body.length >= 128 &&
-    body[body.length - 128] === 0x54 &&
-    body[body.length - 127] === 0x41 &&
-    body[body.length - 126] === 0x47
-  ) {
-    body = body.subarray(0, body.length - 128);
-  }
-
+  const body = extractMp3Body(buffer);
   const format = scanMp3Format(body);
   if (!format) return fail('no-frame');
 
@@ -190,6 +190,7 @@ function isValidMp3(buffer) {
 module.exports = {
   SENTENCE_GAP_SECONDS,
   stripID3,
+  extractMp3Body,
   parseFrameHeader,
   scanMp3Format,
   analyzeMp3,

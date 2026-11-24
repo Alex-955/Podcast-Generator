@@ -10,20 +10,25 @@ const { makeMp3 } = require('./helpers/mp3Fixtures');
 
 const apiKey = 'offline-credential';
 const payload = { mode: 'text', content: '离线文章正文', apiKey };
-let root, server, base, previousEnv;
+let root, publicDir, server, base, previousEnv;
 let generate;
 
 test.before(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'podcast-routes-'));
+  publicDir = path.join(root, 'public');
+  fs.mkdirSync(publicDir);
+  for (const file of ['index.html', 'style.css', 'app.js', 'inputSource.js']) {
+    fs.writeFileSync(path.join(publicDir, file), file);
+  }
   const settings = {
-    DATA_DIR: path.join(root, 'data'), PODCASTS_DIR: path.join(root, 'external-audio'),
+    DATA_DIR: path.join(root, 'data'), PODCASTS_DIR: path.join(publicDir, 'external-audio'),
     CORS_ORIGIN: 'https://one.example, https://two.example', DEEPSEEK_API_KEY: '',
   };
   previousEnv = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
   Object.assign(process.env, settings);
   const { createApp } = require('../server');
   const app = createApp({
-    dataDir: path.join(root, 'custom-data'),
+    publicDir, dataDir: path.join(publicDir, 'custom-data'),
     extractor(params) {
       if (params.url === 'https://offline.example/fail') {
         throw Object.assign(new Error('抓取错误 Bearer private-value'), { statusCode: 502 });
@@ -105,6 +110,35 @@ test('任务入参、不存在资源、非法 ID 与移除的接口', async () =
   for (const route of ['generate-script', 'synthesize-podcast', 'one-click-generate']) await request(route, 404, {});
 });
 
+test('前端只公开指定的 GET/HEAD 文件，运行目录只通过音频路由公开 MP3', async () => {
+  const audioDir = path.join(publicDir, 'external-audio', 'sample');
+  const tasksDir = path.join(publicDir, 'custom-data', 'tasks');
+  fs.mkdirSync(audioDir, { recursive: true });
+  fs.mkdirSync(tasksDir, { recursive: true });
+  fs.writeFileSync(path.join(audioDir, 'meta.json'), '{}');
+  fs.writeFileSync(path.join(tasksDir, 'sample.json'), '{}');
+  const bytes = makeMp3(2);
+  fs.writeFileSync(path.join(audioDir, 'clip.mp3'), bytes);
+
+  for (const route of ['/', '/index.html', '/style.css', '/app.js', '/inputSource.js']) {
+    const get = await fetch(base + route);
+    assert.equal(get.status, 200);
+    assert.equal(await get.text(), route === '/' ? 'index.html' : route.slice(1));
+    const head = await fetch(base + route, { method: 'HEAD' });
+    assert.equal(head.status, 200);
+    assert.equal(await head.text(), '');
+  }
+  const audio = await fetch(base + '/podcasts/sample/clip.mp3');
+  assert.equal(audio.status, 200);
+  assert.deepEqual(Buffer.from(await audio.arrayBuffer()), bytes);
+  for (const route of ['/external-audio/sample/meta.json', '/custom-data/tasks/sample.json',
+    '/EXTERNAL-AUDIO/sample/META.JSON', '/custom-data/tasks/%73ample.json', '/podcasts/sample/meta.json',
+    '/external-audio/sample/clip.mp3', '/APP.JS', '/%61pp.js']) {
+    assert.equal((await fetch(base + route)).status, 404, route);
+  }
+  for (const method of ['POST', 'OPTIONS']) assert.equal((await fetch(base + '/app.js', { method })).status, 404);
+});
+
 test('创建、单活冲突、取消、续跑、轮询成品、历史与外置静态音频', async () => {
   generate = ({ signal }) => new Promise((resolve, reject) => {
     signal.addEventListener('abort', () => reject(new Error('迟到的上游失败')), { once: true });
@@ -136,8 +170,8 @@ test('创建、单活冲突、取消、续跑、轮询成品、历史与外置�
     assert.equal(res.status, 200);
     assert.deepEqual(Buffer.from(await res.arrayBuffer()), makeMp3(10));
   }
-  assert.ok(fs.existsSync(path.join(root, 'custom-data', 'tasks', task.id + '.json')));
-  assert.ok(fs.existsSync(path.join(root, 'external-audio', task.id, 'meta.json')));
+  assert.ok(fs.existsSync(path.join(publicDir, 'custom-data', 'tasks', task.id + '.json')));
+  assert.ok(fs.existsSync(path.join(publicDir, 'external-audio', task.id, 'meta.json')));
   await request(route + '/resume', 409, { apiKey });
   await request(route + '/cancel', 409, {});
 });

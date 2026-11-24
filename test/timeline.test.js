@@ -11,7 +11,8 @@ const os = require('os');
 const path = require('path');
 const { buildSentenceTimeline, SENTENCE_GAP_SECONDS } = require('../src/services/ttsService');
 const { makeMp3, HEADER_24K, HEADER_48K, FRAME_SIZE_48K, FRAME_SIZE_24K } = require('./helpers/mp3Fixtures');
-const { scanMp3Format, computeGap, buildSilenceFrames } = require('../src/services/mp3Utils');
+const { scanMp3Format, computeGap, buildSilenceFrames, analyzeMp3, isValidMp3 } = require('../src/services/mp3Utils');
+const { concatenateAudioFiles } = require('../src/services/audioMerger');
 
 function approx(actual, expected, epsilon = 1e-9) {
   assert.ok(
@@ -115,4 +116,25 @@ test('非 MP3 片段拒绝生成时间轴', () => {
 
 test('空列表拒绝生成时间轴', () => {
   assert.throws(() => buildSentenceTimeline([]), /没有可合成的台词/);
+});
+
+test('多段带 ID3v2 头、ID3v1 尾的音频拼接后可逐帧解析，字幕与成品时长一致', t => {
+  const counts = [10, 15, 20];
+  const { entries, dir } = setupEntries(counts);
+  t.after(() => fs.rmSync(dir, { recursive: true }));
+  // 4096 字节元数据体超过旧时间轴从原始文件扫描首帧的范围。
+  const header = Buffer.concat([Buffer.from([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 32, 0]), Buffer.alloc(4096)]);
+  const tail = Buffer.concat([Buffer.from('TAG'), Buffer.alloc(125)]);
+  for (const { filePath } of entries) {
+    fs.writeFileSync(filePath, Buffer.concat([header, fs.readFileSync(filePath), tail]));
+  }
+  const timeline = buildSentenceTimeline(entries);
+  const file = path.join(dir, 'full_podcast.mp3');
+  concatenateAudioFiles(entries.map(entry => entry.filePath), file);
+  const combined = fs.readFileSync(file);
+  const expectedFrames = 10 + 15 + 20 + 2 * 15;
+  assert.strictEqual(isValidMp3(combined), true);
+  assert.strictEqual(analyzeMp3(combined).frameCount, expectedFrames);
+  assert.strictEqual(combined.length, expectedFrames * FRAME_SIZE_24K);
+  approx(timeline.totalDuration, analyzeMp3(combined).durationSeconds);
 });

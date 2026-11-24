@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const {
-  stripID3,
+  extractMp3Body,
   scanMp3Format,
   buildSilenceFrames,
   computeGap,
@@ -10,7 +10,7 @@ const {
 
 /**
  * 纯 Node.js 合并多个 MP3 音频切片为完整 MP3。
- * 过滤 ID3v2 头部后将 MPEG Audio Frame 直接连接，句间插入与源音频格式
+ * 过滤 ID3 头尾标签后将 MPEG Audio Frame 直接连接，句间插入与源音频格式
  * 一致的真实静音帧。
  *
  * B0-5 契约（不再静默跳过）：
@@ -29,7 +29,7 @@ function concatenateAudioFiles(filePaths, outputFilePath, { gapSeconds = SENTENC
     if (!fs.existsSync(filePath)) {
       throw new Error(`音频片段缺失，拒绝拼接：${path.basename(filePath)}`);
     }
-    const buf = stripID3(fs.readFileSync(filePath));
+    const buf = extractMp3Body(fs.readFileSync(filePath));
     const frame = scanMp3Format(buf);
     if (!frame) {
       throw new Error(`音频片段不是有效 MP3，拒绝拼接：${path.basename(filePath)}`);
@@ -43,7 +43,7 @@ function concatenateAudioFiles(filePaths, outputFilePath, { gapSeconds = SENTENC
     ) {
       throw new Error(`音频片段编码格式与其他片段不一致，拒绝拼接：${path.basename(filePath)}`);
     }
-    cleanedBuffers.push(buf);
+    cleanedBuffers.push(buf.subarray(frame.frameOffset));
   }
 
   const gap = computeGap(format, gapSeconds);

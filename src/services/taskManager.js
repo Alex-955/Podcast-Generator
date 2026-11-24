@@ -63,6 +63,29 @@ function stageProgress(stage) {
   return { stageIndex, totalStages: 4, stageLabel, message: stageLabel, currentSpeaker: null, stageStartedAt: now() };
 }
 
+function validTaskRecord(task, id) {
+  const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+  const hasText = value => typeof value === 'string' && value.trim().length > 0;
+  if (!object(task) || task.id !== id || !object(task.input) || !object(task.progress)) return false;
+  if (!['queued', 'running', 'failed', 'cancelled', 'completed'].includes(task.status)) return false;
+  if (typeof task.stage !== 'string' || !Object.hasOwn(STAGES, task.stage)) return false;
+  if (!['text', 'url'].includes(task.input.mode)) return false;
+  if (task.script != null) {
+    const lines = task.script.dialogue;
+    return Array.isArray(lines) && lines.length > 0 && lines.every(line => hasText(line?.text));
+  }
+  return hasText(task.sourceContent) || (task.input.mode === 'url' && hasText(task.input.url));
+}
+
+function assertScriptSafeToSave({ podcastTitle, summary, dialogue }, apiKey) {
+  if (!apiKey) return;
+  const containsKey = value => typeof value === 'string' && value.includes(apiKey);
+  if (containsKey(podcastTitle) || containsKey(summary) ||
+      dialogue.some(line => containsKey(line.text) || containsKey(line.emotion))) {
+    throw new Error('模型返回内容包含敏感凭据，已拦截并中止保存');
+  }
+}
+
 // Only persist public dialogue fields, including when reading older metadata.
 function publicSentences(id, sentences) {
   return sentences.map(({ index, speaker, text, emotion, startTime, endTime, duration, fileName }) => ({
@@ -85,32 +108,36 @@ function createTaskManager({
     atomicWrite(path.join(tasksDir, task.id + '.json'), JSON.stringify(record));
   }
 
-  function readTask(id) {
+  function readTask(id, { startup = false } = {}) {
     checkId(id);
     const file = path.join(tasksDir, id + '.json');
     if (!fs.existsSync(file)) throw httpError(404, '任务不存在');
     const task = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (task.id !== id) throw new Error('任务记录无效');
+    if (!validTaskRecord(task, id)) throw new Error('任务记录无效');
+    if (['queued', 'running'].includes(task.status) && active?.task.id !== id) {
+      task.status = 'failed';
+      task.error = {
+        stage: task.stage, retryable: true, failedSegmentIndex: null,
+        message: startup ? '服务已重启，上次生成被中断，可点击「从断点继续生成」恢复'
+          : '上次生成已中断，可点击「从断点继续生成」恢复',
+      };
+      try {
+        save(task);
+      } catch {
+        // The checkpoint stays readable on a read-only volume. A later read or resume retries the write.
+      }
+    }
     return task;
   }
 
   for (const entry of readDirectory(tasksDir)) {
     const id = path.basename(entry.name, '.json');
     if (!entry.isFile() || !entry.name.endsWith('.json') || !SAFE_ID.test(id)) continue;
-    let task;
     try {
-      task = readTask(id);
+      readTask(id, { startup: true });
     } catch {
       console.warn('启动恢复时跳过了一条无法读取的任务记录');
-      continue;
     }
-    if (!['queued', 'running'].includes(task.status)) continue;
-    task.status = 'failed';
-    task.error = {
-      stage: task.stage, message: '服务已重启，上次生成被中断，可点击「从断点继续生成」恢复',
-      retryable: true, failedSegmentIndex: null,
-    };
-    save(task);
   }
 
   function getPodcast(id) {
@@ -173,7 +200,7 @@ function createTaskManager({
     }
     try {
       task.status = 'running';
-      if (!task.sourceContent) {
+      if (!task.sourceContent && !task.script) {
         enter('extract');
         const article = await extractor({ url: task.input.url }, { signal });
         signal.throwIfAborted();
@@ -185,10 +212,12 @@ function createTaskManager({
       }
       if (!task.script) {
         enter('script');
-        const { podcastTitle, summary, dialogue } = await scriptGenerator({
+        const script = await scriptGenerator({
           title: task.input.title, content: task.sourceContent, ...creds, signal,
         });
         signal.throwIfAborted();
+        assertScriptSafeToSave(script, creds.apiKey);
+        const { podcastTitle, summary, dialogue } = script;
         task.script = {
           podcastTitle, summary,
           dialogue: dialogue.map(({ speaker, text, emotion, rate, pitch }) => ({ speaker, text, emotion, rate, pitch })),

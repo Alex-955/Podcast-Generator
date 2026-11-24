@@ -168,24 +168,109 @@ test('重启将 queued / running 转为可恢复失败，保存的正文供重�
   }
 });
 
-test('启动扫描保留截断和 ID 不匹配的记录，并恢复同目录的 running 任务', t => {
-  const { config } = setup(t);
+test('启动扫描原样保留损坏记录，有可用剧本的 running 任务能续跑完成', async t => {
+  const unexpectedCall = () => assert.fail('已有剧本，应跳过抓取和剧本生成');
+  const { config } = setup(t, {
+    ttsProvider: await localProvider(t), extractor: unexpectedCall, scriptGenerator: unexpectedCall,
+  });
   fs.mkdirSync(config.tasksDir);
-  const truncated = path.join(config.tasksDir, 'broken.json');
-  const mismatch = path.join(config.tasksDir, 'mismatch.json');
-  const running = path.join(config.tasksDir, 'running.json');
-  const wrongRecord = JSON.stringify({ id: 'running', status: 'running', stage: 'extract' });
-  fs.writeFileSync(truncated, '{"id":');
-  fs.writeFileSync(mismatch, wrongRecord);
-  fs.writeFileSync(running, JSON.stringify({ id: 'running', status: 'running', stage: 'tts' }));
+  const file = id => path.join(config.tasksDir, id + '.json');
+  const valid = {
+    id: 'running', status: 'running', stage: 'tts', input: { mode: 'text', title: '标题' }, script,
+    progress: { stageIndex: 3, totalStages: 4, totalSegments: 3, completedSegments: 0, cachedSegments: 0 },
+  };
+  fs.writeFileSync(file(valid.id), JSON.stringify(valid));
+  const damaged = {
+    broken: '{"id":',
+    mismatch: JSON.stringify(valid),
+    incomplete: JSON.stringify({ id: 'incomplete', status: 'running', stage: 'tts' }),
+    noSource: JSON.stringify({ ...valid, id: 'noSource', script: null }),
+    noUrl: JSON.stringify({ ...valid, id: 'noUrl', script: null, input: { mode: 'url' } }),
+    badStage: JSON.stringify({ ...valid, id: 'badStage', stage: 'unknown' }),
+    badStatus: JSON.stringify({ ...valid, id: 'badStatus', status: 'unknown' }),
+    badMode: JSON.stringify({ ...valid, id: 'badMode', input: { mode: 'other' } }),
+    badProgress: JSON.stringify({ ...valid, id: 'badProgress', progress: [] }),
+  };
+  for (const [id, bytes] of Object.entries(damaged)) fs.writeFileSync(file(id), bytes);
 
   const restarted = createTaskManager(config);
   const recovered = restarted.getTask('running');
   assert.equal(recovered.status, 'failed');
   assert.equal(recovered.error.stage, 'tts');
   assert.equal(recovered.error.retryable, true);
-  assert.equal(fs.readFileSync(truncated, 'utf8'), '{"id":');
-  assert.equal(fs.readFileSync(mismatch, 'utf8'), wrongRecord);
+  for (const [id, bytes] of Object.entries(damaged)) {
+    assert.throws(() => restarted.getTask(id));
+    assert.equal(fs.readFileSync(file(id), 'utf8'), bytes);
+  }
+  restarted.resumeTask(valid.id);
+  const done = await waitFor(() => restarted.getTask(valid.id), task => task.status === 'completed');
+  assert.equal(done.podcast.sentences.length, script.dialogue.length);
+});
+
+test('状态和失败记录均写盘失败时，仍可查询恢复态并在同一实例续跑', async t => {
+  let blockWrites = false;
+  let failedWrites = 0;
+  let generations = 0;
+  const scriptGenerator = () => { generations++; return script; };
+  const { synthesizeDialogueScript } = require('../src/services/ttsService');
+  const { manager, config } = setup(t, {
+    ttsProvider: await localProvider(t), scriptGenerator,
+    async ttsSynthesizer(...args) {
+      const result = await synthesizeDialogueScript(...args);
+      if (failedWrites === 0) blockWrites = true;
+      return result;
+    },
+  });
+  const { id } = manager.createTask(payload);
+  const file = path.join(config.tasksDir, id + '.json');
+  const rename = fs.renameSync;
+  t.mock.method(fs, 'renameSync', (from, to) => {
+    if (blockWrites && to === file) {
+      failedWrites++;
+      throw Object.assign(new Error('模拟任务目录暂不可写'), { code: 'EROFS' });
+    }
+    return rename(from, to);
+  });
+  await waitFor(() => failedWrites, count => count >= 2);
+  const recovered = manager.getTask(id);
+  assert.equal(recovered.status, 'failed');
+  assert.equal(recovered.error.stage, 'tts'); // 最后成功落盘的阶段
+  assert.equal(recovered.error.retryable, true);
+  assert.equal(JSON.parse(fs.readFileSync(file)).status, 'running');
+  blockWrites = false;
+  manager.resumeTask(id);
+  const done = await waitFor(() => manager.getTask(id), task => task.status === 'completed');
+  assert.equal(done.progress.cachedSegments, dialogue.length);
+  assert.equal(generations, 1);
+});
+
+test('成功的模型回复若回显本次 Key 会在保存及合成前被拦截，讨论服务地址仍可生成', async t => {
+  let reply;
+  let syntheses = 0;
+  const provider = await localProvider(t, null, () => { syntheses++; });
+  const { manager, config, root } = setup(t, { ttsProvider: provider, scriptGenerator: () => reply });
+  for (const field of ['podcastTitle', 'summary', 'text', 'emotion']) {
+    reply = structuredClone(script);
+    const target = ['text', 'emotion'].includes(field) ? reply.dialogue.at(-1) : reply;
+    target[field] = `回显 ${apiKey} 测试`;
+    const { id } = manager.createTask(payload);
+    const task = await waitFor(() => manager.getTask(id), task => task.status === 'failed');
+    assert.equal(task.error.message, '模型返回内容包含敏感凭据，已拦截并中止保存');
+    assert.equal(task.error.stage, 'script');
+    assert.equal(task.hasScript, false);
+    noLeaks(task, root);
+    const stored = JSON.parse(fs.readFileSync(path.join(config.tasksDir, id + '.json')));
+    assert.equal(stored.script, null);
+    noLeaks(stored, root);
+    assert.equal(fs.existsSync(path.join(config.podcastsDir, id)), false);
+  }
+  assert.equal(syntheses, 0);
+  assert.deepEqual(manager.listPodcasts().items, []);
+
+  reply = { ...script, summary: '本集介绍 https://api.deepseek.com' };
+  const { id } = manager.createTask({ ...payload, baseURL: 'https://api.deepseek.com' });
+  const done = await waitFor(() => manager.getTask(id), task => task.status === 'completed');
+  assert.equal(done.podcast.summary, reply.summary);
 });
 
 test('历史倒序、残缺目录原样保留、旧元数据投影与安全 ID', t => {
