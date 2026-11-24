@@ -6,7 +6,7 @@ const path = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
 const { createTaskManager } = require('../src/services/taskManager');
 const { getTtsProvider } = require('../src/services/ttsProvider');
-const { synthesizeSentence } = require('../src/services/ttsService');
+const { synthesizeSentence, synthesizeDialogueScript, DEFAULT_VOICES } = require('../src/services/ttsService');
 const { getMp3DurationSeconds } = require('../src/services/mp3Utils');
 const { startFakeEdgeTts } = require('./fakeEdgeTts');
 const { makeMp3 } = require('./helpers/mp3Fixtures');
@@ -55,6 +55,86 @@ async function localProvider(t, onConnection, beforeSynthesis) {
     },
   };
 }
+
+test('服务端 Key 仅用于服务端配置的模型地址，自带 Key 可使用自定义地址', async t => {
+  const serverKey = 'offline-server-credential';
+  const defaultURL = 'https://api.deepseek.com';
+  const customURL = 'https://model.example/Team';
+  const { DEEPSEEK_API_KEY, LLM_BASE_URL } = process.env;
+  t.after(() => {
+    for (const [key, value] of Object.entries({ DEEPSEEK_API_KEY, LLM_BASE_URL })) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  process.env.DEEPSEEK_API_KEY = serverKey;
+  delete process.env.LLM_BASE_URL;
+  const calls = [];
+  const { manager, config } = setup(t, {
+    ttsProvider: await localProvider(t),
+    scriptGenerator({ apiKey, baseURL }) {
+      calls.push({ apiKey, baseURL });
+      return script;
+    },
+  });
+  const article = { mode: 'text', content: '普通正文' };
+  const denied = { statusCode: 400, message: '使用自定义接口地址时请提供对应的 API Key' };
+  assert.throws(() => manager.createTask({ ...article, baseURL: customURL }), denied);
+  assert.throws(() => manager.createTask({ ...article, baseURL: customURL, apiKey: '  ' }), denied);
+  assert.throws(() => manager.createTask({ ...article, title: serverKey }), { statusCode: 400, message: '输入内容包含敏感凭据，已拦截并中止保存' });
+  assert.equal(fs.existsSync(config.tasksDir), false);
+  assert.equal(calls.length, 0);
+
+  async function checkDestination(credentials, expectedKey, expectedURL) {
+    const { id } = manager.createTask({ ...article, ...credentials });
+    const done = await waitFor(() => manager.getTask(id), task => task.status === 'completed');
+    assert.deepEqual(calls.splice(0), [{ apiKey: expectedKey, baseURL: expectedURL }]);
+    assert.ok(!JSON.stringify(done).includes(expectedKey));
+  }
+  await checkDestination({}, serverKey, defaultURL);
+  await checkDestination({ baseURL: defaultURL }, serverKey, defaultURL);
+  await checkDestination({ baseURL: customURL, apiKey }, apiKey, customURL);
+  process.env.LLM_BASE_URL = customURL;
+  await checkDestination({ baseURL: '  https://MODEL.example/Team/v1/  ' }, serverKey, customURL);
+  assert.throws(() => manager.createTask({ ...article, baseURL: 'https://model.example/team' }), denied);
+});
+
+test('创建时拦截含本次 Key 的标题、正文或文章链接，首次落盘前返回 400', t => {
+  const unexpectedCall = () => assert.fail('输入应在任务启动前被拒绝');
+  const { manager, root } = setup(t, { extractor: unexpectedCall, scriptGenerator: unexpectedCall });
+  for (const input of [
+    { ...payload, title: '标题' + apiKey },
+    { ...payload, content: '正文' + apiKey },
+    { mode: 'url', url: 'https://article.example/' + apiKey, apiKey },
+  ]) {
+    assert.throws(() => manager.createTask(input), {
+      statusCode: 400, message: '输入内容包含敏感凭据，已拦截并中止保存',
+    });
+  }
+  assert.deepEqual(fs.readdirSync(root), []);
+});
+
+test('抓取返回的标题或正文含本次 Key 时任务在 extract 失败，文件与 DTO 不含凭据', async t => {
+  let article;
+  let scriptCalls = 0;
+  const { manager, config, root } = setup(t, {
+    extractor: () => article,
+    scriptGenerator() { scriptCalls++; throw new Error('不应进入剧本阶段'); },
+  });
+  for (const field of ['title', 'content']) {
+    article = { title: '标题', content: '正文', [field]: '文章中包含 ' + apiKey };
+    const task = manager.createTask({ mode: 'url', url: 'https://article.example/story', apiKey });
+    const failed = await waitFor(() => manager.getTask(task.id), record => record.status === 'failed');
+    assert.equal(failed.error.stage, 'extract');
+    assert.equal(failed.error.message, '抓取内容包含敏感凭据，已拦截并中止保存');
+    const stored = JSON.parse(fs.readFileSync(path.join(config.tasksDir, task.id + '.json')));
+    assert.equal(stored.sourceContent, '');
+    assert.equal(stored.input.title, '');
+    noLeaks(failed, root);
+    noLeaks(stored, root);
+  }
+  assert.equal(scriptCalls, 0);
+});
 
 test('url / text 四阶段、真实逐句进度、跨任务缓存与成品帧时间轴', async t => {
   const stages = [];
@@ -190,6 +270,7 @@ test('启动扫描原样保留损坏记录，有可用剧本的 running 任务�
     badStatus: JSON.stringify({ ...valid, id: 'badStatus', status: 'unknown' }),
     badMode: JSON.stringify({ ...valid, id: 'badMode', input: { mode: 'other' } }),
     badProgress: JSON.stringify({ ...valid, id: 'badProgress', progress: [] }),
+    badVoices: JSON.stringify({ ...valid, id: 'badVoices', voiceMapping: [] }),
   };
   for (const [id, bytes] of Object.entries(damaged)) fs.writeFileSync(file(id), bytes);
 
@@ -207,12 +288,32 @@ test('启动扫描原样保留损坏记录，有可用剧本的 running 任务�
   assert.equal(done.podcast.sentences.length, script.dialogue.length);
 });
 
+test('voiceMapping 为 null 的历史断点用两位主播的默认音色续跑', async t => {
+  const voices = [];
+  const { config, manager } = setup(t, {
+    ttsProvider: await localProvider(t, null, ({ voice }) => voices.push(voice)),
+    ttsSynthesizer(lines, dir, mapping, options) {
+      assert.deepEqual(mapping, DEFAULT_VOICES);
+      return synthesizeDialogueScript(lines, dir, mapping, options);
+    },
+  });
+  const record = {
+    id: 'null-voices', status: 'failed', stage: 'tts', input: { mode: 'text' },
+    progress: {}, script, voiceMapping: null,
+  };
+  fs.mkdirSync(config.tasksDir);
+  fs.writeFileSync(path.join(config.tasksDir, record.id + '.json'), JSON.stringify(record));
+  manager.resumeTask(record.id);
+  const done = await waitFor(() => manager.getTask(record.id), task => task.status === 'completed');
+  assert.equal(done.podcast.sentences.length, dialogue.length);
+  assert.deepEqual(voices, dialogue.map(line => DEFAULT_VOICES[line.speaker]));
+});
+
 test('状态和失败记录均写盘失败时，仍可查询恢复态并在同一实例续跑', async t => {
   let blockWrites = false;
   let failedWrites = 0;
   let generations = 0;
   const scriptGenerator = () => { generations++; return script; };
-  const { synthesizeDialogueScript } = require('../src/services/ttsService');
   const { manager, config } = setup(t, {
     ttsProvider: await localProvider(t), scriptGenerator,
     async ttsSynthesizer(...args) {

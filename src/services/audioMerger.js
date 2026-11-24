@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   extractMp3Body,
-  scanMp3Format,
+  analyzeMp3,
   buildSilenceFrames,
   computeGap,
   SENTENCE_GAP_SECONDS,
@@ -29,9 +29,9 @@ function concatenateAudioFiles(filePaths, outputFilePath, { gapSeconds = SENTENC
     if (!fs.existsSync(filePath)) {
       throw new Error(`音频片段缺失，拒绝拼接：${path.basename(filePath)}`);
     }
-    const buf = extractMp3Body(fs.readFileSync(filePath));
-    const frame = scanMp3Format(buf);
-    if (!frame) {
+    const raw = fs.readFileSync(filePath);
+    const { ok, format: frame } = analyzeMp3(raw);
+    if (!ok) {
       throw new Error(`音频片段不是有效 MP3，拒绝拼接：${path.basename(filePath)}`);
     }
     if (!format) {
@@ -43,7 +43,7 @@ function concatenateAudioFiles(filePaths, outputFilePath, { gapSeconds = SENTENC
     ) {
       throw new Error(`音频片段编码格式与其他片段不一致，拒绝拼接：${path.basename(filePath)}`);
     }
-    cleanedBuffers.push(buf.subarray(frame.frameOffset));
+    cleanedBuffers.push(extractMp3Body(raw).subarray(frame.frameOffset));
   }
 
   const gap = computeGap(format, gapSeconds);

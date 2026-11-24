@@ -27,12 +27,30 @@ function readDirectory(dir) {
   return fs.readdirSync(dir, { withFileTypes: true });
 }
 
+function normalizeBaseURL(value) {
+  let url;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new InputError('使用自定义接口地址时请提供对应的 API Key');
+  }
+  url.pathname = url.pathname.replace(/\/+$/, '').replace(/\/v1$/, '');
+  return url.href;
+}
+
 function getCredentials(payload) {
-  const setting = (value, fallback) => (typeof value === 'string' && value.trim()) || fallback?.trim() || undefined;
+  const setting = value => typeof value === 'string' ? value.trim() : '';
+  const requestKey = setting(payload.apiKey);
+  const apiKey = requestKey || setting(process.env.DEEPSEEK_API_KEY);
+  const requestURL = setting(payload.baseURL);
+  const serverURL = setting(process.env.LLM_BASE_URL) || 'https://api.deepseek.com';
+  if (!requestKey && requestURL && normalizeBaseURL(requestURL) !== normalizeBaseURL(serverURL)) {
+    throw new InputError('使用自定义接口地址时请提供对应的 API Key');
+  }
   return {
-    apiKey: setting(payload.apiKey, process.env.DEEPSEEK_API_KEY),
-    baseURL: setting(payload.baseURL, process.env.LLM_BASE_URL),
-    model: setting(payload.model, process.env.LLM_MODEL),
+    apiKey,
+    baseURL: requestKey && requestURL ? requestURL : serverURL,
+    model: setting(payload.model) || setting(process.env.LLM_MODEL) || undefined,
   };
 }
 
@@ -67,6 +85,7 @@ function validTaskRecord(task, id) {
   const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
   const hasText = value => typeof value === 'string' && value.trim().length > 0;
   if (!object(task) || task.id !== id || !object(task.input) || !object(task.progress)) return false;
+  if (task.voiceMapping != null && !object(task.voiceMapping)) return false;
   if (!['queued', 'running', 'failed', 'cancelled', 'completed'].includes(task.status)) return false;
   if (typeof task.stage !== 'string' || !Object.hasOwn(STAGES, task.stage)) return false;
   if (!['text', 'url'].includes(task.input.mode)) return false;
@@ -77,11 +96,13 @@ function validTaskRecord(task, id) {
   return hasText(task.sourceContent) || (task.input.mode === 'url' && hasText(task.input.url));
 }
 
+function containsApiKey(apiKey, ...fields) {
+  return Boolean(apiKey) && fields.some(value => typeof value === 'string' && value.includes(apiKey));
+}
+
 function assertScriptSafeToSave({ podcastTitle, summary, dialogue }, apiKey) {
-  if (!apiKey) return;
-  const containsKey = value => typeof value === 'string' && value.includes(apiKey);
-  if (containsKey(podcastTitle) || containsKey(summary) ||
-      dialogue.some(line => containsKey(line.text) || containsKey(line.emotion))) {
+  if (containsApiKey(apiKey, podcastTitle, summary) ||
+      dialogue.some(line => containsApiKey(apiKey, line.text, line.emotion))) {
     throw new Error('模型返回内容包含敏感凭据，已拦截并中止保存');
   }
 }
@@ -204,6 +225,9 @@ function createTaskManager({
         enter('extract');
         const article = await extractor({ url: task.input.url }, { signal });
         signal.throwIfAborted();
+        if (containsApiKey(creds.apiKey, article.title, article.content)) {
+          throw new Error('抓取内容包含敏感凭据，已拦截并中止保存');
+        }
         const source = validateScriptRequest(article);
         task.sourceContent = source.content;
         Object.assign(task.input, {
@@ -227,7 +251,7 @@ function createTaskManager({
       Object.assign(task.progress, { completedSegments: 0, totalSegments: task.script.dialogue.length, cachedSegments: 0 });
       enter('tts');
       fs.mkdirSync(workDir, { recursive: true });
-      const result = await ttsSynthesizer(task.script.dialogue, workDir, task.voiceMapping, {
+      const result = await ttsSynthesizer(task.script.dialogue, workDir, task.voiceMapping || DEFAULT_VOICES, {
         provider: ttsProvider, cache, signal,
         onProgress({ index, completedSegments, totalSegments, cachedSegments, speaker }) {
           signal.throwIfAborted();
@@ -292,10 +316,13 @@ function createTaskManager({
 
   function createTask(payload = {}) {
     assertIdle();
+    const creds = getCredentials(payload);
+    if (containsApiKey(creds.apiKey, payload.title, payload.mode === 'url' ? payload.url : payload.content)) {
+      throw new InputError('输入内容包含敏感凭据，已拦截并中止保存');
+    }
     const source = getInput(payload);
     const mapping = validateVoiceMapping(payload.voiceMapping) || DEFAULT_VOICES;
     const voiceMapping = Object.fromEntries(Object.keys(DEFAULT_VOICES).map(speaker => [speaker, mapping[speaker] || DEFAULT_VOICES[speaker]]));
-    const creds = getCredentials(payload);
     if (!creds.apiKey) throw new InputError('缺少 API Key，请先配置后再生成');
     const task = {
       id: randomUUID(), status: 'queued', stage: 'extract', ...source, voiceMapping, script: null,

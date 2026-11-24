@@ -67,7 +67,7 @@ test('逐句合成优先复用工作目录，然后查缓存，且报告两种�
   };
   cache.put(buildCacheKey({ provider: provider.id, model: provider.model, voice: DEFAULT_VOICES.阿泽, text: '缓存' }), source);
   const progress = [];
-  const result = await synthesizeDialogueScript(dialogue, work, DEFAULT_VOICES, {
+  const result = await synthesizeDialogueScript(dialogue, work, null, {
     cache, provider, onProgress: p => progress.push([p.completedSegments, p.cachedSegments, p.reusedSegments]),
   });
   assert.deepEqual(progress, [[0, 0, 0], [1, 1, 1], [1, 1, 1], [2, 2, 1], [2, 2, 1], [3, 2, 1]]);

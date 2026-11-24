@@ -146,6 +146,7 @@ function buildSentenceTimeline(entries, { gapSeconds = SENTENCE_GAP_SECONDS } = 
  * 返回 dialogue 元素保留 filePath（供任务引擎拼接，成品元数据只保留公开字段）。
  */
 async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping = DEFAULT_VOICES, options = {}) {
+  const voices = voiceMapping && typeof voiceMapping === 'object' ? voiceMapping : DEFAULT_VOICES;
   const { provider = getTtsProvider(), cache, signal, onProgress, adapterOptions } = options;
   fs.mkdirSync(workDir, { recursive: true });
   const entries = [];
@@ -154,7 +155,7 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping = DE
   let reusedSegments = 0;
   for (const [index, line] of dialogueList.entries()) {
     const { speaker, text, rate = '+0%', pitch = '+0Hz' } = line;
-    const voice = voiceMapping[speaker] || DEFAULT_VOICES[speaker] || DEFAULT_VOICES.阿泽;
+    const voice = voices[speaker] || DEFAULT_VOICES[speaker] || DEFAULT_VOICES.阿泽;
     const fileName = sentenceFileName(index);
     const outputPath = path.join(workDir, fileName);
     const report = completedSegments => onProgress?.({

@@ -118,6 +118,18 @@ test('空列表拒绝生成时间轴', () => {
   assert.throws(() => buildSentenceTimeline([]), /没有可合成的台词/);
 });
 
+test('单独调用拼接器时拒绝尾帧被截断的片段，已有成品保持原样', t => {
+  const { dir, entries } = setupEntries([4, 3]);
+  t.after(() => fs.rmSync(dir, { recursive: true }));
+  const files = entries.map(entry => entry.filePath);
+  const output = path.join(dir, 'full_podcast.mp3');
+  concatenateAudioFiles(files, output);
+  const original = fs.readFileSync(output);
+  fs.truncateSync(files[1], fs.statSync(files[1]).size - 1);
+  assert.throws(() => concatenateAudioFiles(files, output), /不是有效 MP3/);
+  assert.deepStrictEqual(fs.readFileSync(output), original);
+});
+
 test('多段带 ID3v2 头、ID3v1 尾的音频拼接后可逐帧解析，字幕与成品时长一致', t => {
   const counts = [10, 15, 20];
   const { entries, dir } = setupEntries(counts);
