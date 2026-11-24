@@ -70,6 +70,14 @@ async function request(route, status, body) {
   return json;
 }
 
+test('监听端口在未设置或空白时取 3000，保留显式的 0 和指定端口', () => {
+  const { parsePort } = require('../server');
+  for (const value of [undefined, '', '   ']) assert.equal(parsePort(value), 3000);
+  assert.equal(parsePort('0'), 0);
+  assert.equal(parsePort('4000'), 4000);
+  for (const value of ['-1', '3.5', 'abc', '65536']) assert.throws(() => parsePort(value), RangeError);
+});
+
 test('健康、文章预览、CORS 白名单与上游错误脱敏', async () => {
   assert.equal((await request('health', 200)).status, 'ok');
   assert.deepEqual((await request('extract-article', 200, { rawText: ' 正文 ' })).data,

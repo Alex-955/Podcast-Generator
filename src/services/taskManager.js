@@ -97,7 +97,13 @@ function createTaskManager({
   for (const entry of readDirectory(tasksDir)) {
     const id = path.basename(entry.name, '.json');
     if (!entry.isFile() || !entry.name.endsWith('.json') || !SAFE_ID.test(id)) continue;
-    const task = readTask(id);
+    let task;
+    try {
+      task = readTask(id);
+    } catch {
+      console.warn('启动恢复时跳过了一条无法读取的任务记录');
+      continue;
+    }
     if (!['queued', 'running'].includes(task.status)) continue;
     task.status = 'failed';
     task.error = {
@@ -226,7 +232,7 @@ function createTaskManager({
       enter('done');
     } catch (error) {
       // An immediate resume owns the new checkpoint while this cancelled run drains.
-      if (active.task !== task) return;
+      if (active?.task !== task) return;
       if (signal.aborted || error.name === 'AbortError') {
         task.status = 'cancelled';
         task.error = null;

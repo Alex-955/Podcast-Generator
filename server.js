@@ -13,6 +13,14 @@ const { InputError, redactSecrets } = require('./src/services/validation');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
+function parsePort(value) {
+  const text = value?.trim();
+  if (!text) return 3000;
+  const port = Number(text);
+  if (!/^\d+$/.test(text) || port > 65535) throw new RangeError('PORT 必须是 0 至 65535 的整数');
+  return port;
+}
+
 function createApp(options = {}) {
   const app = express();
   const dataDir = path.resolve(options.dataDir || process.env.DATA_DIR || path.join(__dirname, 'data'));
@@ -73,12 +81,13 @@ function createApp(options = {}) {
 
 const app = createApp();
 app.createApp = createApp;
+app.parsePort = parsePort;
 module.exports = app;
 
 if (require.main === module) {
   const HOST = process.env.HOST || '127.0.0.1';
-  const PORT = process.env.PORT ?? 3000;
-  const server = app.listen(Number(PORT), HOST, () => {
+  const PORT = parsePort(process.env.PORT);
+  const server = app.listen(PORT, HOST, () => {
     console.log(`AI 妙听播客服务已启动 http://${HOST}:${server.address().port}`);
     console.log('局域网手机试听可使用 HOST=0.0.0.0 npm start');
   });

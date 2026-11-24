@@ -168,6 +168,26 @@ test('重启将 queued / running 转为可恢复失败，保存的正文供重�
   }
 });
 
+test('启动扫描保留截断和 ID 不匹配的记录，并恢复同目录的 running 任务', t => {
+  const { config } = setup(t);
+  fs.mkdirSync(config.tasksDir);
+  const truncated = path.join(config.tasksDir, 'broken.json');
+  const mismatch = path.join(config.tasksDir, 'mismatch.json');
+  const running = path.join(config.tasksDir, 'running.json');
+  const wrongRecord = JSON.stringify({ id: 'running', status: 'running', stage: 'extract' });
+  fs.writeFileSync(truncated, '{"id":');
+  fs.writeFileSync(mismatch, wrongRecord);
+  fs.writeFileSync(running, JSON.stringify({ id: 'running', status: 'running', stage: 'tts' }));
+
+  const restarted = createTaskManager(config);
+  const recovered = restarted.getTask('running');
+  assert.equal(recovered.status, 'failed');
+  assert.equal(recovered.error.stage, 'tts');
+  assert.equal(recovered.error.retryable, true);
+  assert.equal(fs.readFileSync(truncated, 'utf8'), '{"id":');
+  assert.equal(fs.readFileSync(mismatch, 'utf8'), wrongRecord);
+});
+
 test('历史倒序、残缺目录原样保留、旧元数据投影与安全 ID', t => {
   const { manager, config, root } = setup(t);
   const dates = { old: '2024-01-01', latest: '2025-01-01' };
