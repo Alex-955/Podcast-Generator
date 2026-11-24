@@ -1,694 +1,1354 @@
-// 示例文章数据库
-const SAMPLES = {
-  ai: {
-    title: 'AI 智能体 Agent 正在重构现代个人工作流',
-    content: `随着大语言模型推理能力的跃升，AI 不再只是问答机器，而是演化为具备自主规划、工具调用与协作能力的智能体。在传统认知中，人类需要学习各种复杂的工具软件；而在智能体时代，工具主动适应人类的意图。
-智能体的核心价值在于“解耦认知与执行”。比如在过去的写作流程中，收集资料、校对格式、排版发布都需要消耗大量精力。现在，一个经过精心编排的智能体可以同时调用网络搜索、阅读长文档、提炼核心论点，并直接生成结构化内容。
-然而，智能体并不是万能的。它的真正护城河依然在人类的输入——即深刻的领域经验、品味与判断力。正如很多行业专家所指出的那样：“AI 不会取代人，但善用 AI 智能体的人会迅速拉开与普通人的差距。”`,
-  },
-  deepseek: {
-    title: 'DeepSeek 的技术突围：算力性价比与架构创新',
-    content: `近年来，全球大模型领域一直被庞大的算力军备竞赛所主导。然而，DeepSeek 的横空出世打破了这一固有格局。通过在模型架构（如 MoE 混合专家模型、MLA 多头潜在注意力）以及训练策略上的深度极致优化，它实现了以远低于硅谷同行的算力成本，逼近甚至超越顶尖闭源模型的性能。
-更关键的是，DeepSeek 采取了极度开放和普惠的 API 定价策略。它让原本高昂的百万 token 推理成本降低到了人民币几毛钱甚至几分钱的级别。这极大降低了全球中小团队、独立开发者将 AI 融入日常产品的门槛。
-对于广大普通用户和开发者来说，底层模型的性价比变革，意味着我们可以更肆无忌惮地让 AI 帮我们进行长文转播客、多轮对抗推演、代码全自动重构等高耗能任务，而完全不必担心钱包承受不起。`,
-  },
-  work: {
-    title: '数字游民时代的“自由”真相：自律才是终极生产力',
-    content: `随着远程办公常态化与在线协作工具的成熟，“背着电脑环游世界”的数字游民生活方式吸引了无数年轻人。海滩边的咖啡馆、雪山脚下的民宿，似乎成了打破写字楼工位禁锢的乌托邦。
-但真正经历过半年以上游民生活的人会告诉你，这种看似浪漫的背后隐藏着剧烈的熵增：时区混乱、网络波动、社交孤独感，以及因为缺乏固定作息带来的拖延与焦虑。
-真正的自由绝不是随心所欲，而是建立在极高自我管理意识上的自律。那些能够长期维持游民状态并持续创造高价值收入的人，无一例外都拥有一套近乎严苛的个人操作系统：固定的深度工作时段、模块化的任务管理，以及清晰的工作生活边界。`,
-  },
-};
+(function () {
+  'use strict';
 
-// 替换原生阻塞性 alert，使用轻量优雅 toast
-function showToast(msg, type = 'info') {
-  let toast = document.getElementById('toast-notification');
-  if (!toast) {
-    toast = document.createElement('div');
-    toast.id = 'toast-notification';
-    toast.style.position = 'fixed';
-    toast.style.top = '24px';
-    toast.style.left = '50%';
-    toast.style.transform = 'translateX(-50%)';
-    toast.style.padding = '12px 24px';
-    toast.style.borderRadius = '30px';
-    toast.style.background = 'rgba(24, 28, 48, 0.95)';
-    toast.style.border = '1px solid rgba(99, 102, 241, 0.5)';
-    toast.style.color = '#fff';
-    toast.style.boxShadow = '0 10px 30px rgba(0,0,0,0.5)';
-    toast.style.zIndex = '99999';
-    toast.style.fontSize = '14px';
-    toast.style.fontWeight = '500';
-    toast.style.transition = 'all 0.3s ease';
-    document.body.appendChild(toast);
+  const DEFAULT_BASE_URL = 'https://api.deepseek.com';
+  const DEFAULT_MODEL = 'deepseek-flash';
+  const MAX_CONTENT_LENGTH = 12000;
+  const FULL_PREVIEW_THRESHOLD = 150;
+  const POLL_INTERVAL_MS = 1000;
+  const SPEEDS = [0.8, 1.0, 1.25, 1.5, 1.75, 2.0];
+  const STAGE_ORDER = ['extract', 'script', 'tts', 'merge'];
+
+  const STORAGE_KEYS = {
+    apiKey: 'ai_podcast_apikey',
+    baseURL: 'ai_podcast_baseurl',
+    model: 'ai_podcast_model',
+    activeTaskId: 'ai_podcast_active_task_id',
+  };
+
+  const SAMPLES = {
+    ai: {
+      title: 'AI 智能体 Agent 正在重构现代个人工作流',
+      content: [
+        '随着大语言模型推理能力的跃升，AI 不再只是问答机器，而是演化为具备自主规划、工具调用与协作能力的智能体。在传统认知中，人类需要学习各种复杂的工具软件；而在智能体时代，工具主动适应人类的意图。',
+        '智能体的核心价值在于“解耦认知与执行”。比如在过去的写作流程中，收集资料、校对格式、排版发布都需要消耗大量精力。现在，一个经过精心编排的智能体可以同时调用网络搜索、阅读长文档、提炼核心论点，并直接生成结构化内容。',
+        '然而，智能体并不是万能的。它的真正护城河依然在人类的输入——即深刻的领域经验、品味与判断力。正如很多行业专家所指出的那样：“AI 不会取代人，但善用 AI 智能体的人会迅速拉开与普通人的差距。”',
+      ].join('\n'),
+    },
+    deepseek: {
+      title: 'DeepSeek 的技术突围：算力性价比与架构创新',
+      content: [
+        '近年来，全球大模型领域一直被庞大的算力军备竞赛所主导。然而，DeepSeek 的横空出世打破了这一固有格局。通过在模型架构（如 MoE 混合专家模型、MLA 多头潜在注意力）以及训练策略上的深度极致优化，它实现了以远低于硅谷同行的算力成本，逼近甚至超越顶尖闭源模型的性能。',
+        '更关键的是，DeepSeek 采取了极度开放和普惠的 API 定价策略。它让原本高昂的百万 token 推理成本降低到了人民币几毛钱甚至几分钱的级别。这极大降低了全球中小团队、独立开发者将 AI 融入日常产品的门槛。',
+        '对于广大普通用户和开发者来说，底层模型的性价比变革，意味着我们可以更肆无忌惮地让 AI 帮我们进行长文转播客、多轮对抗推演、代码全自动重构等高耗能任务，而完全不必担心钱包承受不起。',
+      ].join('\n'),
+    },
+    work: {
+      title: '数字游民时代的“自由”真相：自律才是终极生产力',
+      content: [
+        '随着远程办公常态化与在线协作工具的成熟，“背着电脑环游世界”的数字游民生活方式吸引了无数年轻人。海滩边的咖啡馆、雪山脚下的民宿，似乎成了打破写字楼工位禁锢的乌托邦。',
+        '但真正经历过半年以上游民生活的人会告诉你，这种看似浪漫的背后隐藏着剧烈的熵增：时区混乱、网络波动、社交孤独感，以及因为缺乏固定作息带来的拖延与焦虑。',
+        '真正的自由绝不是随心所欲，而是建立在极高自我管理意识上的自律。那些能够长期维持游民状态并持续创造高价值收入的人，无一例外都拥有一套近乎严苛的个人操作系统：固定的深度工作时段、模块化的任务管理，以及清晰的工作生活边界。',
+      ].join('\n'),
+    },
+  };
+
+  const state = {
+    apiKey: readStorage(STORAGE_KEYS.apiKey),
+    baseURL: readStorage(STORAGE_KEYS.baseURL) || DEFAULT_BASE_URL,
+    model: readStorage(STORAGE_KEYS.model) || DEFAULT_MODEL,
+    input: window.InputSource.createState(),
+    confirmedDraft: null,
+    fullPreviewExpanded: false,
+    activeTask: null,
+    pollTimer: null,
+    pollInFlight: false,
+    elapsedTimer: null,
+    historyItems: [],
+    currentPodcast: null,
+    playbackRate: 1.0,
+    isSeeking: false,
+    subtitleElements: [],
+  };
+
+  const dom = {
+    btnSettings: document.getElementById('btnSettings'),
+    apiKeyStatusDot: document.getElementById('apiKeyStatusDot'),
+    settingsModal: document.getElementById('settingsModal'),
+    btnCloseSettings: document.getElementById('btnCloseSettings'),
+    btnCancelSettings: document.getElementById('btnCancelSettings'),
+    settingsForm: document.getElementById('settingsForm'),
+    settingApiKey: document.getElementById('settingApiKey'),
+    settingBaseUrl: document.getElementById('settingBaseUrl'),
+    settingModel: document.getElementById('settingModel'),
+    btnToggleKeyVisible: document.getElementById('btnToggleKeyVisible'),
+
+    tabIndicator: document.getElementById('tabIndicator'),
+    tabBtnUrl: document.getElementById('tabBtnUrl'),
+    tabBtnText: document.getElementById('tabBtnText'),
+    panelUrl: document.getElementById('panelUrl'),
+    panelText: document.getElementById('panelText'),
+    inputUrl: document.getElementById('inputUrl'),
+    btnFetchUrl: document.getElementById('btnFetchUrl'),
+    inputTitle: document.getElementById('inputTitle'),
+    inputText: document.getElementById('inputText'),
+    textCharCount: document.getElementById('textCharCount'),
+    btnPreviewText: document.getElementById('btnPreviewText'),
+    samplePills: document.querySelectorAll('.sample-pill'),
+    parseErrorBanner: document.getElementById('parseErrorBanner'),
+    parseErrorText: document.getElementById('parseErrorText'),
+    btnSwitchToTextFromParse: document.getElementById('btnSwitchToTextFromParse'),
+    btnRetryParseUrl: document.getElementById('btnRetryParseUrl'),
+
+    studioRail: document.querySelector('.studio-rail'),
+    confirmCard: document.getElementById('confirmCard'),
+    confirmSourceBadge: document.getElementById('confirmSourceBadge'),
+    confirmCharBadge: document.getElementById('confirmCharBadge'),
+    confirmTruncatedBadge: document.getElementById('confirmTruncatedBadge'),
+    confirmTitle: document.getElementById('confirmTitle'),
+    confirmExcerpt: document.getElementById('confirmExcerpt'),
+    btnToggleFullPreview: document.getElementById('btnToggleFullPreview'),
+    btnEditInput: document.getElementById('btnEditInput'),
+    btnStartGenerate: document.getElementById('btnStartGenerate'),
+
+    progressSection: document.getElementById('progressSection'),
+    progressStatusBadge: document.getElementById('progressStatusBadge'),
+    stageElapsed: document.getElementById('stageElapsed'),
+    btnCancelTask: document.getElementById('btnCancelTask'),
+    progressTaskTitle: document.getElementById('progressTaskTitle'),
+    stageStepper: document.getElementById('stageStepper'),
+    taskMeterTrack: document.getElementById('taskMeterTrack'),
+    taskMeterFill: document.getElementById('taskMeterFill'),
+    progressMessage: document.getElementById('progressMessage'),
+    cacheHitBadge: document.getElementById('cacheHitBadge'),
+    activeSpeakerChip: document.getElementById('activeSpeakerChip'),
+    taskErrorBanner: document.getElementById('taskErrorBanner'),
+    taskErrorText: document.getElementById('taskErrorText'),
+    taskResumeHint: document.getElementById('taskResumeHint'),
+    taskErrorActions: document.getElementById('taskErrorActions'),
+
+    historyCount: document.getElementById('historyCount'),
+    btnRefreshHistory: document.getElementById('btnRefreshHistory'),
+    historyList: document.getElementById('historyList'),
+
+    playerDeck: document.getElementById('playerDeck'),
+    waveVisualizer: document.getElementById('waveVisualizer'),
+    currentPodcastMeta: document.getElementById('currentPodcastMeta'),
+    currentPodcastTitle: document.getElementById('currentPodcastTitle'),
+    currentPodcastSummary: document.getElementById('currentPodcastSummary'),
+    currentTime: document.getElementById('currentTime'),
+    totalDuration: document.getElementById('totalDuration'),
+    seekSlider: document.getElementById('seekSlider'),
+    btnDownloadAudio: document.getElementById('btnDownloadAudio'),
+    btnCopyMarkdown: document.getElementById('btnCopyMarkdown'),
+    btnRewind10: document.getElementById('btnRewind10'),
+    btnPlayPause: document.getElementById('btnPlayPause'),
+    playRipple: document.getElementById('playRipple'),
+    btnForward10: document.getElementById('btnForward10'),
+    btnSpeed: document.getElementById('btnSpeed'),
+    subtitlesList: document.getElementById('subtitlesList'),
+
+    mobileMiniPlayer: document.getElementById('mobileMiniPlayer'),
+    miniTitle: document.getElementById('miniTitle'),
+    miniTime: document.getElementById('miniTime'),
+    btnMiniSpeed: document.getElementById('btnMiniSpeed'),
+    btnMiniPlayPause: document.getElementById('btnMiniPlayPause'),
+    miniProgressFill: document.getElementById('miniProgressFill'),
+
+    mainAudio: document.getElementById('mainAudioPlayer'),
+    toastStack: document.getElementById('toastStack'),
+  };
+
+  function readStorage(key) {
+    try {
+      return localStorage.getItem(key) || '';
+    } catch {
+      return '';
+    }
   }
-  toast.textContent = msg;
-  toast.style.opacity = '1';
-  toast.style.pointerEvents = 'auto';
-  clearTimeout(toast._timer);
-  toast._timer = setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.pointerEvents = 'none';
-  }, 3500);
-}
-const state = {
-  apiKey: localStorage.getItem('ai_podcast_apikey') || '',
-  baseURL: localStorage.getItem('ai_podcast_baseurl') || 'https://api.deepseek.com',
-  model: localStorage.getItem('ai_podcast_model') || 'deepseek-flash',
-  currentPodcast: null,
-  isPlaying: false,
-  playbackRate: 1.0,
-  activeSentenceIndex: -1,
-  bgmVolume: 0.15, // 播客背景音量（柔和避让）
-  // B0-1：输入来源状态机（唯一事实来源/操作互斥/过期结果丢弃），见 inputSource.js
-  input: InputSource.createState(),
-};
 
-// DOM 元素引用
-const dom = {
-  btnSettings: document.getElementById('btnSettings'),
-  apiKeyStatusDot: document.getElementById('apiKeyStatusDot'),
-  settingsModal: document.getElementById('settingsModal'),
-  btnCloseSettings: document.getElementById('btnCloseSettings'),
-  btnSaveSettings: document.getElementById('btnSaveSettings'),
-  settingApiKey: document.getElementById('settingApiKey'),
-  settingBaseUrl: document.getElementById('settingBaseUrl'),
-  settingModel: document.getElementById('settingModel'),
-
-  tabBtns: document.querySelectorAll('.tab-btn'),
-  tabContents: document.querySelectorAll('.tab-content'),
-  inputUrl: document.getElementById('inputUrl'),
-  btnFetchUrl: document.getElementById('btnFetchUrl'),
-  inputTitle: document.getElementById('inputTitle'),
-  inputText: document.getElementById('inputText'),
-  bgmSelect: document.getElementById('bgmSelect'),
-  chips: document.querySelectorAll('.chip'),
-
-  btnOneClick: document.getElementById('btnOneClick'),
-  btnOnlyScript: document.getElementById('btnOnlyScript'),
-  statusContainer: document.getElementById('statusContainer'),
-  statusMessage: document.getElementById('statusMessage'),
-  progressBar: document.getElementById('progressBar'),
-
-  scriptSection: document.getElementById('scriptSection'),
-  podcastSummary: document.getElementById('podcastSummary'),
-  dialogueList: document.getElementById('dialogueList'),
-  btnRegenerateAudio: document.getElementById('btnRegenerateAudio'),
-
-  mainAudio: document.getElementById('mainAudioPlayer'),
-  bgmAudio: document.getElementById('bgmAudioPlayer'),
-  waveVisualizer: document.getElementById('waveVisualizer'),
-  currentPodcastTitle: document.getElementById('currentPodcastTitle'),
-  currentPodcastMeta: document.getElementById('currentPodcastMeta'),
-  currentTime: document.getElementById('currentTime'),
-  totalDuration: document.getElementById('totalDuration'),
-  seekSlider: document.getElementById('seekSlider'),
-  btnPlayPause: document.getElementById('btnPlayPause'),
-  playIcon: document.getElementById('playIcon'),
-  pauseIcon: document.getElementById('pauseIcon'),
-  btnRewind10: document.getElementById('btnRewind10'),
-  btnForward10: document.getElementById('btnForward10'),
-  btnSpeed: document.getElementById('btnSpeed'),
-  btnDownloadAudio: document.getElementById('btnDownloadAudio'),
-  subtitlesList: document.getElementById('subtitlesList'),
-};
-
-// 初始化
-function init() {
-  bindEvents();
-  updateApiKeyStatus();
-
-  // 恢复配置输入框
-  dom.settingApiKey.value = state.apiKey;
-  dom.settingBaseUrl.value = state.baseURL;
-  dom.settingModel.value = state.model;
-}
-
-// 绑定交互事件
-function bindEvents() {
-  // 设置弹窗
-  dom.btnSettings.addEventListener('click', () => {
-    dom.settingsModal.classList.remove('hidden');
-  });
-  dom.btnCloseSettings.addEventListener('click', () => {
-    dom.settingsModal.classList.add('hidden');
-  });
-  dom.btnSaveSettings.addEventListener('click', saveSettings);
-
-  // 标签页切换（同时更新事实来源模式：链接 Tab = URL 模式，文字 Tab = 文本模式）
-  dom.tabBtns.forEach((btn) => {
-    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
-  });
-
-  // 示例文章点击填充
-  dom.chips.forEach((chip) => {
-    chip.addEventListener('click', () => {
-      const sampleKey = chip.dataset.sample;
-      const sample = SAMPLES[sampleKey];
-      if (sample) {
-        // 自动切换到文字输入 Tab 并填充
-        dom.tabBtns[1].click();
-        dom.inputTitle.value = sample.title;
-        dom.inputText.value = sample.content;
+  function writeStorage(key, value) {
+    try {
+      if (value) {
+        localStorage.setItem(key, value);
+      } else {
+        localStorage.removeItem(key);
       }
+    } catch {
+      // 隐私模式下忽略本地存储写入失败
+    }
+  }
+
+  function showToast(message) {
+    const pill = document.createElement('div');
+    pill.className = 'toast-pill';
+    pill.textContent = message;
+    dom.toastStack.appendChild(pill);
+    window.setTimeout(() => {
+      pill.remove();
+    }, 3200);
+  }
+
+  function formatTime(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return '00:00';
+    const total = Math.floor(seconds);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+
+  function formatDateLabel(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${month} 月 ${day} 日 ${hh}:${mm}`;
+  }
+
+  function isHostSpeaker(speaker) {
+    return speaker === '阿泽' || speaker === '主持人' || speaker === 'Host' || String(speaker).includes('泽');
+  }
+
+  function displaySpeakerName(speaker) {
+    return isHostSpeaker(speaker) ? '阿泽' : '小晓';
+  }
+
+  function initWaveformBars() {
+    const heights = [
+      0.32, 0.56, 0.44, 0.78, 0.94, 0.62, 0.40, 0.85,
+      0.98, 0.68, 0.46, 0.88, 0.74, 0.52, 0.92, 0.64,
+      0.38, 0.82, 0.95, 0.58, 0.42, 0.76, 0.48, 0.30,
+    ];
+    dom.waveVisualizer.textContent = '';
+    heights.forEach((peak, idx) => {
+      const bar = document.createElement('span');
+      bar.className = 'wave-bar';
+      const centerDist = Math.abs(idx - (heights.length - 1) / 2) / (heights.length / 2);
+      const envelope = 0.56 - centerDist * 0.34;
+      const idle = Math.max(0.20, envelope * (0.72 + (idx % 3) * 0.14)).toFixed(2);
+      const dur = 680 + ((idx * 97) % 420);
+      const delay = ((idx * 65) % 480);
+      bar.style.setProperty('--idle-scale', idle);
+      bar.style.setProperty('--bar-peak', String(peak));
+      bar.style.setProperty('--bar-dur', `${dur}ms`);
+      bar.style.setProperty('--bar-delay', `${delay}ms`);
+      dom.waveVisualizer.appendChild(bar);
     });
-  });
-
-  // 解析 URL
-  dom.btnFetchUrl.addEventListener('click', handleFetchUrl);
-
-  // B0-1：手动编辑输入即切换事实来源——编辑链接回到 URL 模式（已解析正文作废），
-  // 编辑正文切到文本模式（此后生成以正文为准）。程序化填充不会触发 input 事件。
-  dom.inputUrl.addEventListener('input', () => switchTab('tab-url'));
-  dom.inputText.addEventListener('input', () => switchTab('tab-text'));
-
-  // 一键生成播客
-  dom.btnOneClick.addEventListener('click', handleOneClickGenerate);
-
-  // 仅生成剧本
-  dom.btnOnlyScript.addEventListener('click', handleOnlyScriptGenerate);
-
-  // 按修改后剧本重新配音
-  dom.btnRegenerateAudio.addEventListener('click', handleRegenerateAudio);
-
-  // 音频播放器相关事件
-  dom.btnPlayPause.addEventListener('click', togglePlayPause);
-  dom.btnRewind10.addEventListener('click', () => seekRelative(-10));
-  dom.btnForward10.addEventListener('click', () => seekRelative(10));
-  dom.btnSpeed.addEventListener('click', toggleSpeed);
-
-  dom.seekSlider.addEventListener('input', () => {
-    const seekTo = (dom.seekSlider.value / 100) * (dom.mainAudio.duration || 0);
-    dom.currentTime.textContent = formatTime(seekTo);
-  });
-
-  dom.seekSlider.addEventListener('change', () => {
-    const seekTo = (dom.seekSlider.value / 100) * (dom.mainAudio.duration || 0);
-    dom.mainAudio.currentTime = seekTo;
-  });
-
-  dom.mainAudio.addEventListener('timeupdate', onAudioTimeUpdate);
-  dom.mainAudio.addEventListener('loadedmetadata', onAudioLoadedMetadata);
-  dom.mainAudio.addEventListener('ended', onAudioEnded);
-  dom.mainAudio.addEventListener('play', () => {
-    setPlayState(true);
-    // 主音频开始播放时同步启动 BGM（修复生成后 BGM 从不播放的问题）
-    startBgm();
-  });
-  dom.mainAudio.addEventListener('pause', () => {
-    setPlayState(false);
-    stopBgm();
-  });
-
-  dom.bgmSelect.addEventListener('change', onBgmChange);
-}
-
-// 检查 API Key 状态
-function updateApiKeyStatus() {
-  if (state.apiKey && state.apiKey.trim()) {
-    dom.apiKeyStatusDot.classList.add('configured');
-    dom.apiKeyStatusDot.title = 'DeepSeek API Key 已配置';
-  } else {
-    dom.apiKeyStatusDot.classList.remove('configured');
-    dom.apiKeyStatusDot.title = '尚未配置 API Key，点击设置';
-  }
-}
-
-// 保存设置
-function saveSettings() {
-  state.apiKey = dom.settingApiKey.value.trim();
-  state.baseURL = dom.settingBaseUrl.value.trim() || 'https://api.deepseek.com';
-  state.model = dom.settingModel.value.trim() || 'deepseek-flash';
-
-  localStorage.setItem('ai_podcast_apikey', state.apiKey);
-  localStorage.setItem('ai_podcast_baseurl', state.baseURL);
-  localStorage.setItem('ai_podcast_model', state.model);
-
-  updateApiKeyStatus();
-  dom.settingsModal.classList.add('hidden');
-  showToast('设置已保存');
-}
-
-// 提取文章 URL 内容（B0-1：解析结果按 seq + URL 配对应用，过期结果不覆盖当前输入）
-async function handleFetchUrl() {
-  const url = dom.inputUrl.value.trim();
-  if (!url) {
-    showToast('请输入有效的文章或公众号链接');
-    return;
-  }
-  if (!/^https?:\/\//i.test(url)) {
-    showToast('请粘贴以 http 开头的完整链接；正文请切换到「直接贴文字」粘贴');
-    showStatus('链接格式不正确：请粘贴完整的 http(s) 链接；若想用文章正文，请切换到「直接贴文字」标签', 0);
-    return;
   }
 
-  const opSeq = InputSource.beginOperation(state.input, url);
-  if (opSeq === null) {
-    showToast('已有任务在进行中，请稍候');
-    return;
+  function positionTabIndicator(immediate) {
+    const activeBtn = state.input.mode === 'url' ? dom.tabBtnUrl : dom.tabBtnText;
+    if (!activeBtn) return;
+    if (immediate) {
+      dom.tabIndicator.style.transition = 'none';
+    }
+    dom.tabIndicator.style.width = `${activeBtn.offsetWidth}px`;
+    dom.tabIndicator.style.transform = `translateX(${activeBtn.offsetLeft}px)`;
+    if (immediate) {
+      void dom.tabIndicator.offsetWidth;
+      dom.tabIndicator.style.transition = '';
+    }
   }
-  setBusyButtons(true);
-  showStatus('正在解析网页正文...', 30);
-  try {
-    const res = await fetch('/api/extract-article', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
-    });
-    const result = await res.json();
-    if (!result.success) throw new Error(result.error);
 
-    // 过期结果（URL 已被改/期间有过新操作/已切文本模式）一律丢弃，不覆盖用户当前输入
-    const applied = InputSource.applyParseResult(state.input, {
-      seq: opSeq,
-      url,
-      currentUrl: dom.inputUrl.value,
-      title: result.data.title,
-      content: result.data.content,
-    });
-    if (applied !== 'applied') {
-      showStatus('输入已变化，已丢弃过期的解析结果', 0);
-      showToast('输入已变化，解析结果未套用；请重新点击「解析文章」');
+  function invalidateConfirmedDraft() {
+    state.confirmedDraft = null;
+    state.fullPreviewExpanded = false;
+    dom.confirmCard.classList.add('hidden');
+    if (dom.studioRail) dom.studioRail.classList.remove('has-confirm');
+    const previewSpan = dom.btnPreviewText.querySelector('span');
+    if (previewSpan) previewSpan.textContent = '预览并确认';
+  }
+
+  function hideParseError() {
+    dom.parseErrorBanner.classList.add('hidden');
+    dom.parseErrorText.textContent = '';
+    dom.inputUrl.classList.remove('is-invalid');
+    dom.inputText.classList.remove('is-invalid');
+  }
+
+  function showParseError(message, fieldEl) {
+    dom.parseErrorText.textContent = message;
+    dom.parseErrorBanner.classList.remove('hidden');
+    if (fieldEl) fieldEl.classList.add('is-invalid');
+  }
+
+  function switchTab(mode, { immediateIndicator = false } = {}) {
+    window.InputSource.setMode(state.input, mode);
+    const isUrl = mode === 'url';
+
+    dom.tabBtnUrl.classList.toggle('is-active', isUrl);
+    dom.tabBtnUrl.setAttribute('aria-selected', String(isUrl));
+    dom.tabBtnText.classList.toggle('is-active', !isUrl);
+    dom.tabBtnText.setAttribute('aria-selected', String(!isUrl));
+
+    dom.panelUrl.classList.toggle('hidden', !isUrl);
+    dom.panelUrl.classList.toggle('is-active', isUrl);
+    dom.panelText.classList.toggle('hidden', isUrl);
+    dom.panelText.classList.toggle('is-active', !isUrl);
+
+    invalidateConfirmedDraft();
+    hideParseError();
+    positionTabIndicator(immediateIndicator);
+  }
+
+  function updateTextCounter() {
+    const len = dom.inputText.value.trim().length;
+    dom.textCharCount.textContent = `${len.toLocaleString('zh-CN')} / ${MAX_CONTENT_LENGTH.toLocaleString('zh-CN')} 字`;
+    dom.textCharCount.classList.toggle('is-over', len > MAX_CONTENT_LENGTH);
+  }
+
+  function renderConfirmationCard(draft) {
+    state.confirmedDraft = draft;
+    state.fullPreviewExpanded = false;
+
+    dom.confirmSourceBadge.textContent = draft.mode === 'url' ? '链接解析' : '直接贴正文';
+    dom.confirmCharBadge.textContent = `${draft.length.toLocaleString('zh-CN')} 字`;
+    dom.confirmTruncatedBadge.classList.toggle('hidden', !draft.truncated);
+    dom.confirmTitle.textContent = draft.title || '未命名文章（生成时将自动提炼标题）';
+
+    updateExcerptView();
+    dom.confirmCard.classList.remove('hidden');
+    if (dom.studioRail) dom.studioRail.classList.add('has-confirm');
+    if (draft.mode === 'text') {
+      const previewSpan = dom.btnPreviewText.querySelector('span');
+      if (previewSpan) previewSpan.textContent = '已在下方预览';
+    }
+    const busy = hasActiveRunningTask();
+    dom.btnStartGenerate.disabled = busy;
+    dom.btnStartGenerate.querySelector('span').textContent = busy ? '当前已有任务生成中' : '开始生成双人播客';
+  }
+
+  function updateExcerptView() {
+    const draft = state.confirmedDraft;
+    if (!draft) return;
+    const text = draft.content || '';
+    const longText = text.length > FULL_PREVIEW_THRESHOLD;
+
+    if (!longText) {
+      dom.confirmExcerpt.textContent = text;
+      dom.confirmExcerpt.classList.remove('is-expanded');
+      dom.btnToggleFullPreview.classList.add('hidden');
       return;
     }
 
-    // 填充到文字框并切换过去供用户确认（此后文本框成为生成的事实来源）
-    dom.inputTitle.value = result.data.title;
-    dom.inputText.value = result.data.content;
-    switchTab('tab-text');
+    dom.btnToggleFullPreview.classList.remove('hidden');
+    dom.btnToggleFullPreview.setAttribute('aria-expanded', String(state.fullPreviewExpanded));
+    dom.btnToggleFullPreview.querySelector('span').textContent = state.fullPreviewExpanded ? '收起全文' : '展开全文预览';
 
-    if (result.data.truncated) {
-      showToast('文章较长，已截取前 1.2 万字用于生成播客');
+    if (state.fullPreviewExpanded) {
+      dom.confirmExcerpt.textContent = text;
+      dom.confirmExcerpt.classList.add('is-expanded');
+    } else {
+      dom.confirmExcerpt.textContent = `${text.slice(0, FULL_PREVIEW_THRESHOLD)}…`;
+      dom.confirmExcerpt.classList.remove('is-expanded');
     }
-    showStatus('文章解析成功！可检查标题与正文后生成播客', 100);
-    setTimeout(hideStatus, 1500);
-  } catch (err) {
-    showStatus('解析失败: ' + err.message, 0);
-    showToast('解析文章失败: ' + err.message);
-  } finally {
-    InputSource.finishOperation(state.input, opSeq);
-    setBusyButtons(false);
-  }
-}
-
-// 切换输入标签页（同时更新 InputSource 的事实来源模式）
-function switchTab(tabId) {
-  dom.tabBtns.forEach((b) => b.classList.toggle('active', b.dataset.tab === tabId));
-  dom.tabContents.forEach((c) => c.classList.toggle('active', c.id === tabId));
-  InputSource.setMode(state.input, tabId === 'tab-url' ? 'url' : 'text');
-}
-
-// 解析/生成期间统一禁用动作按钮，防止重复提交产生互相覆盖的并发任务
-function setBusyButtons(busy) {
-  dom.btnFetchUrl.disabled = busy;
-  dom.btnOneClick.disabled = busy;
-  dom.btnOnlyScript.disabled = busy;
-  dom.btnRegenerateAudio.disabled = busy;
-}
-
-// 一键全流程生成（B0-1：输入按当前模式取唯一事实来源，显式不混用）
-async function handleOneClickGenerate() {
-  const input = getCurrentInputContent();
-  if (!input.content && !input.url) {
-    showToast('请提供文章链接或输入文章正文');
-    return;
   }
 
-  if (!state.apiKey) {
+  async function apiJson(url, options = {}) {
+    const res = await fetch(url, options);
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      throw new Error(`服务返回异常响应（HTTP ${res.status}）`);
+    }
+    if (!res.ok || data?.success === false) {
+      const err = new Error(data?.error || `请求失败（HTTP ${res.status}）`);
+      err.status = res.status;
+      err.code = data?.code;
+      throw err;
+    }
+    return data.data;
+  }
+
+  async function handleFetchUrl() {
+    const url = dom.inputUrl.value.trim();
+    if (!url) {
+      showParseError('请先粘贴文章或微信公众号链接。', dom.inputUrl);
+      return;
+    }
+    if (!/^https?:\/\//i.test(url)) {
+      showParseError('请粘贴以 http:// 或 https:// 开头的完整链接；如果手头是文章正文，请切换到「直接贴正文」。', dom.inputUrl);
+      return;
+    }
+
+    const opSeq = window.InputSource.beginOperation(state.input, url);
+    if (opSeq === null) {
+      showToast('操作正在进行中，请稍候');
+      return;
+    }
+
+    hideParseError();
+    invalidateConfirmedDraft();
+    setParseLoading(true);
+
+    try {
+      const data = await apiJson('/api/extract-article', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+
+      const applied = window.InputSource.applyParseResult(state.input, {
+        seq: opSeq,
+        url,
+        currentUrl: dom.inputUrl.value,
+        title: data.title,
+        content: data.content,
+      });
+
+      if (applied !== 'applied') {
+        showToast('链接输入已变化，已丢弃过期解析结果');
+        return;
+      }
+
+      renderConfirmationCard({
+        mode: 'url',
+        url,
+        title: data.title || '',
+        content: data.content,
+        length: data.length,
+        truncated: Boolean(data.truncated),
+      });
+    } catch (err) {
+      showParseError(err.message || '抓取文章失败，建议切换到「直接贴正文」粘贴文章内容', dom.inputUrl);
+    } finally {
+      window.InputSource.finishOperation(state.input, opSeq);
+      setParseLoading(false);
+    }
+  }
+
+  function setParseLoading(loading) {
+    dom.btnFetchUrl.disabled = loading;
+    dom.btnFetchUrl.querySelector('span').textContent = loading ? '正在抓取正文…' : '解析文章';
+  }
+
+  function confirmTextDraft() {
+    const rawContent = dom.inputText.value.trim();
+    const rawTitle = dom.inputTitle.value.trim();
+    if (!rawContent) {
+      showParseError('请先粘贴或输入文章正文。', dom.inputText);
+      dom.inputText.focus();
+      return;
+    }
+    if (/^https?:\/\/\S+$/i.test(rawContent)) {
+      showParseError('检测到你粘贴的是单个链接，请切换到「文章链接」标签进行抓取解析。', dom.inputText);
+      return;
+    }
+
+    hideParseError();
+    const truncated = rawContent.length > MAX_CONTENT_LENGTH;
+    const content = rawContent.slice(0, MAX_CONTENT_LENGTH);
+
+    renderConfirmationCard({
+      mode: 'text',
+      title: rawTitle,
+      content,
+      length: content.length,
+      truncated,
+    });
+  }
+
+  function buildCredsPayload() {
+    const payload = {};
+    const key = state.apiKey.trim();
+    const baseURL = state.baseURL.trim();
+    const model = state.model.trim();
+    if (key) {
+      payload.apiKey = key;
+      if (baseURL) payload.baseURL = baseURL;
+    } else if (baseURL && baseURL !== DEFAULT_BASE_URL) {
+      payload.baseURL = baseURL;
+    }
+    if (model && (key || model !== DEFAULT_MODEL)) {
+      payload.model = model;
+    }
+    return payload;
+  }
+
+  function hasActiveRunningTask() {
+    return state.activeTask && ['queued', 'running'].includes(state.activeTask.status);
+  }
+
+  async function handleStartGenerate() {
+    if (!state.confirmedDraft) {
+      showToast('请先解析文章或预览确认正文');
+      return;
+    }
+    if (hasActiveRunningTask()) {
+      showToast('当前已有任务正在生成，请等待完成或先取消');
+      return;
+    }
+
+    const draftSnapshot = { ...state.confirmedDraft };
+    dom.btnStartGenerate.disabled = true;
+
+    try {
+      const task = await apiJson('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'text',
+          title: draftSnapshot.title,
+          content: draftSnapshot.content,
+          ...buildCredsPayload(),
+        }),
+      });
+
+      invalidateConfirmedDraft();
+      setActiveTask(task);
+      if (window.innerWidth <= 900) {
+        dom.progressSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      startPolling();
+      showToast('已加入后台生成队列，开始制作双人播客');
+    } catch (err) {
+      handleCredentialOrTaskError(err);
+    } finally {
+      dom.btnStartGenerate.disabled = hasActiveRunningTask();
+    }
+  }
+
+  function handleCredentialOrTaskError(err) {
+    const msg = err.message || '请求未能完成';
+    showToast(msg);
+    if (err.status === 400 && /API Key|接口地址/i.test(msg)) {
+      openSettingsModal();
+    }
+  }
+
+  function setActiveTask(task) {
+    state.activeTask = task;
+    if (task && task.id) {
+      writeStorage(STORAGE_KEYS.activeTaskId, task.id);
+      if (dom.studioRail) dom.studioRail.classList.add('has-task');
+      renderTaskProgress(task);
+    } else {
+      writeStorage(STORAGE_KEYS.activeTaskId, '');
+      stopPolling();
+      stopElapsedTimer();
+      dom.progressSection.classList.add('hidden');
+      if (dom.studioRail) dom.studioRail.classList.remove('has-task');
+    }
+    if (state.confirmedDraft) {
+      const busy = hasActiveRunningTask();
+      dom.btnStartGenerate.disabled = busy;
+      dom.btnStartGenerate.querySelector('span').textContent = busy ? '当前已有任务生成中' : '开始生成双人播客';
+    }
+  }
+
+  function startPolling() {
+    stopPolling();
+    startElapsedTimer();
+    state.pollTimer = window.setInterval(pollCurrentTask, POLL_INTERVAL_MS);
+  }
+
+  function stopPolling() {
+    if (state.pollTimer) {
+      window.clearInterval(state.pollTimer);
+      state.pollTimer = null;
+    }
+  }
+
+  function startElapsedTimer() {
+    stopElapsedTimer();
+    updateElapsedLabel();
+    state.elapsedTimer = window.setInterval(updateElapsedLabel, 500);
+  }
+
+  function stopElapsedTimer() {
+    if (state.elapsedTimer) {
+      window.clearInterval(state.elapsedTimer);
+      state.elapsedTimer = null;
+    }
+  }
+
+  function updateElapsedLabel() {
+    const task = state.activeTask;
+    if (!task) return;
+    if (!['queued', 'running'].includes(task.status)) {
+      dom.stageElapsed.textContent = '';
+      return;
+    }
+    const started = Date.parse(task.progress?.stageStartedAt || task.createdAt);
+    if (Number.isNaN(started)) {
+      dom.stageElapsed.textContent = '';
+      return;
+    }
+    const sec = Math.max(0, Math.floor((Date.now() - started) / 1000));
+    dom.stageElapsed.textContent = `本阶段已耗时 ${sec}s`;
+  }
+
+  async function pollCurrentTask() {
+    if (!state.activeTask?.id || state.pollInFlight) return;
+    state.pollInFlight = true;
+    try {
+      const task = await apiJson(`/api/tasks/${encodeURIComponent(state.activeTask.id)}`);
+      state.activeTask = task;
+      renderTaskProgress(task);
+
+      if (task.status === 'completed') {
+        stopPolling();
+        stopElapsedTimer();
+        writeStorage(STORAGE_KEYS.activeTaskId, '');
+        await loadHistoryList();
+        if (task.podcast) {
+          loadPodcast(task.podcast, { autoplay: false });
+        }
+        showToast(`播客《${task.podcastTitle || '新剧集'}》已生成完毕`);
+        window.setTimeout(() => {
+          if (state.activeTask?.id === task.id && state.activeTask?.status === 'completed') {
+            setActiveTask(null);
+          }
+        }, 1600);
+      } else if (task.status === 'failed' || task.status === 'cancelled') {
+        stopPolling();
+        stopElapsedTimer();
+      }
+    } catch (err) {
+      if (err.status === 404) {
+        setActiveTask(null);
+      }
+    } finally {
+      state.pollInFlight = false;
+    }
+  }
+
+  function renderTaskProgress(task) {
+    dom.progressSection.classList.remove('hidden');
+
+    const title = task.podcastTitle || task.input?.title || '正在处理文章并准备播客';
+    dom.progressTaskTitle.textContent = title;
+
+    const status = task.status;
+    dom.progressStatusBadge.className = 'state-chip';
+    if (status === 'queued' || status === 'running') {
+      dom.progressStatusBadge.classList.add('is-running');
+      dom.progressStatusBadge.textContent = status === 'queued' ? '排队中' : '生成中';
+      dom.btnCancelTask.classList.remove('hidden');
+      dom.btnCancelTask.disabled = false;
+    } else if (status === 'completed') {
+      dom.progressStatusBadge.classList.add('is-done');
+      dom.progressStatusBadge.textContent = '已完成';
+      dom.btnCancelTask.classList.add('hidden');
+    } else if (status === 'cancelled') {
+      dom.progressStatusBadge.classList.add('is-cancelled');
+      dom.progressStatusBadge.textContent = '已取消';
+      dom.btnCancelTask.classList.add('hidden');
+    } else {
+      dom.progressStatusBadge.classList.add('is-failed');
+      dom.progressStatusBadge.textContent = '已中断';
+      dom.btnCancelTask.classList.add('hidden');
+    }
+
+    updateStepper(task);
+    updateMeterAndChips(task);
+    updateTaskErrorBanner(task);
+    updateElapsedLabel();
+  }
+
+  function updateStepper(task) {
+    const activeStage = task.stage;
+    const isCompleted = task.status === 'completed' || activeStage === 'done';
+    const activeIdx = isCompleted ? STAGE_ORDER.length : Math.max(0, STAGE_ORDER.indexOf(activeStage));
+
+    const nodes = dom.stageStepper.querySelectorAll('.step-node');
+    nodes.forEach((node) => {
+      const idx = STAGE_ORDER.indexOf(node.dataset.stage);
+      node.classList.remove('is-done', 'is-active', 'is-error');
+      if (idx < activeIdx) {
+        node.classList.add('is-done');
+      } else if (idx === activeIdx) {
+        if (task.status === 'failed') {
+          node.classList.add('is-error');
+        } else if (task.status === 'running' || task.status === 'queued') {
+          node.classList.add('is-active');
+        }
+      }
+    });
+  }
+
+  function updateMeterAndChips(task) {
+    const prog = task.progress || {};
+    const stage = task.stage;
+    const running = ['queued', 'running'].includes(task.status);
+
+    dom.taskMeterFill.classList.remove('is-indeterminate');
+
+    if (task.status === 'completed') {
+      dom.taskMeterFill.style.width = '100%';
+      dom.taskMeterTrack.setAttribute('aria-valuenow', '100');
+      dom.progressMessage.textContent = '全部片段拼接完成，已载入右侧播放器。';
+    } else if (stage === 'tts' && prog.totalSegments > 0) {
+      const pct = Math.min(100, Math.round((prog.completedSegments / prog.totalSegments) * 100));
+      dom.taskMeterFill.style.width = `${pct}%`;
+      dom.taskMeterTrack.setAttribute('aria-valuenow', String(pct));
+      dom.progressMessage.textContent = `已完成 ${prog.completedSegments}/${prog.totalSegments} 句${prog.message ? ` · ${prog.message}` : ''}`;
+    } else if (running) {
+      dom.taskMeterFill.classList.add('is-indeterminate');
+      dom.taskMeterTrack.removeAttribute('aria-valuenow');
+      dom.progressMessage.textContent = prog.message || `${prog.stageLabel || '处理中'}…`;
+    } else {
+      const donePct = prog.totalSegments > 0
+        ? Math.round((prog.completedSegments / prog.totalSegments) * 100)
+        : 0;
+      dom.taskMeterFill.style.width = `${donePct}%`;
+      dom.taskMeterTrack.setAttribute('aria-valuenow', String(donePct));
+      dom.progressMessage.textContent = prog.message || '任务已停留在当前阶段';
+    }
+
+    if (prog.cachedSegments > 0) {
+      dom.cacheHitBadge.textContent = `缓存命中 ${prog.cachedSegments} 句`;
+      dom.cacheHitBadge.classList.remove('hidden');
+    } else {
+      dom.cacheHitBadge.classList.add('hidden');
+    }
+
+    if (running && prog.currentSpeaker) {
+      const host = isHostSpeaker(prog.currentSpeaker);
+      dom.activeSpeakerChip.textContent = `当前合成：${displaySpeakerName(prog.currentSpeaker)}`;
+      dom.activeSpeakerChip.className = `meta-pill ${host ? 'is-host' : 'is-guest'}`;
+    } else {
+      dom.activeSpeakerChip.classList.add('hidden');
+    }
+  }
+
+  function updateTaskErrorBanner(task) {
+    if (task.status !== 'failed' && task.status !== 'cancelled') {
+      dom.taskErrorBanner.classList.add('hidden');
+      dom.taskErrorActions.textContent = '';
+      return;
+    }
+
+    dom.taskErrorBanner.classList.remove('hidden');
+    dom.taskErrorBanner.classList.toggle('is-cancelled', task.status === 'cancelled');
+
+    if (task.status === 'cancelled') {
+      dom.taskErrorText.textContent = '已取消当前生成。你可以随时从断点继续，或放弃并重新导入文稿。';
+    } else {
+      dom.taskErrorText.textContent = task.error?.message || '生成过程中遇到意外错误。';
+    }
+
+    if (task.hasScript) {
+      dom.taskResumeHint.textContent = '剧本与已完成的单句音频已缓存，续跑将直接跳过模型生成阶段。';
+      dom.taskResumeHint.classList.remove('hidden');
+    } else {
+      dom.taskResumeHint.classList.add('hidden');
+    }
+
+    dom.taskErrorActions.textContent = '';
+    const isExtractFailure = task.status === 'failed' && task.error?.stage === 'extract';
+
+    if (isExtractFailure) {
+      const switchBtn = createActionBtn('切换到直接贴正文', 'btn btn-primary btn-sm', () => {
+        setActiveTask(null);
+        switchTab('text');
+        dom.inputText.focus();
+      });
+      const retryBtn = createActionBtn('原链接重试', 'btn btn-subtle btn-sm', () => handleResumeTask(task.id));
+      const discardBtn = createActionBtn('放弃', 'btn btn-ghost btn-sm', () => setActiveTask(null));
+      dom.taskErrorActions.append(switchBtn, retryBtn, discardBtn);
+    } else {
+      const resumeBtn = createActionBtn('从断点继续生成', 'btn btn-primary btn-sm', () => handleResumeTask(task.id));
+      const discardBtn = createActionBtn('放弃', 'btn btn-ghost btn-sm', () => setActiveTask(null));
+      dom.taskErrorActions.append(resumeBtn, discardBtn);
+    }
+  }
+
+  function createActionBtn(label, className, onClick) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = className;
+    btn.textContent = label;
+    btn.addEventListener('click', onClick);
+    return btn;
+  }
+
+  async function handleCancelTask() {
+    if (!state.activeTask?.id) return;
+    dom.btnCancelTask.disabled = true;
+    try {
+      const task = await apiJson(`/api/tasks/${encodeURIComponent(state.activeTask.id)}/cancel`, {
+        method: 'POST',
+      });
+      setActiveTask(task);
+      stopPolling();
+      stopElapsedTimer();
+      showToast('已取消当前生成任务');
+    } catch (err) {
+      dom.btnCancelTask.disabled = false;
+      showToast(err.message || '取消任务失败');
+    }
+  }
+
+  async function handleResumeTask(taskId) {
+    try {
+      const task = await apiJson(`/api/tasks/${encodeURIComponent(taskId)}/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildCredsPayload()),
+      });
+      setActiveTask(task);
+      startPolling();
+      showToast('已从断点恢复生成');
+    } catch (err) {
+      handleCredentialOrTaskError(err);
+    }
+  }
+
+  async function loadHistoryList() {
+    try {
+      const data = await apiJson('/api/podcasts');
+      state.historyItems = Array.isArray(data?.items) ? data.items : [];
+      renderHistoryList();
+    } catch {
+      dom.historyList.textContent = '';
+      const p = document.createElement('p');
+      p.className = 'history-empty';
+      p.textContent = '未能获取本地历史列表，请稍后刷新重试。';
+      dom.historyList.appendChild(p);
+    }
+  }
+
+  function renderHistoryList() {
+    const items = state.historyItems;
+    dom.historyCount.textContent = `${items.length} 集`;
+    dom.historyList.textContent = '';
+
+    if (items.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'history-empty';
+      empty.textContent = '还没有已完成的本地播客，导入第一篇文章试试看。';
+      dom.historyList.appendChild(empty);
+      return;
+    }
+
+    items.forEach((item) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'history-item';
+      const isCurrent = state.currentPodcast?.id === item.id;
+      if (isCurrent) {
+        btn.classList.add('is-active');
+        btn.setAttribute('aria-current', 'true');
+      }
+
+      const title = document.createElement('span');
+      title.className = 'history-item-title';
+      title.textContent = item.podcastTitle || '未命名播客';
+
+      const meta = document.createElement('span');
+      meta.className = 'history-item-meta';
+      const parts = [
+        `${item.sentenceCount || 0} 句`,
+        formatTime(item.totalDuration || 0),
+        formatDateLabel(item.createAt),
+      ].filter(Boolean);
+      meta.textContent = parts.join(' · ');
+
+      btn.append(title, meta);
+      btn.addEventListener('click', () => handleSelectHistory(item.id));
+      dom.historyList.appendChild(btn);
+    });
+  }
+
+  async function handleSelectHistory(podcastId) {
+    try {
+      const podcast = await apiJson(`/api/podcasts/${encodeURIComponent(podcastId)}`);
+      loadPodcast(podcast, { autoplay: false });
+    } catch (err) {
+      showToast(err.message || '读取播客详情失败');
+    }
+  }
+
+  function loadPodcast(podcast, { autoplay = false } = {}) {
+    state.currentPodcast = podcast;
+    window.InputSource.resetPlaybackHighlight(state.input);
+
+    const sentences = Array.isArray(podcast.sentences) ? podcast.sentences : [];
+    dom.currentPodcastTitle.textContent = podcast.podcastTitle || 'AI 妙听双人播客';
+    dom.currentPodcastMeta.textContent = `共 ${sentences.length} 句对话 · 全长 ${formatTime(podcast.totalDuration || 0)}`;
+
+    if (podcast.summary) {
+      dom.currentPodcastSummary.textContent = podcast.summary;
+      dom.currentPodcastSummary.classList.remove('hidden');
+    } else {
+      dom.currentPodcastSummary.textContent = '';
+      dom.currentPodcastSummary.classList.add('hidden');
+    }
+
+    dom.mainAudio.src = podcast.fullAudioUrl;
+    dom.mainAudio.playbackRate = state.playbackRate;
+    dom.mainAudio.load();
+
+    dom.currentTime.textContent = '00:00';
+    dom.totalDuration.textContent = formatTime(podcast.totalDuration || 0);
+    setSeekProgress(0);
+
+    dom.seekSlider.disabled = false;
+    dom.btnPlayPause.disabled = false;
+    dom.btnRewind10.disabled = false;
+    dom.btnForward10.disabled = false;
+    dom.btnSpeed.disabled = false;
+    dom.btnCopyMarkdown.disabled = sentences.length === 0;
+
+    dom.btnDownloadAudio.href = podcast.fullAudioUrl;
+    dom.btnDownloadAudio.download = `${podcast.podcastTitle || 'ai-podcast'}.mp3`;
+    dom.btnDownloadAudio.classList.remove('is-disabled');
+    dom.btnDownloadAudio.removeAttribute('aria-disabled');
+
+    setDeckPlaying(false);
+    dom.playerDeck.dataset.speaker = 'none';
+    dom.miniTitle.textContent = podcast.podcastTitle || 'AI 妙听双人播客';
+    dom.miniTime.textContent = `00:00 / ${formatTime(podcast.totalDuration || 0)}`;
+    if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.speaker = 'none';
+
+    renderSubtitles(sentences);
+    renderHistoryList();
+    updateMobileMiniVisibility();
+
+    if (autoplay) {
+      dom.mainAudio.play().catch(() => {});
+    }
+  }
+
+  function renderSubtitles(sentences) {
+    dom.subtitlesList.textContent = '';
+    state.subtitleElements = [];
+
+    if (!sentences.length) {
+      const empty = document.createElement('div');
+      empty.className = 'subtitles-empty';
+      const p = document.createElement('p');
+      p.textContent = '该集暂无可展示的字幕时间轴。';
+      empty.appendChild(p);
+      dom.subtitlesList.appendChild(empty);
+      return;
+    }
+
+    sentences.forEach((s, idx) => {
+      const isHost = isHostSpeaker(s.speaker);
+      const row = document.createElement('div');
+      row.className = `subtitle-item ${isHost ? 'is-host' : 'is-guest'}`;
+      row.tabIndex = 0;
+      row.setAttribute('role', 'button');
+      row.setAttribute('aria-label', `${displaySpeakerName(s.speaker)} ${formatTime(s.startTime)}：${s.text}`);
+
+      const meta = document.createElement('div');
+      meta.className = 'subtitle-meta';
+
+      const speaker = document.createElement('span');
+      speaker.className = 'subtitle-speaker';
+      speaker.textContent = displaySpeakerName(s.speaker);
+      meta.appendChild(speaker);
+
+      if (s.emotion) {
+        const emotion = document.createElement('span');
+        emotion.className = 'subtitle-emotion';
+        emotion.textContent = `· ${s.emotion}`;
+        meta.appendChild(emotion);
+      }
+
+      const time = document.createElement('span');
+      time.className = 'subtitle-time';
+      time.textContent = formatTime(s.startTime);
+      meta.appendChild(time);
+
+      const text = document.createElement('p');
+      text.className = 'subtitle-text';
+      text.textContent = s.text;
+
+      row.append(meta, text);
+
+      const jumpAndPlay = () => {
+        if (!dom.mainAudio.src) return;
+        const target = Math.max(0, Number(s.startTime) || 0);
+        dom.mainAudio.currentTime = target;
+        syncHighlightToTime(target);
+        if (dom.mainAudio.paused) {
+          dom.mainAudio.play().catch(() => {});
+        }
+      };
+
+      row.addEventListener('click', jumpAndPlay);
+      row.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          jumpAndPlay();
+        }
+      });
+
+      dom.subtitlesList.appendChild(row);
+      state.subtitleElements.push(row);
+    });
+  }
+
+  /** 兼容 0.36s 句间静音间隙：落入间隔时保持上一句高亮不闪烁 */
+  function findActiveSentenceIndex(sentences, currentTime) {
+    if (!sentences.length) return -1;
+    let candidate = -1;
+    for (let i = 0; i < sentences.length; i += 1) {
+      const s = sentences[i];
+      if (currentTime >= s.startTime && currentTime < s.endTime) {
+        return i;
+      }
+      if (currentTime >= s.startTime) {
+        candidate = i;
+      } else {
+        break;
+      }
+    }
+    return candidate;
+  }
+
+  function syncHighlightToTime(curTime) {
+    const sentences = state.currentPodcast?.sentences;
+    if (!sentences?.length) return;
+    const idx = findActiveSentenceIndex(sentences, curTime);
+    if (idx === -1) return;
+
+    const activeSentence = sentences[idx];
+    const speakerRole = isHostSpeaker(activeSentence.speaker) ? 'host' : 'guest';
+    dom.playerDeck.dataset.speaker = speakerRole;
+    if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.speaker = speakerRole;
+
+    if (idx !== state.input.activeSentenceIndex) {
+      const prevIdx = state.input.activeSentenceIndex;
+      if (prevIdx >= 0 && state.subtitleElements[prevIdx]) {
+        state.subtitleElements[prevIdx].classList.remove('is-active');
+      }
+      state.input.activeSentenceIndex = idx;
+      const activeEl = state.subtitleElements[idx];
+      if (activeEl) {
+        activeEl.classList.add('is-active');
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }
+
+  function setSeekProgress(percent) {
+    const clamped = Math.max(0, Math.min(100, percent));
+    dom.seekSlider.value = String(clamped);
+    dom.seekSlider.style.setProperty('--seek-pct', `${clamped}%`);
+    if (dom.miniProgressFill) dom.miniProgressFill.style.width = `${clamped}%`;
+  }
+
+  function setDeckPlaying(playing) {
+    dom.playerDeck.dataset.playing = playing ? 'true' : 'false';
+    if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.playing = playing ? 'true' : 'false';
+  }
+
+  function togglePlayPause() {
+    if (!dom.mainAudio.src) return;
+    triggerPlayRipple();
+    if (dom.mainAudio.paused) {
+      dom.mainAudio.play().catch((err) => {
+        showToast('未能播放音频：' + (err.message || '请检查音频文件'));
+      });
+    } else {
+      dom.mainAudio.pause();
+    }
+  }
+
+  function triggerPlayRipple() {
+    dom.playRipple.classList.remove('is-burst');
+    void dom.playRipple.offsetWidth;
+    dom.playRipple.classList.add('is-burst');
+  }
+
+  function seekRelative(delta) {
+    if (!dom.mainAudio.src) return;
+    const duration = dom.mainAudio.duration || state.currentPodcast?.totalDuration || 0;
+    const target = Math.max(0, Math.min(duration, dom.mainAudio.currentTime + delta));
+    dom.mainAudio.currentTime = target;
+    syncHighlightToTime(target);
+  }
+
+  function cyclePlaybackSpeed() {
+    const currentIdx = SPEEDS.indexOf(state.playbackRate);
+    const nextIdx = (currentIdx + 1) % SPEEDS.length;
+    state.playbackRate = SPEEDS[nextIdx];
+    dom.mainAudio.playbackRate = state.playbackRate;
+    const label = `${state.playbackRate}x`;
+    dom.btnSpeed.textContent = label;
+    if (dom.btnMiniSpeed) dom.btnMiniSpeed.textContent = label;
+    dom.btnSpeed.classList.remove('is-pop');
+    void dom.btnSpeed.offsetWidth;
+    dom.btnSpeed.classList.add('is-pop');
+  }
+
+  function updateMobileMiniVisibility() {
+    if (!dom.mobileMiniPlayer) return;
+    if (window.innerWidth > 900 || !state.currentPodcast) {
+      dom.mobileMiniPlayer.classList.add('hidden');
+      return;
+    }
+    const deckRect = dom.playerDeck.getBoundingClientRect();
+    const shouldShow = deckRect.bottom < 72;
+    dom.mobileMiniPlayer.classList.toggle('hidden', !shouldShow);
+  }
+
+  async function handleCopyMarkdown() {
+    const podcast = state.currentPodcast;
+    if (!podcast || !Array.isArray(podcast.sentences) || !podcast.sentences.length) return;
+
+    const lines = [];
+    lines.push(`# ${podcast.podcastTitle || 'AI 妙听双人播客'}`);
+    if (podcast.summary) {
+      lines.push('', `> ${podcast.summary}`);
+    }
+    lines.push('');
+    podcast.sentences.forEach((s) => {
+      lines.push(`**${displaySpeakerName(s.speaker)}**（${formatTime(s.startTime)}）：${s.text}`);
+    });
+    const markdown = lines.join('\n');
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(markdown);
+      } else {
+        const helper = document.createElement('textarea');
+        helper.value = markdown;
+        helper.setAttribute('readonly', '');
+        helper.style.position = 'fixed';
+        helper.style.opacity = '0';
+        document.body.appendChild(helper);
+        helper.select();
+        document.execCommand('copy');
+        helper.remove();
+      }
+      showToast(`已复制 ${podcast.sentences.length} 句 Markdown 剧本`);
+    } catch {
+      showToast('浏览器未授予剪贴板权限，请手动选择字幕复制');
+    }
+  }
+
+  function updateApiKeyStatus() {
+    const configured = Boolean(state.apiKey && state.apiKey.trim());
+    dom.apiKeyStatusDot.classList.toggle('is-configured', configured);
+    dom.btnSettings.title = configured
+      ? '已配置本地 API Key'
+      : '未配置本地 Key（服务端配置 .env 时可直接生成，或点击填写）';
+  }
+
+  function openSettingsModal() {
+    dom.settingApiKey.value = state.apiKey;
+    dom.settingBaseUrl.value = state.baseURL || DEFAULT_BASE_URL;
+    dom.settingModel.value = state.model || DEFAULT_MODEL;
+    dom.settingApiKey.type = 'password';
+    dom.btnToggleKeyVisible.textContent = '显示';
     dom.settingsModal.classList.remove('hidden');
-    showToast('请先在右上角设置中填写你的 DeepSeek API Key 即可开始！');
-    return;
+    window.setTimeout(() => dom.settingApiKey.focus(), 40);
   }
 
-  const opSeq = InputSource.beginOperation(state.input, input.url);
-  if (opSeq === null) {
-    showToast('已有任务在进行中，请稍候');
-    return;
+  function closeSettingsModal() {
+    dom.settingsModal.classList.add('hidden');
+    dom.btnSettings.focus();
   }
-  setBusyButtons(true);
-  showStatus(input.url ? '正在解析文章并生成双人播客剧本...' : '正在让大模型将文章重构为生动的双人播客剧本...', 35);
 
-  try {
-    const res = await fetch('/api/one-click-generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: input.title,
-        // 唯一事实来源：URL 模式只传 url，文本模式只传正文，绝不混用
-        url: input.url,
-        rawText: input.content,
-        apiKey: state.apiKey,
-        baseURL: state.baseURL,
-        model: state.model,
-      }),
+  function saveSettings(e) {
+    e.preventDefault();
+    state.apiKey = dom.settingApiKey.value.trim();
+    state.baseURL = dom.settingBaseUrl.value.trim() || DEFAULT_BASE_URL;
+    state.model = dom.settingModel.value.trim() || DEFAULT_MODEL;
+
+    writeStorage(STORAGE_KEYS.apiKey, state.apiKey);
+    writeStorage(STORAGE_KEYS.baseURL, state.baseURL);
+    writeStorage(STORAGE_KEYS.model, state.model);
+
+    updateApiKeyStatus();
+    dom.settingsModal.classList.add('hidden');
+    showToast(state.apiKey ? '模型配置与 API Key 已保存' : '已保存（留空时将尝试服务端 .env 配置）');
+  }
+
+  function bindEvents() {
+    dom.tabBtnUrl.addEventListener('click', () => switchTab('url'));
+    dom.tabBtnText.addEventListener('click', () => switchTab('text'));
+    window.addEventListener('resize', () => positionTabIndicator(true));
+
+    dom.inputUrl.addEventListener('input', () => {
+      if (state.input.mode !== 'url') {
+        window.InputSource.setMode(state.input, 'url');
+      }
+      invalidateConfirmedDraft();
+      hideParseError();
     });
 
-    const result = await res.json();
-    if (!result.success) throw new Error(result.error);
-
-    showStatus('播客生成完毕，正在载入播放器...', 100);
-    loadPodcastData(result.data);
-    renderScript(result.data.sentences, result.data.summary);
-    if (result.data.sourceTruncated) {
-      showToast('原文较长，本次播客基于截取的前 1.2 万字生成');
-    }
-
-    setTimeout(hideStatus, 1000);
-  } catch (err) {
-    console.error(err);
-    // 错误持久显示在状态栏，不自动消失，避免用户不知道发生了什么
-    showStatus('生成播客失败: ' + (err.message || '未知错误') + ' —— 可直接重试', 0);
-    showToast('生成播客失败: ' + (err.message || '未知错误'));
-  } finally {
-    InputSource.finishOperation(state.input, opSeq);
-    setBusyButtons(false);
-  }
-}
-
-// 仅生成剧本（B0-1：输入按当前模式取唯一事实来源）
-async function handleOnlyScriptGenerate() {
-  const input = getCurrentInputContent();
-  if (!input.content && !input.url) {
-    showToast('请先解析文章链接，或直接输入文章内容');
-    return;
-  }
-
-  if (!state.apiKey) {
-    dom.settingsModal.classList.remove('hidden');
-    showToast('请先填写 DeepSeek API Key');
-    return;
-  }
-
-  const opSeq = InputSource.beginOperation(state.input, input.url);
-  if (opSeq === null) {
-    showToast('已有任务在进行中，请稍候');
-    return;
-  }
-  setBusyButtons(true);
-  showStatus('正在生成双人播客剧本草稿...', 50);
-  try {
-    const res = await fetch('/api/generate-script', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: input.title,
-        // 唯一事实来源：URL 模式只传 url，文本模式只传正文，绝不混用
-        url: input.url,
-        content: input.content,
-        apiKey: state.apiKey,
-        baseURL: state.baseURL,
-        model: state.model,
-      }),
-    });
-    const result = await res.json();
-    if (!result.success) throw new Error(result.error);
-
-    state.input.scriptTitle = result.data.podcastTitle || input.title || 'AI妙听播客';
-    renderScript(result.data.dialogue, result.data.summary);
-    if (result.data.sourceTruncated) {
-      showToast('原文较长，剧本基于截取的前 1.2 万字生成');
-    }
-    showStatus('剧本生成完成！你可以随意编辑台词，然后点击下方重新配音', 100);
-    setTimeout(hideStatus, 2000);
-  } catch (err) {
-    showStatus('生成剧本失败: ' + (err.message || '未知错误') + ' —— 可直接重试', 0);
-    showToast('生成剧本失败: ' + (err.message || '未知错误'));
-  } finally {
-    InputSource.finishOperation(state.input, opSeq);
-    setBusyButtons(false);
-  }
-}
-
-// 按修改后的剧本重新配音（标题取 state.scriptTitle，不再读 DOM）
-async function handleRegenerateAudio() {
-  const items = document.querySelectorAll('.dialogue-item');
-  const dialogue = [];
-  items.forEach((item) => {
-    const speaker = item.dataset.speaker;
-    const text = item.querySelector('.dialogue-content').innerText.trim();
-    if (text) {
-      dialogue.push({ speaker, text });
-    }
-  });
-
-  if (dialogue.length === 0) {
-    showToast('剧本台词为空');
-    return;
-  }
-
-  const opSeq = InputSource.beginOperation(state.input);
-  if (opSeq === null) {
-    showToast('已有任务在进行中，请稍候');
-    return;
-  }
-  setBusyButtons(true);
-  showStatus('正在使用 Edge-TTS 合成男女声对话音频并拼接...', 60);
-  try {
-    const res = await fetch('/api/synthesize-podcast', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        podcastTitle: state.input.scriptTitle || 'AI妙听播客',
-        dialogue,
-      }),
-    });
-    const result = await res.json();
-    if (!result.success) throw new Error(result.error);
-
-    loadPodcastData(result.data);
-    showStatus('重新配音合成完成！', 100);
-    setTimeout(hideStatus, 1500);
-  } catch (err) {
-    showStatus('合成失败: ' + (err.message || '未知错误') + ' —— 可直接重试', 0);
-    showToast('合成失败: ' + (err.message || '未知错误'));
-  } finally {
-    InputSource.finishOperation(state.input, opSeq);
-    setBusyButtons(false);
-  }
-}
-
-// 获取当前生成输入（唯一事实来源：URL 模式用链接框，文本模式用正文框；显式不混用）
-function getCurrentInputContent() {
-  const input = InputSource.selectGenerationInput(state.input, {
-    urlInput: dom.inputUrl.value,
-    textTitle: dom.inputTitle.value,
-    textContent: dom.inputText.value,
-  });
-  if (input.kind === 'url') {
-    return { title: '', content: '', url: input.url };
-  }
-  return { title: input.title, content: input.content, url: '' };
-}
-
-// 载入生成的播客并准备播放
-function loadPodcastData(podcastData) {
-  state.currentPodcast = podcastData;
-  // B0-1：记住剧本标题供「重新配音」使用；加载新数据时重置逐句高亮
-  state.input.scriptTitle = podcastData.podcastTitle || 'AI妙听播客';
-  state.activeSentenceIndex = -1;
-  InputSource.resetPlaybackHighlight(state.input);
-
-  dom.currentPodcastTitle.textContent = podcastData.podcastTitle || 'AI妙听双人播客';
-  dom.currentPodcastMeta.textContent = `共 ${podcastData.sentences.length} 句对话 · 全长 ${formatTime(podcastData.totalDuration)}`;
-
-  dom.mainAudio.src = podcastData.fullAudioUrl;
-  dom.mainAudio.load();
-
-  // 设置下载链接
-  dom.btnDownloadAudio.href = podcastData.fullAudioUrl;
-  dom.btnDownloadAudio.download = `${podcastData.podcastTitle || 'AI妙听播客'}.mp3`;
-  dom.btnDownloadAudio.classList.remove('disabled');
-
-  // 配置背景音乐
-  setupBgm();
-
-  // 渲染高亮对话字幕
-  renderSubtitles(podcastData.sentences);
-
-  // 自动开始播放
-  dom.mainAudio.play().catch(() => {
-    // 某些浏览器需要用户手势后才允许 autoplay
-  });
-}
-
-// 渲染左侧可编辑剧本卡片
-function renderScript(dialogue, summary) {
-  dom.scriptSection.classList.remove('hidden');
-  dom.podcastSummary.textContent = summary ? `【本期看点】${summary}` : '';
-  dom.dialogueList.innerHTML = '';
-
-  dialogue.forEach((line, idx) => {
-    const isHost = line.speaker === '主持人' || line.speaker.includes('泽') || line.speaker === 'Host';
-    const speakerName = isHost ? '阿泽' : '小晓';
-    const speakerClass = isHost ? 'host' : 'guest';
-
-    const item = document.createElement('div');
-    item.className = 'dialogue-item';
-    item.dataset.speaker = line.speaker;
-    item.innerHTML = `
-      <span class="dialogue-speaker ${speakerClass}">${speakerName}：</span>
-      <div class="dialogue-content" contenteditable="true">${escapeHtml(line.text)}</div>
-    `;
-    dom.dialogueList.appendChild(item);
-  });
-}
-
-// 渲染右侧滚动高亮字幕
-function renderSubtitles(sentences) {
-  dom.subtitlesList.innerHTML = '';
-
-  sentences.forEach((s, idx) => {
-    const isHost = s.speaker === '主持人' || s.speaker.includes('泽') || s.speaker === 'Host';
-    const speakerName = isHost ? '阿泽' : '小晓';
-    const bubbleClass = isHost ? 'host' : 'guest';
-
-    const bubble = document.createElement('div');
-    bubble.className = `subtitle-bubble ${bubbleClass}`;
-    bubble.id = `sub-item-${idx}`;
-    bubble.innerHTML = `
-      <div class="subtitle-meta">
-        <span class="subtitle-speaker">${speakerName}</span>
-        <span class="subtitle-time">${formatTime(s.startTime)}</span>
-      </div>
-      <div class="subtitle-text">${escapeHtml(s.text)}</div>
-    `;
-
-    // 点击字幕直接跳转到对应时间点
-    bubble.addEventListener('click', () => {
-      dom.mainAudio.currentTime = s.startTime;
-      if (dom.mainAudio.paused) {
-        dom.mainAudio.play();
+    dom.inputUrl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleFetchUrl();
       }
     });
 
-    dom.subtitlesList.appendChild(bubble);
-  });
-}
+    const handleTextEdit = () => {
+      if (state.input.mode !== 'text') {
+        window.InputSource.setMode(state.input, 'text');
+      }
+      invalidateConfirmedDraft();
+      hideParseError();
+      updateTextCounter();
+    };
+    dom.inputTitle.addEventListener('input', handleTextEdit);
+    dom.inputText.addEventListener('input', handleTextEdit);
 
-// 处理背景音乐
-function startBgm() {
-  if (dom.bgmSelect.value === 'none') return;
-  if (!dom.bgmAudio.src) {
-    dom.bgmAudio.src = '/audio/bgm/coffee_ambient.wav';
-  }
-  dom.bgmAudio.volume = state.bgmVolume;
-  dom.bgmAudio.play().catch(() => {});
-}
+    dom.btnFetchUrl.addEventListener('click', handleFetchUrl);
+    dom.btnRetryParseUrl.addEventListener('click', handleFetchUrl);
+    dom.btnSwitchToTextFromParse.addEventListener('click', () => {
+      switchTab('text');
+      dom.inputText.focus();
+    });
 
-function stopBgm() {
-  dom.bgmAudio.pause();
-}
+    dom.btnPreviewText.addEventListener('click', confirmTextDraft);
 
-function setupBgm() {
-  if (dom.bgmSelect.value === 'none') {
-    stopBgm();
-    dom.bgmAudio.removeAttribute('src');
-  } else if (!dom.mainAudio.paused) {
-    // 仅在主音频已经在播放时才启动；未播放时等 play 事件触发后再启动
-    startBgm();
-  }
-}
-
-function onBgmChange() {
-  setupBgm();
-}
-
-// 音频时间进度更新
-function onAudioTimeUpdate() {
-  const cur = dom.mainAudio.currentTime || 0;
-  const dur = dom.mainAudio.duration || 1;
-
-  dom.currentTime.textContent = formatTime(cur);
-  dom.seekSlider.value = (cur / dur) * 100;
-
-  // 查找并高亮对应字幕
-  if (state.currentPodcast && state.currentPodcast.sentences) {
-    const sentences = state.currentPodcast.sentences;
-    const currentIdx = sentences.findIndex((s) => cur >= s.startTime && cur < s.endTime);
-
-    if (currentIdx !== -1 && currentIdx !== state.activeSentenceIndex) {
-      state.activeSentenceIndex = currentIdx;
-
-      // 更新高亮
-      document.querySelectorAll('.subtitle-bubble').forEach((el, i) => {
-        if (i === currentIdx) {
-          el.classList.add('active');
-          el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        } else {
-          el.classList.remove('active');
-        }
+    dom.samplePills.forEach((pill) => {
+      pill.addEventListener('click', () => {
+        const sample = SAMPLES[pill.dataset.sample];
+        if (!sample) return;
+        switchTab('text');
+        dom.inputTitle.value = sample.title;
+        dom.inputText.value = sample.content;
+        updateTextCounter();
+        confirmTextDraft();
       });
+    });
+
+    dom.btnToggleFullPreview.addEventListener('click', () => {
+      state.fullPreviewExpanded = !state.fullPreviewExpanded;
+      updateExcerptView();
+    });
+
+    dom.btnEditInput.addEventListener('click', () => {
+      const targetMode = state.confirmedDraft?.mode || state.input.mode;
+      invalidateConfirmedDraft();
+      if (targetMode === 'url') {
+        dom.inputUrl.focus();
+      } else {
+        dom.inputText.focus();
+      }
+    });
+
+    dom.btnStartGenerate.addEventListener('click', handleStartGenerate);
+    dom.btnCancelTask.addEventListener('click', handleCancelTask);
+
+    dom.btnRefreshHistory.addEventListener('click', async () => {
+      dom.btnRefreshHistory.classList.remove('is-spinning');
+      void dom.btnRefreshHistory.offsetWidth;
+      dom.btnRefreshHistory.classList.add('is-spinning');
+      await loadHistoryList();
+    });
+
+    dom.btnPlayPause.addEventListener('click', togglePlayPause);
+    dom.btnRewind10.addEventListener('click', () => seekRelative(-10));
+    dom.btnForward10.addEventListener('click', () => seekRelative(10));
+    dom.btnSpeed.addEventListener('click', cyclePlaybackSpeed);
+    dom.btnCopyMarkdown.addEventListener('click', handleCopyMarkdown);
+    if (dom.btnMiniPlayPause) dom.btnMiniPlayPause.addEventListener('click', togglePlayPause);
+    if (dom.btnMiniSpeed) dom.btnMiniSpeed.addEventListener('click', cyclePlaybackSpeed);
+    window.addEventListener('scroll', updateMobileMiniVisibility, { passive: true });
+    window.addEventListener('resize', updateMobileMiniVisibility, { passive: true });
+
+    dom.seekSlider.addEventListener('input', () => {
+      state.isSeeking = true;
+      const pct = Number(dom.seekSlider.value) || 0;
+      dom.seekSlider.style.setProperty('--seek-pct', `${pct}%`);
+      const dur = dom.mainAudio.duration || state.currentPodcast?.totalDuration || 0;
+      const curStr = formatTime((pct / 100) * dur);
+      dom.currentTime.textContent = curStr;
+      if (dom.miniTime) dom.miniTime.textContent = `${curStr} / ${formatTime(dur)}`;
+    });
+
+    dom.seekSlider.addEventListener('change', () => {
+      const pct = Number(dom.seekSlider.value) || 0;
+      const dur = dom.mainAudio.duration || state.currentPodcast?.totalDuration || 0;
+      const target = (pct / 100) * dur;
+      dom.mainAudio.currentTime = target;
+      state.isSeeking = false;
+      syncHighlightToTime(target);
+    });
+
+    dom.mainAudio.addEventListener('loadedmetadata', () => {
+      const dur = dom.mainAudio.duration || state.currentPodcast?.totalDuration || 0;
+      dom.totalDuration.textContent = formatTime(dur);
+      if (dom.miniTime) dom.miniTime.textContent = `${formatTime(dom.mainAudio.currentTime || 0)} / ${formatTime(dur)}`;
+    });
+
+    dom.mainAudio.addEventListener('timeupdate', () => {
+      if (state.isSeeking) return;
+      const cur = dom.mainAudio.currentTime || 0;
+      const dur = dom.mainAudio.duration || state.currentPodcast?.totalDuration || 0;
+      const curStr = formatTime(cur);
+      dom.currentTime.textContent = curStr;
+      if (dom.miniTime) dom.miniTime.textContent = `${curStr} / ${formatTime(dur)}`;
+      if (dur > 0) {
+        setSeekProgress((cur / dur) * 100);
+      }
+      syncHighlightToTime(cur);
+    });
+
+    dom.mainAudio.addEventListener('play', () => {
+      setDeckPlaying(true);
+      syncHighlightToTime(dom.mainAudio.currentTime || 0);
+    });
+
+    dom.mainAudio.addEventListener('pause', () => {
+      setDeckPlaying(false);
+    });
+
+    dom.mainAudio.addEventListener('ended', () => {
+      setDeckPlaying(false);
+      dom.playerDeck.dataset.speaker = 'none';
+      if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.speaker = 'none';
+    });
+
+    dom.btnSettings.addEventListener('click', openSettingsModal);
+    dom.btnCloseSettings.addEventListener('click', closeSettingsModal);
+    dom.btnCancelSettings.addEventListener('click', closeSettingsModal);
+    dom.settingsForm.addEventListener('submit', saveSettings);
+    dom.settingsModal.addEventListener('click', (e) => {
+      if (e.target === dom.settingsModal) closeSettingsModal();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !dom.settingsModal.classList.contains('hidden')) {
+        closeSettingsModal();
+      }
+    });
+
+    dom.btnToggleKeyVisible.addEventListener('click', () => {
+      const hidden = dom.settingApiKey.type === 'password';
+      dom.settingApiKey.type = hidden ? 'text' : 'password';
+      dom.btnToggleKeyVisible.textContent = hidden ? '隐藏' : '显示';
+    });
+  }
+
+  async function restoreActiveTaskIfAny() {
+    const savedId = readStorage(STORAGE_KEYS.activeTaskId);
+    if (!savedId) return;
+    try {
+      const task = await apiJson(`/api/tasks/${encodeURIComponent(savedId)}`);
+      if (task.status === 'completed') {
+        writeStorage(STORAGE_KEYS.activeTaskId, '');
+        if (task.podcast && !state.currentPodcast) {
+          loadPodcast(task.podcast, { autoplay: false });
+        }
+        return;
+      }
+      setActiveTask(task);
+      if (['queued', 'running'].includes(task.status)) {
+        startPolling();
+      }
+    } catch {
+      writeStorage(STORAGE_KEYS.activeTaskId, '');
     }
   }
-}
 
-function onAudioLoadedMetadata() {
-  dom.totalDuration.textContent = formatTime(dom.mainAudio.duration || 0);
-}
+  async function bootstrap() {
+    initWaveformBars();
+    updateApiKeyStatus();
+    updateTextCounter();
+    bindEvents();
+    positionTabIndicator(true);
 
-function onAudioEnded() {
-  setPlayState(false);
-}
+    await loadHistoryList();
+    await restoreActiveTaskIfAny();
 
-// 播放 / 暂停切换（BGM 跟随主音频的 play/pause 事件自动启停）
-function togglePlayPause() {
-  if (!dom.mainAudio.src) return;
-  if (dom.mainAudio.paused) {
-    dom.mainAudio.play();
-  } else {
-    dom.mainAudio.pause();
+    if (!state.currentPodcast && state.historyItems.length > 0) {
+      await handleSelectHistory(state.historyItems[0].id);
+    }
   }
-}
 
-function setPlayState(playing) {
-  state.isPlaying = playing;
-  if (playing) {
-    dom.playIcon.classList.add('hidden');
-    dom.pauseIcon.classList.remove('hidden');
-    dom.waveVisualizer.classList.add('playing');
-  } else {
-    dom.playIcon.classList.remove('hidden');
-    dom.pauseIcon.classList.add('hidden');
-    dom.waveVisualizer.classList.remove('playing');
-  }
-}
-
-function seekRelative(seconds) {
-  if (!dom.mainAudio.src) return;
-  dom.mainAudio.currentTime = Math.max(0, Math.min(dom.mainAudio.duration, dom.mainAudio.currentTime + seconds));
-}
-
-function toggleSpeed() {
-  const speeds = [1.0, 1.25, 1.5, 1.75, 2.0];
-  const nextIdx = (speeds.indexOf(state.playbackRate) + 1) % speeds.length;
-  state.playbackRate = speeds[nextIdx];
-  dom.mainAudio.playbackRate = state.playbackRate;
-  dom.btnSpeed.textContent = `${state.playbackRate}x`;
-}
-
-// 状态提示条工具函数
-function showStatus(text, progress = 0) {
-  dom.statusContainer.classList.remove('hidden');
-  dom.statusMessage.textContent = text;
-  dom.progressBar.style.width = `${progress}%`;
-}
-
-function hideStatus() {
-  dom.statusContainer.classList.add('hidden');
-}
-
-function formatTime(sec) {
-  if (!sec || isNaN(sec)) return '00:00';
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.innerText = text;
-  return div.innerHTML;
-}
-
-// 页面加载完成启动
-window.addEventListener('DOMContentLoaded', init);
+  window.addEventListener('DOMContentLoaded', bootstrap);
+})();
