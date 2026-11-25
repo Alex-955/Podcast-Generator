@@ -13,7 +13,171 @@
     apiKey: 'ai_podcast_apikey',
     baseURL: 'ai_podcast_baseurl',
     model: 'ai_podcast_model',
+    ttsConfig: 'ai_podcast_tts_config',
     activeTaskId: 'ai_podcast_active_task_id',
+  };
+
+  const LLM_PRESETS = [
+    {
+      id: 'deepseek',
+      label: 'DeepSeek',
+      baseURL: 'https://api.deepseek.com',
+      model: 'deepseek-chat',
+      hint: '性价比与中文播客口语感兼顾（推荐）。前往 DeepSeek 开放平台（platform.deepseek.com）创建 API Key。',
+    },
+    {
+      id: 'kimi',
+      label: 'Kimi',
+      baseURL: 'https://api.moonshot.cn/v1',
+      model: 'kimi-k2-0711-preview',
+      hint: '长文消化与中文对话自然度极佳，适合有 Kimi Token 套餐的用户。前往 platform.moonshot.cn 获取 API Key。',
+    },
+    {
+      id: 'doubao',
+      label: '豆包',
+      baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+      model: 'doubao-seed-1-6-250615',
+      hint: '中文网感强、响应快。前往火山方舟（console.volcengine.com/ark）获取 API Key 或填写推理接入点 ID。',
+    },
+    {
+      id: 'qwen',
+      label: '通义千问',
+      baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      model: 'qwen-plus',
+      hint: '长上下文稳定、结构化剧本输出可靠。前往阿里云百炼（bailian.console.aliyun.com）获取 API Key。',
+    },
+    {
+      id: 'mimo',
+      label: '小米 MiMo',
+      baseURL: 'https://api.xiaomimimo.com/v1',
+      model: 'mimo-v2-flash',
+      hint: '轻量高速、适合快速试听剧本生成。前往小米 MiMo 开放平台（platform.xiaomimimo.com）获取 API Key。',
+    },
+    {
+      id: 'siliconflow',
+      label: '硅基流动',
+      baseURL: 'https://api.siliconflow.cn/v1',
+      model: 'deepseek-ai/DeepSeek-V3',
+      hint: '聚合多款主流开源模型（DeepSeek / Qwen / GLM 等）。前往 cloud.siliconflow.cn 获取 API Key。',
+    },
+    {
+      id: 'custom',
+      label: '自定义',
+      baseURL: '',
+      model: '',
+      hint: '支持任意 OpenAI 兼容接口（OpenRouter、One-API、本地 Ollama 等），手动填写 Base URL 与模型名即可。',
+    },
+  ];
+
+  const FALLBACK_TTS_CATALOG = {
+    defaultProvider: 'edge',
+    items: [
+      {
+        id: 'minimax',
+        name: 'MiniMax Speech',
+        requiresAuth: true,
+        authModes: ['apiKey'],
+        availableModels: ['speech-02-hd', 'speech-02-turbo', 'speech-2.8-hd', 'speech-2.8-turbo'],
+        defaultModel: 'speech-02-hd',
+        defaultVoices: { 阿泽: 'male-qn-jingying', 小晓: 'female-yujie' },
+        availableVoices: [
+          { id: 'male-qn-jingying', name: '精英青年（沉稳自然·阿泽推荐）', gender: 'male' },
+          { id: 'Chinese (Mandarin)_Radio_Host', name: '电台主播（从容播报）', gender: 'male' },
+          { id: 'Chinese (Mandarin)_Sincere_Adult', name: '真诚成年（温和朋友感）', gender: 'male' },
+          { id: 'male-qn-qingse', name: '青涩青年（年轻明快）', gender: 'male' },
+          { id: 'female-yujie', name: '知性御姐（干练细腻·小晓推荐）', gender: 'female' },
+          { id: 'Chinese (Mandarin)_Warm_Bestie', name: '温暖闺蜜（亲切放松）', gender: 'female' },
+          { id: 'Chinese (Mandarin)_Wise_Women', name: '知性女性（深度解析）', gender: 'female' },
+          { id: 'female-shaonv', name: '清脆少女（轻快活泼）', gender: 'female' },
+        ],
+        serverConfigured: false,
+      },
+      {
+        id: 'volcengine',
+        name: '火山引擎（豆包语音 V3）',
+        requiresAuth: true,
+        authModes: ['apiKey', 'appIdAccessKey'],
+        availableModels: ['seed-tts-2.0', 'seed-tts-1.0'],
+        defaultModel: 'seed-tts-2.0',
+        defaultVoices: { 阿泽: 'zh_male_m191_uranus_bigtts', 小晓: 'zh_female_vv_uranus_bigtts' },
+        availableVoices: [
+          { id: 'zh_male_m191_uranus_bigtts', name: '云舟 2.0（自然播客男声·阿泽推荐）', gender: 'male' },
+          { id: 'zh_male_liufei_uranus_bigtts', name: '刘飞 2.0（对话磁性男声）', gender: 'male' },
+          { id: 'zh_male_taocheng_uranus_bigtts', name: '小天 2.0（明快青年男声）', gender: 'male' },
+          { id: 'zh_female_vv_uranus_bigtts', name: 'Vivi 2.0（灵动自然女声·小晓推荐）', gender: 'female' },
+          { id: 'zh_female_xiaohe_uranus_bigtts', name: '小何 2.0（亲和对话女声）', gender: 'female' },
+          { id: 'zh_female_cancan_uranus_bigtts', name: '知性灿灿 2.0（清亮拆解女声）', gender: 'female' },
+          { id: 'zh_female_shuangkuaisisi_uranus_bigtts', name: '爽快思思 2.0（干脆爽朗女声）', gender: 'female' },
+          { id: 'zh_male_yangguangqingnian_moon_bigtts', name: '阳光青年 1.0', gender: 'male' },
+          { id: 'zh_female_cancan_mars_bigtts', name: '灿灿 1.0', gender: 'female' },
+        ],
+        serverConfigured: false,
+      },
+      {
+        id: 'edge',
+        name: 'Microsoft Edge',
+        requiresAuth: false,
+        authModes: [],
+        availableModels: ['edge-readaloud-24k48k'],
+        defaultModel: 'edge-readaloud-24k48k',
+        defaultVoices: { 阿泽: 'zh-CN-YunxiNeural', 小晓: 'zh-CN-XiaoxiaoNeural' },
+        availableVoices: [
+          { id: 'zh-CN-YunxiNeural', name: '云希 (男声·温和沉稳·主持人推荐)', gender: 'male' },
+          { id: 'zh-CN-XiaoxiaoNeural', name: '晓晓 (女声·灵动自然·嘉宾推荐)', gender: 'female' },
+          { id: 'zh-CN-YunjianNeural', name: '云健 (男声·磁性解说)', gender: 'male' },
+          { id: 'zh-CN-YunyangNeural', name: '云扬 (男声·专业新闻播报)', gender: 'male' },
+          { id: 'zh-CN-XiaohanNeural', name: '晓涵 (女声·知性细腻)', gender: 'female' },
+          { id: 'zh-CN-XiaomengNeural', name: '晓梦 (女声·活泼开朗)', gender: 'female' },
+        ],
+        serverConfigured: true,
+      },
+    ],
+  };
+
+  const TTS_SHORT_LABELS = {
+    minimax: 'MiniMax Speech',
+    volcengine: '火山 · 豆包',
+    edge: 'Edge 免费',
+  };
+
+  const TTS_MODEL_LABELS = {
+    'speech-02-hd': 'speech-02-hd（高清自然·推荐）',
+    'speech-02-turbo': 'speech-02-turbo（高速低延）',
+    'speech-2.8-hd': 'speech-2.8-hd（新一代高清）',
+    'speech-2.8-turbo': 'speech-2.8-turbo（新一代极速）',
+    'seed-tts-2.0': 'seed-tts-2.0（豆包语音大模型 2.0 · 推荐）',
+    'seed-tts-1.0': 'seed-tts-1.0（豆包经典版 1.0）',
+  };
+
+  const TTS_GUIDES = {
+    minimax: '音色自然且带有真实对话停顿与呼吸感（推荐）。前往 MiniMax 开放平台（platform.minimaxi.com）创建 API Key 即可使用（新用户含体验额度，默认内置国内版接口）。',
+    volcengine: '字节跳动豆包大模型语音（OPPO AI 妙听同款语音体系）。在火山引擎控制台（console.volcengine.com/speech/app）开通「大模型语音合成」后获取 API Key（或 AppID + Access Key）；1.0 与 2.0 音色会按资源版本自动匹配。',
+    edge: '免配置密钥的微软神经网络语音试用通道；因非官方公开接口，近期偶发 403 限流且拟真度一般，长期稳定制作建议使用 MiniMax 或火山豆包。',
+  };
+
+  const DEFAULT_TTS_CONFIG = {
+    provider: '',
+    minimax: {
+      apiKey: '',
+      model: 'speech-02-hd',
+      endpoint: '',
+      voiceHost: 'male-qn-jingying',
+      voiceGuest: 'female-yujie',
+    },
+    volcengine: {
+      authMode: 'apiKey',
+      apiKey: '',
+      appId: '',
+      accessKey: '',
+      resourceId: 'seed-tts-2.0',
+      endpoint: '',
+      voiceHost: 'zh_male_m191_uranus_bigtts',
+      voiceGuest: 'zh_female_vv_uranus_bigtts',
+    },
+    edge: {
+      voiceHost: 'zh-CN-YunxiNeural',
+      voiceGuest: 'zh-CN-XiaoxiaoNeural',
+    },
   };
 
   const SAMPLES = {
@@ -47,6 +211,11 @@
     apiKey: readStorage(STORAGE_KEYS.apiKey),
     baseURL: readStorage(STORAGE_KEYS.baseURL) || DEFAULT_BASE_URL,
     model: readStorage(STORAGE_KEYS.model) || DEFAULT_MODEL,
+    ttsConfig: loadTtsConfig(),
+    ttsCatalog: FALLBACK_TTS_CATALOG,
+    settingsTab: 'llm',
+    modalTtsProvider: 'edge',
+    modalVolcAuthMode: 'apiKey',
     input: window.InputSource.createState(),
     confirmedDraft: null,
     fullPreviewExpanded: false,
@@ -68,10 +237,51 @@
     btnCloseSettings: document.getElementById('btnCloseSettings'),
     btnCancelSettings: document.getElementById('btnCancelSettings'),
     settingsForm: document.getElementById('settingsForm'),
+    settingsTabIndicator: document.getElementById('settingsTabIndicator'),
+    settingsTabLlm: document.getElementById('settingsTabLlm'),
+    settingsTabTts: document.getElementById('settingsTabTts'),
+    settingsPanelLlm: document.getElementById('settingsPanelLlm'),
+    settingsPanelTts: document.getElementById('settingsPanelTts'),
+    llmPresetPills: document.querySelectorAll('[data-llm-preset]'),
+    llmPresetHint: document.getElementById('llmPresetHint'),
     settingApiKey: document.getElementById('settingApiKey'),
     settingBaseUrl: document.getElementById('settingBaseUrl'),
     settingModel: document.getElementById('settingModel'),
     btnToggleKeyVisible: document.getElementById('btnToggleKeyVisible'),
+    btnTestLlm: document.getElementById('btnTestLlm'),
+    llmTestStatus: document.getElementById('llmTestStatus'),
+
+    ttsProviderButtons: document.querySelectorAll('[data-tts-provider]'),
+    ttsFieldsMinimax: document.getElementById('ttsFieldsMinimax'),
+    ttsFieldsVolcengine: document.getElementById('ttsFieldsVolcengine'),
+    ttsFieldsEdge: document.getElementById('ttsFieldsEdge'),
+    settingMinimaxKey: document.getElementById('settingMinimaxKey'),
+    btnToggleMinimaxKey: document.getElementById('btnToggleMinimaxKey'),
+    minimaxServerHint: document.getElementById('minimaxServerHint'),
+    settingMinimaxModel: document.getElementById('settingMinimaxModel'),
+    settingMinimaxVoiceHost: document.getElementById('settingMinimaxVoiceHost'),
+    settingMinimaxVoiceGuest: document.getElementById('settingMinimaxVoiceGuest'),
+    settingMinimaxEndpoint: document.getElementById('settingMinimaxEndpoint'),
+
+    volcAuthButtons: document.querySelectorAll('[data-volc-auth]'),
+    volcAuthApiKeyGroup: document.getElementById('volcAuthApiKeyGroup'),
+    volcAuthAppGroup: document.getElementById('volcAuthAppGroup'),
+    settingVolcApiKey: document.getElementById('settingVolcApiKey'),
+    btnToggleVolcApiKey: document.getElementById('btnToggleVolcApiKey'),
+    settingVolcAppId: document.getElementById('settingVolcAppId'),
+    settingVolcAccessKey: document.getElementById('settingVolcAccessKey'),
+    btnToggleVolcAccessKey: document.getElementById('btnToggleVolcAccessKey'),
+    volcServerHint: document.getElementById('volcServerHint'),
+    settingVolcResource: document.getElementById('settingVolcResource'),
+    settingVolcVoiceHost: document.getElementById('settingVolcVoiceHost'),
+    settingVolcVoiceGuest: document.getElementById('settingVolcVoiceGuest'),
+    settingVolcEndpoint: document.getElementById('settingVolcEndpoint'),
+
+    settingEdgeVoiceHost: document.getElementById('settingEdgeVoiceHost'),
+    settingEdgeVoiceGuest: document.getElementById('settingEdgeVoiceGuest'),
+    ttsProviderGuide: document.getElementById('ttsProviderGuide'),
+    btnTestTts: document.getElementById('btnTestTts'),
+    ttsTestStatus: document.getElementById('ttsTestStatus'),
 
     tabIndicator: document.getElementById('tabIndicator'),
     tabBtnUrl: document.getElementById('tabBtnUrl'),
@@ -94,6 +304,7 @@
     confirmCard: document.getElementById('confirmCard'),
     confirmSourceBadge: document.getElementById('confirmSourceBadge'),
     confirmCharBadge: document.getElementById('confirmCharBadge'),
+    confirmTtsBadge: document.getElementById('confirmTtsBadge'),
     confirmTruncatedBadge: document.getElementById('confirmTruncatedBadge'),
     confirmTitle: document.getElementById('confirmTitle'),
     confirmExcerpt: document.getElementById('confirmExcerpt'),
@@ -167,6 +378,47 @@
     } catch {
       // 隐私模式下忽略本地存储写入失败
     }
+  }
+
+  function loadTtsConfig() {
+    const raw = readStorage(STORAGE_KEYS.ttsConfig);
+    let parsed = null;
+    if (raw) {
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        parsed = null;
+      }
+    }
+    const base = {
+      provider: typeof parsed?.provider === 'string' ? parsed.provider : DEFAULT_TTS_CONFIG.provider,
+      minimax: { ...DEFAULT_TTS_CONFIG.minimax, ...(parsed?.minimax && typeof parsed.minimax === 'object' ? parsed.minimax : {}) },
+      volcengine: { ...DEFAULT_TTS_CONFIG.volcengine, ...(parsed?.volcengine && typeof parsed.volcengine === 'object' ? parsed.volcengine : {}) },
+      edge: { ...DEFAULT_TTS_CONFIG.edge, ...(parsed?.edge && typeof parsed.edge === 'object' ? parsed.edge : {}) },
+    };
+    if (!['minimax', 'volcengine', 'edge', ''].includes(base.provider)) {
+      base.provider = '';
+    }
+    if (!['apiKey', 'appIdAccessKey'].includes(base.volcengine.authMode)) {
+      base.volcengine.authMode = 'apiKey';
+    }
+    return base;
+  }
+
+  function saveTtsConfigToStorage() {
+    writeStorage(STORAGE_KEYS.ttsConfig, JSON.stringify(state.ttsConfig));
+  }
+
+  function resolveEffectiveTtsProviderId() {
+    if (['minimax', 'volcengine', 'edge'].includes(state.ttsConfig.provider)) {
+      return state.ttsConfig.provider;
+    }
+    return state.ttsCatalog?.defaultProvider || 'edge';
+  }
+
+  function getCatalogProvider(id) {
+    const items = Array.isArray(state.ttsCatalog?.items) ? state.ttsCatalog.items : FALLBACK_TTS_CATALOG.items;
+    return items.find((item) => item.id === id) || FALLBACK_TTS_CATALOG.items.find((item) => item.id === id);
   }
 
   function showToast(message) {
@@ -296,6 +548,7 @@
 
     dom.confirmSourceBadge.textContent = draft.mode === 'url' ? '链接解析' : '直接贴正文';
     dom.confirmCharBadge.textContent = `${draft.length.toLocaleString('zh-CN')} 字`;
+    updateConfirmTtsBadge();
     dom.confirmTruncatedBadge.classList.toggle('hidden', !draft.truncated);
     dom.confirmTitle.textContent = draft.title || '未命名文章（生成时将自动提炼标题）';
 
@@ -442,11 +695,11 @@
     });
   }
 
-  function buildCredsPayload() {
+  function buildCredsPayload(source = state) {
     const payload = {};
-    const key = state.apiKey.trim();
-    const baseURL = state.baseURL.trim();
-    const model = state.model.trim();
+    const key = String(source.apiKey || '').trim();
+    const baseURL = String(source.baseURL || '').trim();
+    const model = String(source.model || '').trim();
     if (key) {
       payload.apiKey = key;
       if (baseURL) payload.baseURL = baseURL;
@@ -457,6 +710,52 @@
       payload.model = model;
     }
     return payload;
+  }
+
+  function buildTtsPayload(source = state.ttsConfig, providerOverride) {
+    const cfg = source || state.ttsConfig;
+    const provider = providerOverride || resolveEffectiveTtsProviderId();
+    if (provider === 'minimax') {
+      const out = {
+        provider: 'minimax',
+        model: cfg.minimax.model || DEFAULT_TTS_CONFIG.minimax.model,
+        voiceMapping: {
+          阿泽: cfg.minimax.voiceHost || DEFAULT_TTS_CONFIG.minimax.voiceHost,
+          小晓: cfg.minimax.voiceGuest || DEFAULT_TTS_CONFIG.minimax.voiceGuest,
+        },
+      };
+      if (cfg.minimax.apiKey?.trim()) out.apiKey = cfg.minimax.apiKey.trim();
+      if (cfg.minimax.endpoint?.trim()) out.endpoint = cfg.minimax.endpoint.trim();
+      return out;
+    }
+    if (provider === 'volcengine') {
+      const resourceId = cfg.volcengine.resourceId || DEFAULT_TTS_CONFIG.volcengine.resourceId;
+      const defaults = getVolcDefaultVoices(resourceId);
+      const out = {
+        provider: 'volcengine',
+        resourceId,
+        model: resourceId,
+        voiceMapping: {
+          阿泽: cfg.volcengine.voiceHost || defaults.阿泽,
+          小晓: cfg.volcengine.voiceGuest || defaults.小晓,
+        },
+      };
+      if (cfg.volcengine.authMode === 'appIdAccessKey') {
+        if (cfg.volcengine.appId?.trim()) out.appId = cfg.volcengine.appId.trim();
+        if (cfg.volcengine.accessKey?.trim()) out.accessKey = cfg.volcengine.accessKey.trim();
+      } else if (cfg.volcengine.apiKey?.trim()) {
+        out.apiKey = cfg.volcengine.apiKey.trim();
+      }
+      if (cfg.volcengine.endpoint?.trim()) out.endpoint = cfg.volcengine.endpoint.trim();
+      return out;
+    }
+    return {
+      provider: 'edge',
+      voiceMapping: {
+        阿泽: cfg.edge.voiceHost || DEFAULT_TTS_CONFIG.edge.voiceHost,
+        小晓: cfg.edge.voiceGuest || DEFAULT_TTS_CONFIG.edge.voiceGuest,
+      },
+    };
   }
 
   function hasActiveRunningTask() {
@@ -485,6 +784,7 @@
           title: draftSnapshot.title,
           content: draftSnapshot.content,
           ...buildCredsPayload(),
+          tts: buildTtsPayload(),
         }),
       });
 
@@ -505,8 +805,12 @@
   function handleCredentialOrTaskError(err) {
     const msg = err.message || '请求未能完成';
     showToast(msg);
-    if (err.status === 400 && /API Key|接口地址/i.test(msg)) {
-      openSettingsModal();
+    if (err.status === 400) {
+      if (/语音|MiniMax|火山|豆包|音色|TTS|AppID|Access Key|资源版本/i.test(msg)) {
+        openSettingsModal('tts');
+      } else if (/API Key|接口地址|模型/i.test(msg)) {
+        openSettingsModal('llm');
+      }
     }
   }
 
@@ -741,6 +1045,11 @@
       const retryBtn = createActionBtn('原链接重试', 'btn btn-subtle btn-sm', () => handleResumeTask(task.id));
       const discardBtn = createActionBtn('放弃', 'btn btn-ghost btn-sm', () => setActiveTask(null));
       dom.taskErrorActions.append(switchBtn, retryBtn, discardBtn);
+    } else if (task.status === 'failed' && task.error?.stage === 'tts') {
+      const resumeBtn = createActionBtn('从断点继续生成', 'btn btn-primary btn-sm', () => handleResumeTask(task.id));
+      const switchTtsBtn = createActionBtn('切换语音服务商', 'btn btn-subtle btn-sm', () => openSettingsModal('tts'));
+      const discardBtn = createActionBtn('放弃', 'btn btn-ghost btn-sm', () => setActiveTask(null));
+      dom.taskErrorActions.append(resumeBtn, switchTtsBtn, discardBtn);
     } else {
       const resumeBtn = createActionBtn('从断点继续生成', 'btn btn-primary btn-sm', () => handleResumeTask(task.id));
       const discardBtn = createActionBtn('放弃', 'btn btn-ghost btn-sm', () => setActiveTask(null));
@@ -779,7 +1088,10 @@
       const task = await apiJson(`/api/tasks/${encodeURIComponent(taskId)}/resume`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildCredsPayload()),
+        body: JSON.stringify({
+          ...buildCredsPayload(),
+          tts: buildTtsPayload(),
+        }),
       });
       setActiveTask(task);
       startPolling();
@@ -1116,22 +1428,377 @@
     }
   }
 
-  function updateApiKeyStatus() {
-    const configured = Boolean(state.apiKey && state.apiKey.trim());
-    dom.apiKeyStatusDot.classList.toggle('is-configured', configured);
-    dom.btnSettings.title = configured
-      ? '已配置本地 API Key'
-      : '未配置本地 Key（服务端配置 .env 时可直接生成，或点击填写）';
+  function isVolcVoiceCompatible(resourceId, voiceId) {
+    if (!voiceId) return true;
+    if (/^seed-tts-1\.0/i.test(resourceId || '')) {
+      return !voiceId.endsWith('_uranus_bigtts');
+    }
+    return !/_(?:moon|mars|wvae)_bigtts$/i.test(voiceId);
   }
 
-  function openSettingsModal() {
+  function getVolcDefaultVoices(resourceId) {
+    if (/^seed-tts-1\.0/i.test(resourceId || '')) {
+      return {
+        阿泽: 'zh_male_yangguangqingnian_moon_bigtts',
+        小晓: 'zh_female_cancan_mars_bigtts',
+      };
+    }
+    return {
+      阿泽: 'zh_male_m191_uranus_bigtts',
+      小晓: 'zh_female_vv_uranus_bigtts',
+    };
+  }
+
+  function normalizeBaseUrlForMatch(url) {
+    return String(url || '').trim().replace(/\/+$/, '').toLowerCase();
+  }
+
+  function detectLlmPresetId(baseURL) {
+    const normalized = normalizeBaseUrlForMatch(baseURL);
+    if (!normalized) return 'deepseek';
+    for (const preset of LLM_PRESETS) {
+      if (!preset.baseURL) continue;
+      const target = normalizeBaseUrlForMatch(preset.baseURL);
+      if (normalized === target || (preset.id === 'deepseek' && normalized === `${target}/v1`)) {
+        return preset.id;
+      }
+    }
+    return 'custom';
+  }
+
+  function updateLlmPresetSelection(presetId) {
+    const preset = LLM_PRESETS.find((item) => item.id === presetId) || LLM_PRESETS[LLM_PRESETS.length - 1];
+    dom.llmPresetPills.forEach((pill) => {
+      pill.classList.toggle('is-active', pill.dataset.llmPreset === preset.id);
+    });
+    if (dom.llmPresetHint) {
+      dom.llmPresetHint.textContent = preset.hint;
+    }
+  }
+
+  function applyLlmPreset(presetId) {
+    const preset = LLM_PRESETS.find((item) => item.id === presetId);
+    if (!preset) return;
+    if (preset.id !== 'custom') {
+      dom.settingBaseUrl.value = preset.baseURL;
+      dom.settingModel.value = preset.model;
+    } else {
+      dom.settingBaseUrl.focus();
+    }
+    updateLlmPresetSelection(preset.id);
+    setTestStatus(dom.llmTestStatus, '', '');
+  }
+
+  function populateSelect(selectEl, options, selectedValue, fallbackValue) {
+    if (!selectEl) return '';
+    selectEl.textContent = '';
+    options.forEach((opt) => {
+      const el = document.createElement('option');
+      el.value = opt.value;
+      el.textContent = opt.label;
+      selectEl.appendChild(el);
+    });
+    const values = options.map((opt) => opt.value);
+    const chosen = values.includes(selectedValue)
+      ? selectedValue
+      : values.includes(fallbackValue)
+        ? fallbackValue
+        : values[0] || '';
+    selectEl.value = chosen;
+    return chosen;
+  }
+
+  function renderVoiceSelects(voices, hostSelect, guestSelect, selectedHost, selectedGuest, defaults) {
+    const orderedForHost = [...voices].sort((a, b) => (a.gender === 'male' ? 0 : 1) - (b.gender === 'male' ? 0 : 1));
+    const orderedForGuest = [...voices].sort((a, b) => (a.gender === 'female' ? 0 : 1) - (b.gender === 'female' ? 0 : 1));
+    populateSelect(
+      hostSelect,
+      orderedForHost.map((v) => ({ value: v.id, label: v.name })),
+      selectedHost,
+      defaults?.阿泽 || ''
+    );
+    populateSelect(
+      guestSelect,
+      orderedForGuest.map((v) => ({ value: v.id, label: v.name })),
+      selectedGuest,
+      defaults?.小晓 || ''
+    );
+  }
+
+  function renderVolcVoicesForResource(resourceId, preferredHost, preferredGuest) {
+    const provider = getCatalogProvider('volcengine');
+    const allVoices = provider?.availableVoices || [];
+    const compatible = allVoices.filter((v) => isVolcVoiceCompatible(resourceId, v.id));
+    const defaults = getVolcDefaultVoices(resourceId);
+    renderVoiceSelects(
+      compatible,
+      dom.settingVolcVoiceHost,
+      dom.settingVolcVoiceGuest,
+      preferredHost,
+      preferredGuest,
+      defaults
+    );
+  }
+
+  function hydrateTtsControlsFromCatalog() {
+    const minimax = getCatalogProvider('minimax');
+    const volc = getCatalogProvider('volcengine');
+    const edge = getCatalogProvider('edge');
+
+    if (minimax) {
+      populateSelect(
+        dom.settingMinimaxModel,
+        (minimax.availableModels || []).map((id) => ({ value: id, label: TTS_MODEL_LABELS[id] || id })),
+        state.ttsConfig.minimax.model,
+        minimax.defaultModel
+      );
+      renderVoiceSelects(
+        minimax.availableVoices || [],
+        dom.settingMinimaxVoiceHost,
+        dom.settingMinimaxVoiceGuest,
+        state.ttsConfig.minimax.voiceHost,
+        state.ttsConfig.minimax.voiceGuest,
+        minimax.defaultVoices
+      );
+      if (dom.minimaxServerHint) {
+        dom.minimaxServerHint.classList.toggle('hidden', !minimax.serverConfigured);
+      }
+    }
+
+    if (volc) {
+      const selectedResource = populateSelect(
+        dom.settingVolcResource,
+        (volc.availableModels || []).map((id) => ({ value: id, label: TTS_MODEL_LABELS[id] || id })),
+        state.ttsConfig.volcengine.resourceId,
+        volc.defaultModel
+      );
+      renderVolcVoicesForResource(
+        selectedResource,
+        state.ttsConfig.volcengine.voiceHost,
+        state.ttsConfig.volcengine.voiceGuest
+      );
+      if (dom.volcServerHint) {
+        dom.volcServerHint.classList.toggle('hidden', !volc.serverConfigured);
+      }
+    }
+
+    if (edge) {
+      renderVoiceSelects(
+        edge.availableVoices || [],
+        dom.settingEdgeVoiceHost,
+        dom.settingEdgeVoiceGuest,
+        state.ttsConfig.edge.voiceHost,
+        state.ttsConfig.edge.voiceGuest,
+        edge.defaultVoices
+      );
+    }
+  }
+
+  function selectTtsProviderInModal(providerId) {
+    state.modalTtsProvider = ['minimax', 'volcengine', 'edge'].includes(providerId) ? providerId : 'edge';
+    dom.ttsProviderButtons.forEach((btn) => {
+      const active = btn.dataset.ttsProvider === state.modalTtsProvider;
+      btn.classList.toggle('is-active', active);
+      btn.setAttribute('aria-checked', String(active));
+    });
+    if (dom.ttsFieldsMinimax) dom.ttsFieldsMinimax.classList.toggle('hidden', state.modalTtsProvider !== 'minimax');
+    if (dom.ttsFieldsVolcengine) dom.ttsFieldsVolcengine.classList.toggle('hidden', state.modalTtsProvider !== 'volcengine');
+    if (dom.ttsFieldsEdge) dom.ttsFieldsEdge.classList.toggle('hidden', state.modalTtsProvider !== 'edge');
+    if (dom.ttsProviderGuide) {
+      dom.ttsProviderGuide.textContent = TTS_GUIDES[state.modalTtsProvider] || '';
+    }
+    setTestStatus(dom.ttsTestStatus, '', '');
+  }
+
+  function selectVolcAuthModeInModal(mode) {
+    state.modalVolcAuthMode = mode === 'appIdAccessKey' ? 'appIdAccessKey' : 'apiKey';
+    dom.volcAuthButtons.forEach((btn) => {
+      btn.classList.toggle('is-active', btn.dataset.volcAuth === state.modalVolcAuthMode);
+    });
+    if (dom.volcAuthApiKeyGroup) {
+      dom.volcAuthApiKeyGroup.classList.toggle('hidden', state.modalVolcAuthMode !== 'apiKey');
+    }
+    if (dom.volcAuthAppGroup) {
+      dom.volcAuthAppGroup.classList.toggle('hidden', state.modalVolcAuthMode !== 'appIdAccessKey');
+    }
+  }
+
+  function positionSettingsTabIndicator(immediate) {
+    const activeBtn = state.settingsTab === 'tts' ? dom.settingsTabTts : dom.settingsTabLlm;
+    if (!activeBtn || !dom.settingsTabIndicator || activeBtn.offsetWidth === 0) return;
+    if (immediate) {
+      dom.settingsTabIndicator.style.transition = 'none';
+    }
+    dom.settingsTabIndicator.style.width = `${activeBtn.offsetWidth}px`;
+    dom.settingsTabIndicator.style.transform = `translateX(${activeBtn.offsetLeft}px)`;
+    if (immediate) {
+      void dom.settingsTabIndicator.offsetWidth;
+      dom.settingsTabIndicator.style.transition = '';
+    }
+  }
+
+  function switchSettingsTab(tab, { immediateIndicator = false } = {}) {
+    state.settingsTab = tab === 'tts' ? 'tts' : 'llm';
+    const isTts = state.settingsTab === 'tts';
+
+    dom.settingsTabLlm.classList.toggle('is-active', !isTts);
+    dom.settingsTabLlm.setAttribute('aria-selected', String(!isTts));
+    dom.settingsTabTts.classList.toggle('is-active', isTts);
+    dom.settingsTabTts.setAttribute('aria-selected', String(isTts));
+
+    dom.settingsPanelLlm.classList.toggle('hidden', isTts);
+    dom.settingsPanelLlm.classList.toggle('is-active', !isTts);
+    dom.settingsPanelTts.classList.toggle('hidden', !isTts);
+    dom.settingsPanelTts.classList.toggle('is-active', isTts);
+
+    positionSettingsTabIndicator(immediateIndicator);
+  }
+
+  function setTestStatus(el, kind, text) {
+    if (!el) return;
+    el.className = 'test-status';
+    if (kind === 'ok') el.classList.add('is-ok');
+    else if (kind === 'error') el.classList.add('is-error');
+    else if (kind === 'loading') el.classList.add('is-loading');
+    el.textContent = text || '';
+  }
+
+  function readLlmFormSnapshot() {
+    return {
+      apiKey: dom.settingApiKey.value.trim(),
+      baseURL: dom.settingBaseUrl.value.trim() || DEFAULT_BASE_URL,
+      model: dom.settingModel.value.trim() || DEFAULT_MODEL,
+    };
+  }
+
+  function readTtsFormSnapshot() {
+    const defaultsMinimax = DEFAULT_TTS_CONFIG.minimax;
+    const defaultsEdge = DEFAULT_TTS_CONFIG.edge;
+    const resourceId = dom.settingVolcResource.value || DEFAULT_TTS_CONFIG.volcengine.resourceId;
+    const defaultsVolc = getVolcDefaultVoices(resourceId);
+    return {
+      provider: state.modalTtsProvider,
+      minimax: {
+        apiKey: dom.settingMinimaxKey.value.trim(),
+        model: dom.settingMinimaxModel.value || defaultsMinimax.model,
+        endpoint: dom.settingMinimaxEndpoint.value.trim(),
+        voiceHost: dom.settingMinimaxVoiceHost.value || defaultsMinimax.voiceHost,
+        voiceGuest: dom.settingMinimaxVoiceGuest.value || defaultsMinimax.voiceGuest,
+      },
+      volcengine: {
+        authMode: state.modalVolcAuthMode,
+        apiKey: dom.settingVolcApiKey.value.trim(),
+        appId: dom.settingVolcAppId.value.trim(),
+        accessKey: dom.settingVolcAccessKey.value.trim(),
+        resourceId,
+        endpoint: dom.settingVolcEndpoint.value.trim(),
+        voiceHost: dom.settingVolcVoiceHost.value || defaultsVolc.阿泽,
+        voiceGuest: dom.settingVolcVoiceGuest.value || defaultsVolc.小晓,
+      },
+      edge: {
+        voiceHost: dom.settingEdgeVoiceHost.value || defaultsEdge.voiceHost,
+        voiceGuest: dom.settingEdgeVoiceGuest.value || defaultsEdge.voiceGuest,
+      },
+    };
+  }
+
+  async function handleTestLlmConnection() {
+    dom.btnTestLlm.disabled = true;
+    setTestStatus(dom.llmTestStatus, 'loading', '正在探测模型接口…');
+    try {
+      const snapshot = readLlmFormSnapshot();
+      const data = await apiJson('/api/llm/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildCredsPayload(snapshot)),
+      });
+      setTestStatus(dom.llmTestStatus, 'ok', `连接成功 · ${data.model} · ${data.latencyMs}ms`);
+    } catch (err) {
+      setTestStatus(dom.llmTestStatus, 'error', err.message || '模型连接测试失败');
+    } finally {
+      dom.btnTestLlm.disabled = false;
+    }
+  }
+
+  async function handleTestTtsConnection() {
+    dom.btnTestTts.disabled = true;
+    setTestStatus(dom.ttsTestStatus, 'loading', '正在测试语音合成…');
+    try {
+      const snapshot = readTtsFormSnapshot();
+      const data = await apiJson('/api/tts/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tts: buildTtsPayload(snapshot, snapshot.provider) }),
+      });
+      if (data.provider === 'edge') {
+        setTestStatus(dom.ttsTestStatus, 'ok', data.message || 'Edge 免密钥已就绪');
+      } else {
+        const dur = Number.isFinite(data.duration) ? `${data.duration.toFixed(1)}s 音频 · ` : '';
+        setTestStatus(dom.ttsTestStatus, 'ok', `合成可用 · ${dur}${data.latencyMs}ms`);
+      }
+    } catch (err) {
+      setTestStatus(dom.ttsTestStatus, 'error', err.message || '语音连接测试失败');
+    } finally {
+      dom.btnTestTts.disabled = false;
+    }
+  }
+
+  function updateConfirmTtsBadge() {
+    if (!dom.confirmTtsBadge) return;
+    const providerId = resolveEffectiveTtsProviderId();
+    dom.confirmTtsBadge.textContent = `语音：${TTS_SHORT_LABELS[providerId] || providerId}`;
+  }
+
+  function updateApiKeyStatus() {
+    const configured = Boolean(state.apiKey && state.apiKey.trim());
+    const ttsId = resolveEffectiveTtsProviderId();
+    dom.apiKeyStatusDot.classList.toggle('is-configured', configured);
+    dom.btnSettings.title = `模型：${state.model || DEFAULT_MODEL}（${configured ? '本地 Key 已配置' : '留空将尝试服务端 .env'}）｜ 语音：${TTS_SHORT_LABELS[ttsId] || ttsId}`;
+    updateConfirmTtsBadge();
+  }
+
+  function resetSecretFieldVisibility(inputEl, btnEl) {
+    if (!inputEl || !btnEl) return;
+    inputEl.type = 'password';
+    btnEl.textContent = '显示';
+  }
+
+  function openSettingsModal(initialTab = 'llm') {
     dom.settingApiKey.value = state.apiKey;
     dom.settingBaseUrl.value = state.baseURL || DEFAULT_BASE_URL;
     dom.settingModel.value = state.model || DEFAULT_MODEL;
-    dom.settingApiKey.type = 'password';
-    dom.btnToggleKeyVisible.textContent = '显示';
+    updateLlmPresetSelection(detectLlmPresetId(dom.settingBaseUrl.value));
+    resetSecretFieldVisibility(dom.settingApiKey, dom.btnToggleKeyVisible);
+    setTestStatus(dom.llmTestStatus, '', '');
+
+    dom.settingMinimaxKey.value = state.ttsConfig.minimax.apiKey;
+    dom.settingMinimaxEndpoint.value = state.ttsConfig.minimax.endpoint;
+    resetSecretFieldVisibility(dom.settingMinimaxKey, dom.btnToggleMinimaxKey);
+
+    dom.settingVolcApiKey.value = state.ttsConfig.volcengine.apiKey;
+    dom.settingVolcAppId.value = state.ttsConfig.volcengine.appId;
+    dom.settingVolcAccessKey.value = state.ttsConfig.volcengine.accessKey;
+    dom.settingVolcEndpoint.value = state.ttsConfig.volcengine.endpoint;
+    resetSecretFieldVisibility(dom.settingVolcApiKey, dom.btnToggleVolcApiKey);
+    resetSecretFieldVisibility(dom.settingVolcAccessKey, dom.btnToggleVolcAccessKey);
+
+    hydrateTtsControlsFromCatalog();
+    selectVolcAuthModeInModal(state.ttsConfig.volcengine.authMode);
+    selectTtsProviderInModal(resolveEffectiveTtsProviderId());
+
     dom.settingsModal.classList.remove('hidden');
-    window.setTimeout(() => dom.settingApiKey.focus(), 40);
+    switchSettingsTab(initialTab === 'tts' ? 'tts' : 'llm', { immediateIndicator: true });
+    window.requestAnimationFrame(() => positionSettingsTabIndicator(true));
+    window.setTimeout(() => {
+      if (state.settingsTab === 'tts') {
+        if (state.modalTtsProvider === 'minimax') dom.settingMinimaxKey.focus();
+        else if (state.modalTtsProvider === 'volcengine') {
+          (state.modalVolcAuthMode === 'appIdAccessKey' ? dom.settingVolcAppId : dom.settingVolcApiKey).focus();
+        }
+      } else {
+        dom.settingApiKey.focus();
+      }
+    }, 40);
   }
 
   function closeSettingsModal() {
@@ -1141,17 +1808,31 @@
 
   function saveSettings(e) {
     e.preventDefault();
-    state.apiKey = dom.settingApiKey.value.trim();
-    state.baseURL = dom.settingBaseUrl.value.trim() || DEFAULT_BASE_URL;
-    state.model = dom.settingModel.value.trim() || DEFAULT_MODEL;
+    const llm = readLlmFormSnapshot();
+    const tts = readTtsFormSnapshot();
+
+    state.apiKey = llm.apiKey;
+    state.baseURL = llm.baseURL;
+    state.model = llm.model;
+    state.ttsConfig = tts;
 
     writeStorage(STORAGE_KEYS.apiKey, state.apiKey);
     writeStorage(STORAGE_KEYS.baseURL, state.baseURL);
     writeStorage(STORAGE_KEYS.model, state.model);
+    saveTtsConfigToStorage();
 
     updateApiKeyStatus();
     dom.settingsModal.classList.add('hidden');
-    showToast(state.apiKey ? '模型配置与 API Key 已保存' : '已保存（留空时将尝试服务端 .env 配置）');
+    showToast(`配置已保存 · 语音：${TTS_SHORT_LABELS[tts.provider] || tts.provider}`);
+  }
+
+  function bindPasswordToggle(inputEl, btnEl) {
+    if (!inputEl || !btnEl) return;
+    btnEl.addEventListener('click', () => {
+      const hidden = inputEl.type === 'password';
+      inputEl.type = hidden ? 'text' : 'password';
+      btnEl.textContent = hidden ? '隐藏' : '显示';
+    });
   }
 
   function bindEvents() {
@@ -1294,7 +1975,7 @@
       if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.speaker = 'none';
     });
 
-    dom.btnSettings.addEventListener('click', openSettingsModal);
+    dom.btnSettings.addEventListener('click', () => openSettingsModal('llm'));
     dom.btnCloseSettings.addEventListener('click', closeSettingsModal);
     dom.btnCancelSettings.addEventListener('click', closeSettingsModal);
     dom.settingsForm.addEventListener('submit', saveSettings);
@@ -1307,11 +1988,60 @@
       }
     });
 
-    dom.btnToggleKeyVisible.addEventListener('click', () => {
-      const hidden = dom.settingApiKey.type === 'password';
-      dom.settingApiKey.type = hidden ? 'text' : 'password';
-      dom.btnToggleKeyVisible.textContent = hidden ? '隐藏' : '显示';
+    dom.settingsTabLlm.addEventListener('click', () => switchSettingsTab('llm'));
+    dom.settingsTabTts.addEventListener('click', () => switchSettingsTab('tts'));
+    window.addEventListener('resize', () => {
+      if (!dom.settingsModal.classList.contains('hidden')) {
+        positionSettingsTabIndicator(true);
+      }
     });
+
+    dom.llmPresetPills.forEach((pill) => {
+      pill.addEventListener('click', () => applyLlmPreset(pill.dataset.llmPreset));
+    });
+    dom.settingBaseUrl.addEventListener('input', () => {
+      updateLlmPresetSelection(detectLlmPresetId(dom.settingBaseUrl.value));
+      setTestStatus(dom.llmTestStatus, '', '');
+    });
+    dom.settingModel.addEventListener('input', () => setTestStatus(dom.llmTestStatus, '', ''));
+    dom.btnTestLlm.addEventListener('click', handleTestLlmConnection);
+
+    dom.ttsProviderButtons.forEach((btn) => {
+      btn.addEventListener('click', () => selectTtsProviderInModal(btn.dataset.ttsProvider));
+    });
+    dom.volcAuthButtons.forEach((btn) => {
+      btn.addEventListener('click', () => selectVolcAuthModeInModal(btn.dataset.volcAuth));
+    });
+    dom.settingVolcResource.addEventListener('change', () => {
+      renderVolcVoicesForResource(
+        dom.settingVolcResource.value,
+        dom.settingVolcVoiceHost.value,
+        dom.settingVolcVoiceGuest.value
+      );
+      setTestStatus(dom.ttsTestStatus, '', '');
+    });
+    dom.btnTestTts.addEventListener('click', handleTestTtsConnection);
+
+    bindPasswordToggle(dom.settingApiKey, dom.btnToggleKeyVisible);
+    bindPasswordToggle(dom.settingMinimaxKey, dom.btnToggleMinimaxKey);
+    bindPasswordToggle(dom.settingVolcApiKey, dom.btnToggleVolcApiKey);
+    bindPasswordToggle(dom.settingVolcAccessKey, dom.btnToggleVolcAccessKey);
+  }
+
+  async function loadTtsProviders() {
+    try {
+      const data = await apiJson('/api/tts/providers');
+      if (Array.isArray(data?.items) && data.items.length > 0) {
+        state.ttsCatalog = {
+          defaultProvider: data.defaultProvider || 'edge',
+          items: data.items,
+        };
+      }
+    } catch {
+      state.ttsCatalog = FALLBACK_TTS_CATALOG;
+    }
+    hydrateTtsControlsFromCatalog();
+    updateApiKeyStatus();
   }
 
   async function restoreActiveTaskIfAny() {
@@ -1337,12 +2067,13 @@
 
   async function bootstrap() {
     initWaveformBars();
+    hydrateTtsControlsFromCatalog();
     updateApiKeyStatus();
     updateTextCounter();
     bindEvents();
     positionTabIndicator(true);
 
-    await loadHistoryList();
+    await Promise.all([loadTtsProviders(), loadHistoryList()]);
     await restoreActiveTaskIfAny();
 
     if (!state.currentPodcast && state.historyItems.length > 0) {

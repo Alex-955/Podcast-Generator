@@ -37,7 +37,7 @@
             <circle cx="9" cy="7" r="2.5" fill="var(--bg-canvas)"></circle>
             <circle cx="15" cy="17" r="2.5" fill="var(--bg-canvas)"></circle>
           </svg>
-          <span>模型设置</span>
+          <span>模型与语音</span>
           <span id="apiKeyStatusDot" class="status-dot" aria-hidden="true"></span>
         </button>
       </div>
@@ -122,6 +122,7 @@
             <div class="confirm-badges">
               <span id="confirmSourceBadge" class="meta-pill">链接解析</span>
               <span id="confirmCharBadge" class="meta-pill is-num">0 字</span>
+              <span id="confirmTtsBadge" class="meta-pill">语音：Edge 免费</span>
               <span id="confirmTruncatedBadge" class="meta-pill is-warn hidden">已截取前 1.2 万字</span>
             </div>
             <h2 id="confirmTitle" class="confirm-title">未命名文章</h2>
@@ -365,13 +366,13 @@
       </section>
     </main>
 
-    <!-- API 设置弹窗 -->
+    <!-- 模型与语音设置弹窗 -->
     <div id="settingsModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
       <div class="modal-sheet">
         <div class="modal-head">
           <div>
-            <h2 id="settingsModalTitle" class="modal-title">模型与接口设置</h2>
-            <p class="modal-subtitle">支持 DeepSeek 及 OpenAI 兼容接口</p>
+            <h2 id="settingsModalTitle" class="modal-title">模型与语音设置</h2>
+            <p class="modal-subtitle">剧本模型（OpenAI 兼容）与双人语音合成配置</p>
           </div>
           <button type="button" id="btnCloseSettings" class="btn-icon-quiet" aria-label="关闭设置弹窗">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
@@ -381,24 +382,201 @@
           </button>
         </div>
 
-        <form id="settingsForm" class="modal-body" novalidate>
-          <div class="form-field">
-            <label for="settingApiKey" class="form-label">API Key</label>
-            <div class="password-wrap">
-              <input type="password" id="settingApiKey" class="field-input" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off" spellcheck="false">
-              <button type="button" id="btnToggleKeyVisible" class="btn-reveal" aria-label="显示或隐藏 API Key">显示</button>
+        <div class="modal-tabs-bar">
+          <div class="segmented modal-segmented" role="tablist" aria-label="设置分类">
+            <div id="settingsTabIndicator" class="segmented-indicator" aria-hidden="true"></div>
+            <button type="button" id="settingsTabLlm" class="segmented-btn is-active" role="tab" aria-selected="true" aria-controls="settingsPanelLlm" data-settings-tab="llm">
+              剧本模型
+            </button>
+            <button type="button" id="settingsTabTts" class="segmented-btn" role="tab" aria-selected="false" aria-controls="settingsPanelTts" data-settings-tab="tts">
+              语音合成
+            </button>
+          </div>
+        </div>
+
+        <form id="settingsForm" class="modal-form" novalidate>
+          <div class="modal-scroll">
+            <!-- Tab 1：剧本模型 -->
+            <div id="settingsPanelLlm" class="settings-panel is-active" role="tabpanel" aria-labelledby="settingsTabLlm">
+              <div class="form-field">
+                <span class="form-label">厂商快捷预设</span>
+                <div class="preset-strip" id="llmPresetStrip" role="group" aria-label="大模型厂商快捷预设">
+                  <button type="button" class="preset-pill is-active" data-llm-preset="deepseek">DeepSeek · 推荐</button>
+                  <button type="button" class="preset-pill" data-llm-preset="kimi">Kimi</button>
+                  <button type="button" class="preset-pill" data-llm-preset="doubao">豆包</button>
+                  <button type="button" class="preset-pill" data-llm-preset="qwen">通义千问</button>
+                  <button type="button" class="preset-pill" data-llm-preset="mimo">小米 MiMo</button>
+                  <button type="button" class="preset-pill" data-llm-preset="siliconflow">硅基流动</button>
+                  <button type="button" class="preset-pill" data-llm-preset="custom">自定义</button>
+                </div>
+                <p id="llmPresetHint" class="provider-guide">性价比与中文播客口语感兼顾（推荐）。前往 DeepSeek 开放平台（platform.deepseek.com）创建 API Key。</p>
+              </div>
+
+              <div class="form-field">
+                <label for="settingApiKey" class="form-label">API Key</label>
+                <div class="password-wrap">
+                  <input type="password" id="settingApiKey" class="field-input" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off" spellcheck="false">
+                  <button type="button" id="btnToggleKeyVisible" class="btn-reveal" aria-label="显示或隐藏 API Key">显示</button>
+                </div>
+                <p class="form-help">仅存于本机浏览器，绝不写入任务记录；留空将使用服务端 .env 配置。</p>
+              </div>
+
+              <div class="form-field">
+                <label for="settingBaseUrl" class="form-label">API Base URL</label>
+                <input type="url" id="settingBaseUrl" class="field-input" value="https://api.deepseek.com" placeholder="https://api.deepseek.com" spellcheck="false">
+              </div>
+
+              <div class="form-field">
+                <label for="settingModel" class="form-label">模型名称</label>
+                <input type="text" id="settingModel" class="field-input" value="deepseek-flash" placeholder="deepseek-chat" spellcheck="false">
+              </div>
+
+              <div class="test-action-row">
+                <button type="button" id="btnTestLlm" class="btn btn-subtle btn-sm">测试模型连接</button>
+                <span id="llmTestStatus" class="test-status" aria-live="polite"></span>
+              </div>
             </div>
-            <p class="form-help">仅存于本机浏览器，绝不写入任务记录；留空将使用服务端 .env 配置。</p>
-          </div>
 
-          <div class="form-field">
-            <label for="settingBaseUrl" class="form-label">API Base URL</label>
-            <input type="url" id="settingBaseUrl" class="field-input" value="https://api.deepseek.com" placeholder="https://api.deepseek.com" spellcheck="false">
-          </div>
+            <!-- Tab 2：语音合成 -->
+            <div id="settingsPanelTts" class="settings-panel hidden" role="tabpanel" aria-labelledby="settingsTabTts">
+              <div class="form-field">
+                <span class="form-label">语音合成服务商</span>
+                <div class="provider-switcher" role="radiogroup" aria-label="语音合成服务商">
+                  <button type="button" class="provider-option is-active" data-tts-provider="minimax" role="radio" aria-checked="true">
+                    <span class="provider-name">MiniMax Speech</span>
+                    <span class="provider-tag">拟真推荐</span>
+                  </button>
+                  <button type="button" class="provider-option" data-tts-provider="volcengine" role="radio" aria-checked="false">
+                    <span class="provider-name">火山 · 豆包</span>
+                    <span class="provider-tag">妙听同款</span>
+                  </button>
+                  <button type="button" class="provider-option" data-tts-provider="edge" role="radio" aria-checked="false">
+                    <span class="provider-name">Edge 免费</span>
+                    <span class="provider-tag">免密钥试用</span>
+                  </button>
+                </div>
+              </div>
 
-          <div class="form-field">
-            <label for="settingModel" class="form-label">模型名称</label>
-            <input type="text" id="settingModel" class="field-input" value="deepseek-flash" placeholder="deepseek-flash" spellcheck="false">
+              <!-- MiniMax Speech -->
+              <div id="ttsFieldsMinimax" class="tts-provider-fields">
+                <div class="form-field">
+                  <label for="settingMinimaxKey" class="form-label">MiniMax API Key</label>
+                  <div class="password-wrap">
+                    <input type="password" id="settingMinimaxKey" class="field-input" placeholder="填入 MiniMax 开放平台 API Key" autocomplete="off" spellcheck="false">
+                    <button type="button" id="btnToggleMinimaxKey" class="btn-reveal" aria-label="显示或隐藏 MiniMax API Key">显示</button>
+                  </div>
+                  <p id="minimaxServerHint" class="form-help is-server-ready hidden">服务端 .env 已配置兜底 Key，留空亦可直接使用官方地址生成。</p>
+                </div>
+
+                <div class="form-field">
+                  <label for="settingMinimaxModel" class="form-label">合成模型</label>
+                  <select id="settingMinimaxModel" class="field-select"></select>
+                </div>
+
+                <div class="field-row-2">
+                  <div class="form-field">
+                    <label for="settingMinimaxVoiceHost" class="form-label">阿泽（主持音色）</label>
+                    <select id="settingMinimaxVoiceHost" class="field-select"></select>
+                  </div>
+                  <div class="form-field">
+                    <label for="settingMinimaxVoiceGuest" class="form-label">小晓（嘉宾音色）</label>
+                    <select id="settingMinimaxVoiceGuest" class="field-select"></select>
+                  </div>
+                </div>
+
+                <details class="advanced-disclosure">
+                  <summary>高级选项 · 自定义接口地址（可选）</summary>
+                  <div class="form-field advanced-field">
+                    <label for="settingMinimaxEndpoint" class="form-label">MiniMax Endpoint</label>
+                    <input type="url" id="settingMinimaxEndpoint" class="field-input" placeholder="https://api.minimaxi.com/v1/t2a_v2" spellcheck="false">
+                    <p class="form-help">国内版官方地址已默认内置；填写自定义地址时须同时填写上方 API Key。</p>
+                  </div>
+                </details>
+              </div>
+
+              <!-- 火山引擎 · 豆包 -->
+              <div id="ttsFieldsVolcengine" class="tts-provider-fields hidden">
+                <div class="form-field">
+                  <div class="label-with-toggle">
+                    <span class="form-label">鉴权方式</span>
+                    <div class="auth-mode-switch" role="group" aria-label="火山引擎鉴权方式">
+                      <button type="button" class="auth-mode-btn is-active" data-volc-auth="apiKey">单 API Key（推荐）</button>
+                      <button type="button" class="auth-mode-btn" data-volc-auth="appIdAccessKey">AppID + Access Key</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="volcAuthApiKeyGroup" class="form-field">
+                  <label for="settingVolcApiKey" class="form-label">火山语音 API Key</label>
+                  <div class="password-wrap">
+                    <input type="password" id="settingVolcApiKey" class="field-input" placeholder="填入火山引擎控制台语音 API Key" autocomplete="off" spellcheck="false">
+                    <button type="button" id="btnToggleVolcApiKey" class="btn-reveal" aria-label="显示或隐藏火山语音 API Key">显示</button>
+                  </div>
+                </div>
+
+                <div id="volcAuthAppGroup" class="field-row-2 hidden">
+                  <div class="form-field">
+                    <label for="settingVolcAppId" class="form-label">AppID</label>
+                    <input type="text" id="settingVolcAppId" class="field-input" placeholder="应用 AppID" autocomplete="off" spellcheck="false">
+                  </div>
+                  <div class="form-field">
+                    <label for="settingVolcAccessKey" class="form-label">Access Key</label>
+                    <div class="password-wrap">
+                      <input type="password" id="settingVolcAccessKey" class="field-input" placeholder="Access Token" autocomplete="off" spellcheck="false">
+                      <button type="button" id="btnToggleVolcAccessKey" class="btn-reveal" aria-label="显示或隐藏 Access Key">显示</button>
+                    </div>
+                  </div>
+                </div>
+
+                <p id="volcServerHint" class="form-help is-server-ready hidden">服务端 .env 已配置兜底凭据，留空亦可直接使用官方地址生成。</p>
+
+                <div class="form-field">
+                  <label for="settingVolcResource" class="form-label">语音资源版本（Resource ID）</label>
+                  <select id="settingVolcResource" class="field-select"></select>
+                </div>
+
+                <div class="field-row-2">
+                  <div class="form-field">
+                    <label for="settingVolcVoiceHost" class="form-label">阿泽（主持音色）</label>
+                    <select id="settingVolcVoiceHost" class="field-select"></select>
+                  </div>
+                  <div class="form-field">
+                    <label for="settingVolcVoiceGuest" class="form-label">小晓（嘉宾音色）</label>
+                    <select id="settingVolcVoiceGuest" class="field-select"></select>
+                  </div>
+                </div>
+
+                <details class="advanced-disclosure">
+                  <summary>高级选项 · 自定义接口地址（可选）</summary>
+                  <div class="form-field advanced-field">
+                    <label for="settingVolcEndpoint" class="form-label">火山引擎 Endpoint</label>
+                    <input type="url" id="settingVolcEndpoint" class="field-input" placeholder="https://openspeech.bytedance.com/api/v3/tts/unidirectional" spellcheck="false">
+                    <p class="form-help">填写自定义地址时须同时填写上方火山凭据；2.0 与 1.0 音色会自动按资源版本筛选匹配。</p>
+                  </div>
+                </details>
+              </div>
+
+              <!-- Edge 免费 -->
+              <div id="ttsFieldsEdge" class="tts-provider-fields hidden">
+                <div class="field-row-2">
+                  <div class="form-field">
+                    <label for="settingEdgeVoiceHost" class="form-label">阿泽（主持音色）</label>
+                    <select id="settingEdgeVoiceHost" class="field-select"></select>
+                  </div>
+                  <div class="form-field">
+                    <label for="settingEdgeVoiceGuest" class="form-label">小晓（嘉宾音色）</label>
+                    <select id="settingEdgeVoiceGuest" class="field-select"></select>
+                  </div>
+                </div>
+              </div>
+
+              <p id="ttsProviderGuide" class="provider-guide"></p>
+
+              <div class="test-action-row">
+                <button type="button" id="btnTestTts" class="btn btn-subtle btn-sm">测试语音合成</button>
+                <span id="ttsTestStatus" class="test-status" aria-live="polite"></span>
+              </div>
+            </div>
           </div>
 
           <div class="modal-foot">

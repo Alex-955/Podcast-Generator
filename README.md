@@ -16,8 +16,13 @@
   - 提交任务后立刻返回任务 ID，前端按阶段推进展示：`1. 抓取正文` → `2. 剧本重构` → `3. 语音合成` → `4. 音频拼接`；
   - 配音阶段实时展示已完成句数、缓存命中数与当前说话人，不伪造百分比；
   - 运行中可随时取消，真正中断底层 HTTP 请求与 TTS WebSocket 连接。
+- **多厂商剧本模型与多语音合成服务商**
+  - 右上角 **「模型与语音」** 弹窗提供两页配置，全部凭据仅存在浏览器 `localStorage`，绝不写入任务记录或成品 JSON：
+    - **剧本模型**：内置 DeepSeek（推荐）、Kimi、豆包（火山方舟）、通义千问、小米 MiMo、硅基流动与自定义 OpenAI 兼容快捷预设，自动填充 Base URL 与推荐模型并附获取指引，支持 **「测试模型连接」** 实时探活；
+    - **语音合成**：支持 **MiniMax Speech**、**火山引擎（豆包语音 V3）**（单 API Key 或 AppID + Access Key，自动筛选 1.0/2.0 兼容音色）与免费 **Microsoft Edge** 一键切换，支持 **「测试语音合成」** 在线合成试听校验；
+  - 切换服务商或音色后从断点续跑时，自动清理旧片段但保留已生成剧本。
 - **单句 MP3 缓存与断点续跑**
-  - 按 `(provider, model, voice, rate, pitch, text)` 内容寻址缓存单句有效 MP3（`data/tts-cache/`）；
+  - 按服务端点、鉴权指纹、model、voiceMapping、语速与文本摘要隔离缓存单句有效 MP3（`data/tts-cache/`）；
   - 合成中断或服务重启导致任务中断时，点击「从断点继续生成」可跳过已落盘剧本与已合成有效单句音频。
 - **纯音质放音台与本地历史找回**
   - 双主播活跃声纹指示、兼容 `0.36s` 句间静音的同步高亮字幕、点击或 `Enter` / `Space` 跳转对应句；
@@ -35,7 +40,7 @@ npm install
 npm start
 ```
 
-服务默认监听 `http://127.0.0.1:3000`。打开浏览器后，可在右上角 **「模型设置」** 中填入 API Key（仅存在当前浏览器 `localStorage`，不会写入服务端任务或成品 JSON），或通过服务端 `.env` 提供默认 Key。
+服务默认监听 `http://127.0.0.1:3000`。打开浏览器后，可在右上角 **「模型与语音」** 中选择大模型快捷预设与语音服务商并填入 API Key（仅存在当前浏览器 `localStorage`，不会写入服务端任务或成品 JSON），或通过服务端 `.env` 提供默认 Key。
 
 > 若不习惯使用终端，可在 macOS 运行一次 `bash scripts/build-mac-launcher.sh` 生成 **`启动 AI 妙听.app`**，以后在访达或程序坞直接双击即可在后台启动服务并弹出浏览器（再次双击可一键重启或停止服务）。`npm start` 与 `npm run dev` 默认启用了 `--use-bundled-ca`，避免部分 macOS Homebrew Node 环境因缺少 OpenSSL `cert.pem` 导致 HTTPS 证书校验失败，同时保留完整证书校验并兼容 `NODE_EXTRA_CA_CERTS`。
 
@@ -74,18 +79,28 @@ HOST=0.0.0.0 npm start
 | `DEEPSEEK_API_KEY` | 空 | 服务端默认兜底 API Key（仅当浏览器设置留空且未改接口地址时生效） |
 | `LLM_BASE_URL` | `https://api.deepseek.com` | 剧本模型 OpenAI 兼容接口地址 |
 | `LLM_MODEL` | `deepseek-flash` | 默认剧本生成模型名称 |
+| `TTS_PROVIDER` | `edge` | 默认语音合成服务商，可选 `minimax`、`volcengine`、`edge` |
+| `MINIMAX_API_KEY` | 空 | 服务端默认 MiniMax Speech API Key |
+| `MINIMAX_TTS_MODEL` | `speech-02-hd` | 默认 MiniMax 语音合成模型 |
+| `MINIMAX_TTS_ENDPOINT` | `https://api.minimaxi.com/v1/t2a_v2` | MiniMax Speech 合成接口地址 |
+| `VOLCENGINE_TTS_API_KEY` | 空 | 服务端默认火山引擎豆包语音单 API Key（`X-Api-Key`） |
+| `VOLCENGINE_TTS_APP_ID` | 空 | 火山引擎旧版双字段鉴权 AppID（未配 `VOLCENGINE_TTS_API_KEY` 时生效） |
+| `VOLCENGINE_TTS_ACCESS_KEY` | 空 | 火山引擎旧版双字段鉴权 Access Key |
+| `VOLCENGINE_TTS_RESOURCE_ID` | `seed-tts-2.0` | 默认火山引擎语音资源版本（`seed-tts-2.0` 或 `seed-tts-1.0`） |
+| `VOLCENGINE_TTS_ENDPOINT` | `https://openspeech.bytedance.com/api/v3/tts/unidirectional` | 火山引擎豆包 V3 单向流式接口地址 |
+| `ALLOW_PRIVATE_TTS_ENDPOINT` | 未开启 | 默认拒绝连接内网/本机语音接口；设为 `1` 可放开局域网 TTS 调试端点 |
 | `ALLOW_INSECURE_TLS` | 未开启 | 仅限本地代理调试；设为 `1` 时跳过 TLS 证书校验（默认 `--use-bundled-ca` 已兼顾完整性，常规企业代理 CA 请优先用 `NODE_EXTRA_CA_CERTS`） |
 | `NODE_EXTRA_CA_CERTS` | 未设置 | Node 标准选项：指定额外受信 CA 根证书文件路径 |
-| `ALLOW_PRIVATE_FETCH` | 未开启 | 默认拒绝抓取本机及内网地址；设为 `1` 可放开本地源抓取 |
+| `ALLOW_PRIVATE_FETCH` | 未开启 | 默认拒绝抓取本机及内网地址；设为 `1` 可放开本地源抓取（不影响 TTS 私网策略） |
 | `CORS_ORIGIN` | 未开启 | 默认同源访问；需跨域调用时可填逗号分隔的来源白名单 |
 
 ---
 
 ## 已知限制与扩展说明
 
-1. **配音服务定位**：默认内建的微软 Edge-TTS（`zh-CN-YunxiNeural` 与 `zh-CN-XiaoxiaoNeural`）属于免费非官方接口，仅适合个人试用与轻量测试，不承诺高并发 SLA。
+1. **配音服务定位**：默认内置 **MiniMax Speech**（拟真度高）、**火山引擎（豆包语音 V3，OPPO AI 妙听同款体系）** 与免费 **Microsoft Edge-TTS**（`edge` 属免费非官方接口，偶发 403 限流，建议仅作快速试用）。
 2. **正文截断上限**：为控制生成稳定性与成本，单次导入正文上限为 `12,000` 字（超出部分按确定性截取前 1.2 万字，标题上限 `200` 字）。
 3. **字幕同步时间轴**：字幕高亮基于纯 Node 解析的 MP3 帧计数与固定 `0.36s` 句间静音间隔计算，非逐字级 ASR 对齐。
 4. **公众号反爬验证**：微信公众号链接偶发返回「环境异常」或「操作频繁」提示时，可点击提示条中的 **「切换到直接贴正文」** 直接粘贴原文继续生成。
-5. **抓取安全基线**：抓取器在初始请求和每次重定向（最多 5 跳）时都会阻断本机、内网与链路本地地址，但未覆盖解析后的 DNS 重绑定（DNS rebinding）复检。
-6. **接入商业 TTS Provider**：如需替换为付费语音服务（如 CosyVoice、MiniMax、火山语音等），可在 [ttsProvider.js](src/services/ttsProvider.js) 中按 `{ id, model, defaultVoices, availableVoices, synthesizeToFile }` 契约注册新 Provider。
+5. **网络安全基线**：TTS 端点与连接探测均执行 DNS 解析后 IP 校验与重定向拦截（仅当服务端显式开启 `ALLOW_PRIVATE_TTS_ENDPOINT=1` 才放开内网地址）；文章抓取器默认阻断本机/内网地址。
+6. **后续客户端规划**：详见 [ROADMAP.md](ROADMAP.md)。
