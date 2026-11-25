@@ -8,11 +8,18 @@ const express = require('express');
 const cors = require('cors');
 const path = require('node:path');
 const { extractArticle } = require('./src/services/extractor');
+const { extractTextFromImages } = require('./src/services/imageExtractor');
+const { fetchLlmModels } = require('./src/services/llmModels');
+const { polishArticleText } = require('./src/services/textPolisher');
 const { createTaskManager } = require('./src/services/taskManager');
-const { InputError, redactSecrets } = require('./src/services/validation');
+const { InputError, redactSecrets, ttsSecrets } = require('./src/services/validation');
+
+const { getPublicTtsProviders, resolveDefaultProviderId } = require('./src/services/ttsProvider');
+
+const { testLlmConnection, testTtsConnection } = require('./src/services/connectionTests');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const FRONTEND_FILES = new Set(['/index.html', '/style.css', '/app.js', '/inputSource.js']);
+const FRONTEND_FILES = new Set(['/index.html', '/style.css', '/app.js', '/inputSource.js', '/audioEngine.js']);
 
 function parsePort(value) {
   const text = value?.trim();
@@ -37,8 +44,34 @@ function createApp(options = {}) {
     app.use(cors({ origin: origins, preflightContinue: true }));
     app.options(/^\/api\//, (req, res) => res.sendStatus(204));
   }
+  const cancelOnDisconnect = handler => async (req, res) => {
+    if (res.destroyed) return;
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    res.once('close', cancel);
+    try {
+      const data = await handler(req.body || {}, { ...options, signal: controller.signal });
+      if (!controller.signal.aborted) res.json({ success: true, data });
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+    } finally {
+      res.removeListener('close', cancel);
+    }
+  };
+  app.post('/api/extract-image', express.json({ limit: '25mb' }), cancelOnDisconnect(extractTextFromImages));
   app.use('/api', express.json({ limit: '10mb' }));
 
+  app.post('/api/llm/test', async (req, res) => {
+    res.json({ success: true, data: await testLlmConnection(req.body || {}, options) });
+  });
+  app.post('/api/llm/models', cancelOnDisconnect(fetchLlmModels));
+  app.post('/api/polish-text', cancelOnDisconnect(polishArticleText));
+  app.post('/api/tts/test', async (req, res) => {
+    res.json({ success: true, data: await testTtsConnection(req.body || {}, options) });
+  });
+  app.get('/api/tts/providers', (req, res) => res.json({
+    success: true, data: { items: getPublicTtsProviders(), defaultProvider: resolveDefaultProviderId() },
+  }));
   app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
   app.post('/api/extract-article', async (req, res) => {
     const { url, rawText } = req.body || {};
@@ -74,7 +107,9 @@ function createApp(options = {}) {
     let detail = err.message;
     if (status === 500 || err.path) detail = '本地服务未能完成请求';
     if (err.type === 'entity.parse.failed') detail = '请求体必须是有效 JSON';
-    const sensitive = [req.body?.apiKey, req.body?.baseURL, process.env.DEEPSEEK_API_KEY, dataDir, podcastsDir];
+    const sensitive = [req.body?.apiKey, req.body?.baseURL, process.env.DEEPSEEK_API_KEY, process.env.LLM_BASE_URL,
+      req.body?.visionApiKey, req.body?.visionBaseURL, process.env.VISION_API_KEY, process.env.VISION_BASE_URL,
+      ...ttsSecrets(req.body?.tts ?? {}), dataDir, podcastsDir];
     const error = redactSecrets(detail, sensitive);
     const code = typeof err.code === 'string' ? redactSecrets(err.code, sensitive) : undefined;
     res.status(status).json({ success: false, error, code });

@@ -29,8 +29,9 @@ const FAST_TIMEOUTS = {
   taskTimeoutMs: 3000,
 };
 
-function tmpTarget() {
+function tmpTarget(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'edge-tts-adapter-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return path.join(dir, 'sentence_000.mp3');
 }
 
@@ -43,10 +44,10 @@ function makeAdapter(endpoint, overrides = {}) {
   });
 }
 
-test('ok：完整音频原子发布且时长按帧计数精确', async () => {
+test('ok：完整音频原子发布且时长按帧计数精确', async t => {
   const payload = makeMp3(50); // 50 帧 × 0.024s = 1.2s
   const fake = await startFakeEdgeTts({ mode: 'ok', payload });
-  const target = tmpTarget();
+  const target = tmpTarget(t);
   try {
     const result = await makeAdapter(fake.endpoint).synthesizeToFile('测试句子', target);
     assert.strictEqual(result.filePath, target);
@@ -59,9 +60,9 @@ test('ok：完整音频原子发布且时长按帧计数精确', async () => {
   }
 });
 
-test('no-data：first-data 超时快速失败且不留下产物', async () => {
+test('no-data：first-data 超时快速失败且不留下产物', async t => {
   const fake = await startFakeEdgeTts({ mode: 'no-data', payload: makeMp3(10) });
-  const target = tmpTarget();
+  const target = tmpTarget(t);
   try {
     await assert.rejects(
       () => makeAdapter(fake.endpoint).synthesizeToFile('测试句子', target),
@@ -73,9 +74,9 @@ test('no-data：first-data 超时快速失败且不留下产物', async () => {
   }
 });
 
-test('stall-mid：流中途停顿触发 idle 超时', async () => {
+test('stall-mid：流中途停顿触发 idle 超时', async t => {
   const fake = await startFakeEdgeTts({ mode: 'stall-mid', payload: makeMp3(50) });
-  const target = tmpTarget();
+  const target = tmpTarget(t);
   try {
     await assert.rejects(
       () => makeAdapter(fake.endpoint).synthesizeToFile('测试句子', target),
@@ -87,12 +88,12 @@ test('stall-mid：流中途停顿触发 idle 超时', async () => {
   }
 });
 
-test('late：首包晚于 first-data 阈值即拒绝；阈值内可成功', async () => {
+test('late：首包晚于 first-data 阈值即拒绝；阈值内可成功', async t => {
   const payload = makeMp3(10);
   const slow = await startFakeEdgeTts({ mode: 'late', payload, delayMs: 600 });
   try {
     await assert.rejects(
-      () => makeAdapter(slow.endpoint).synthesizeToFile('测试句子', tmpTarget()),
+      () => makeAdapter(slow.endpoint).synthesizeToFile('测试句子', tmpTarget(t)),
       (e) => e instanceof TtsTimeoutError && e.phase === 'first-data'
     );
   } finally {
@@ -100,7 +101,7 @@ test('late：首包晚于 first-data 阈值即拒绝；阈值内可成功', asyn
   }
 
   const ok = await startFakeEdgeTts({ mode: 'late', payload, delayMs: 30 });
-  const target = tmpTarget();
+  const target = tmpTarget(t);
   try {
     const result = await makeAdapter(ok.endpoint).synthesizeToFile('测试句子', target);
     assert.strictEqual(result.bytes, payload.length);
@@ -109,9 +110,9 @@ test('late：首包晚于 first-data 阈值即拒绝；阈值内可成功', asyn
   }
 });
 
-test('task：整项总超时覆盖连接在内的全生命周期', async () => {
+test('task：整项总超时覆盖连接在内的全生命周期', async t => {
   const fake = await startFakeEdgeTts({ mode: 'no-data', payload: makeMp3(10) });
-  const target = tmpTarget();
+  const target = tmpTarget(t);
   try {
     await assert.rejects(
       () => makeAdapter(fake.endpoint, { taskTimeoutMs: 120, firstDataTimeoutMs: 5000 }).synthesizeToFile('测试', target),
@@ -122,9 +123,9 @@ test('task：整项总超时覆盖连接在内的全生命周期', async () => {
   }
 });
 
-test('garbage：产物不是有效 MP3 时拒绝发布', async () => {
+test('garbage：产物不是有效 MP3 时拒绝发布', async t => {
   const fake = await startFakeEdgeTts({ mode: 'garbage', payload: makeMp3(10) });
-  const target = tmpTarget();
+  const target = tmpTarget(t);
   try {
     await assert.rejects(
       () => makeAdapter(fake.endpoint).synthesizeToFile('测试句子', target),
@@ -136,9 +137,9 @@ test('garbage：产物不是有效 MP3 时拒绝发布', async () => {
   }
 });
 
-test('no-separator：协议缺分隔符报协议错误', async () => {
+test('no-separator：协议缺分隔符报协议错误', async t => {
   const fake = await startFakeEdgeTts({ mode: 'no-separator', payload: makeMp3(10) });
-  const target = tmpTarget();
+  const target = tmpTarget(t);
   try {
     await assert.rejects(
       () => makeAdapter(fake.endpoint).synthesizeToFile('测试句子', target),
@@ -149,9 +150,9 @@ test('no-separator：协议缺分隔符报协议错误', async () => {
   }
 });
 
-test('close-early：连接提前关闭报音频不完整', async () => {
+test('close-early：连接提前关闭报音频不完整', async t => {
   const fake = await startFakeEdgeTts({ mode: 'close-early', payload: makeMp3(10) });
-  const target = tmpTarget();
+  const target = tmpTarget(t);
   try {
     await assert.rejects(
       () => makeAdapter(fake.endpoint).synthesizeToFile('测试句子', target),
@@ -162,7 +163,7 @@ test('close-early：连接提前关闭报音频不完整', async () => {
   }
 });
 
-test('synthesizeSentence：前两次失败第三次成功（限次重试）', async () => {
+test('synthesizeSentence：前两次失败第三次成功（限次重试）', async t => {
   const payload = makeMp3(10);
   const fake = await startFakeEdgeTts({
     mode: 'ok',
@@ -171,7 +172,7 @@ test('synthesizeSentence：前两次失败第三次成功（限次重试）', as
       conn.mode = conn.index < 2 ? 'close-early' : 'ok';
     },
   });
-  const target = tmpTarget();
+  const target = tmpTarget(t);
   try {
     const result = await synthesizeSentence({
       text: '重试测试',
@@ -186,9 +187,9 @@ test('synthesizeSentence：前两次失败第三次成功（限次重试）', as
   }
 });
 
-test('synthesizeSentence：连续失败最多尝试 3 次并报 502', async () => {
+test('synthesizeSentence：连续失败最多尝试 3 次并报 502', async t => {
   const fake = await startFakeEdgeTts({ mode: 'close-early', payload: makeMp3(10) });
-  const target = tmpTarget();
+  const target = tmpTarget(t);
   try {
     await assert.rejects(
       () =>

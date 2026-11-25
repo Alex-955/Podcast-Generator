@@ -6,10 +6,13 @@ const { DEFAULT_VOICES, AVAILABLE_VOICES, AVAILABLE_VOICE_IDS, getTtsProvider } 
 const { buildCacheKey } = require('./ttsCache');
 const {
   analyzeMp3,
+  compatibleFrameFormat,
   computeGap,
   isValidMp3,
   SENTENCE_GAP_SECONDS,
 } = require('./mp3Utils');
+
+const { InputError } = require('./validation');
 
 const MAX_SYNTHESIS_ATTEMPTS = 3;
 
@@ -38,10 +41,14 @@ async function synthesizeSentence({
   outputPath,
   rate = '+0%',
   pitch = '+0Hz',
+  emotion,
   adapterOptions = {},
   provider = getTtsProvider(),
   signal,
   onAttempt,
+  onRetry,
+  rateLimitMaxAttempts = 6,
+  rateLimitBackoffMs = [2500, 5000, 9000, 14000, 20000],
 }) {
   checkCancellation(signal);
   if (typeof text !== 'string' || !text.trim()) {
@@ -49,11 +56,18 @@ async function synthesizeSentence({
   }
 
   let lastError = null;
-  for (let attempt = 1; attempt <= MAX_SYNTHESIS_ATTEMPTS; attempt += 1) {
+  let maxAttempts = MAX_SYNTHESIS_ATTEMPTS;
+  let rateLimitHits = 0;
+  let normalHits = 0;
+  let attempt = 0;
+  while (attempt < maxAttempts) {
+    attempt++;
     onAttempt?.(attempt);
     checkCancellation(signal);
     try {
-      const { bytes, duration } = await provider.synthesizeToFile({ text, voice, outputPath, rate, pitch, signal, adapterOptions });
+      const { bytes, duration } = await provider.synthesizeToFile({
+        text, voice, outputPath, rate, pitch, emotion, signal, adapterOptions,
+      });
       checkCancellation(signal);
       return {
         filePath: outputPath,
@@ -63,16 +77,31 @@ async function synthesizeSentence({
       };
     } catch (error) {
       checkCancellation(signal);
-      if (error instanceof TtsCancelledError || error.name === 'AbortError') throw error;
+      if (error instanceof InputError || error?.statusCode === 400 || error?.retryable === false) throw error;
+      if (error instanceof TtsCancelledError || error?.name === 'AbortError') throw error;
       lastError = error;
-      if (attempt < MAX_SYNTHESIS_ATTEMPTS) {
-        await delay(300 * attempt, undefined, { signal }); // 线性退避
+      const rateLimited = Boolean(error?.rateLimited);
+      let delayMs = 300 * attempt;
+      if (rateLimited) {
+        rateLimitHits++;
+        normalHits = 0;
+        maxAttempts = Math.max(maxAttempts, rateLimitMaxAttempts);
+        delayMs = rateLimitBackoffMs[Math.min(rateLimitHits - 1, rateLimitBackoffMs.length - 1)] ?? delayMs;
+      } else {
+        normalHits++;
+        if (normalHits >= MAX_SYNTHESIS_ATTEMPTS) break;
+      }
+      if (attempt < maxAttempts) {
+        const intervalMs = provider.getMinRequestIntervalMs?.(adapterOptions) ?? provider.minRequestIntervalMs ?? 0;
+        delayMs = Math.max(delayMs, intervalMs);
+        onRetry?.({ attempt, maxAttempts, delayMs, rateLimited, error });
+        await delay(delayMs, undefined, { signal });
       }
     }
   }
 
   const detail = lastError && lastError.message ? lastError.message : String(lastError);
-  const wrapped = new Error(`语音合成失败（已尝试 ${MAX_SYNTHESIS_ATTEMPTS} 次）：${detail}`);
+  const wrapped = new Error(`语音合成失败（已尝试 ${attempt} 次）：${detail}`);
   wrapped.statusCode = 502;
   throw wrapped;
 }
@@ -102,11 +131,7 @@ function buildSentenceTimeline(entries, { gapSeconds = SENTENCE_GAP_SECONDS } = 
     }
     if (!format) {
       format = frame;
-    } else if (
-      frame.versionBits !== format.versionBits ||
-      frame.bitrateIdx !== format.bitrateIdx ||
-      frame.samplerateIdx !== format.samplerateIdx
-    ) {
+    } else if (!compatibleFrameFormat(frame, format)) {
       throw new Error(`音频片段 ${entry.fileName} 编码格式与其他片段不一致，拒绝生成时间轴`);
     }
     return durationSeconds;
@@ -145,21 +170,30 @@ function buildSentenceTimeline(entries, { gapSeconds = SENTENCE_GAP_SECONDS } = 
  * 逐句合成 + 构建精确时间轴。
  * 返回 dialogue 元素保留 filePath（供任务引擎拼接，成品元数据只保留公开字段）。
  */
-async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping = DEFAULT_VOICES, options = {}) {
-  const voices = voiceMapping && typeof voiceMapping === 'object' ? voiceMapping : DEFAULT_VOICES;
-  const { provider = getTtsProvider(), cache, signal, onProgress, adapterOptions } = options;
+async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping, options = {}) {
+  const { provider = getTtsProvider(), cache, signal, onProgress, ttsModel, rateLimitMaxAttempts, rateLimitBackoffMs } = options;
+  let adapterOptions = options.adapterOptions;
+  if (ttsModel) {
+    adapterOptions = { ...adapterOptions, model: ttsModel };
+    if (provider.id === 'volcengine') adapterOptions.resourceId = ttsModel;
+  }
+  const cacheModel = adapterOptions?.resourceId || adapterOptions?.model || provider.model;
+  const defaultVoices = provider.defaultVoicesForModel?.(cacheModel) || provider.defaultVoices || DEFAULT_VOICES;
+  const voices = voiceMapping || defaultVoices;
+  const intervalMs = options.minRequestIntervalMs ?? provider.getMinRequestIntervalMs?.(adapterOptions) ?? provider.minRequestIntervalMs ?? 0;
   fs.mkdirSync(workDir, { recursive: true });
   const entries = [];
   const totalSegments = dialogueList.length;
   let cachedSegments = 0;
   let reusedSegments = 0;
+  let lastRequestEndAt = null;
   for (const [index, line] of dialogueList.entries()) {
-    const { speaker, text, rate = '+0%', pitch = '+0Hz' } = line;
-    const voice = voices[speaker] || DEFAULT_VOICES[speaker] || DEFAULT_VOICES.阿泽;
+    const { speaker, text, rate = '+0%', pitch = '+0Hz', emotion } = line;
+    const voice = voices[speaker] || defaultVoices[speaker] || Object.values(defaultVoices)[0];
     const fileName = sentenceFileName(index);
     const outputPath = path.join(workDir, fileName);
-    const report = completedSegments => onProgress?.({
-      index, completedSegments, totalSegments, cachedSegments, reusedSegments, speaker, text,
+    const report = (completedSegments, retry) => onProgress?.({
+      index, completedSegments, totalSegments, cachedSegments, reusedSegments, speaker, text, ...retry,
     });
     try {
       checkCancellation(signal);
@@ -172,19 +206,30 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping = DE
         cachedSegments++;
         fileSize = existing.length;
       } else {
-        const key = cache && buildCacheKey({ provider: provider.id, model: provider.model, voice, rate, pitch, text });
+        const scopeHash = cache && provider.getScopeHash?.([voice], adapterOptions);
+        const key = cache && buildCacheKey({ scopeHash, provider: provider.id, model: cacheModel, voice, rate, pitch, emotion, text });
         const cached = cache?.get(key, outputPath);
         if (cached?.hit) {
           cachedSegments++;
           fileSize = cached.bytes;
         } else {
-          const result = await synthesizeSentence({ text, voice, outputPath, rate, pitch, provider, signal, adapterOptions });
+          if (lastRequestEndAt !== null && intervalMs > 0) {
+            const waitMs = Math.max(0, lastRequestEndAt + intervalMs - Date.now());
+            if (waitMs > 0) await delay(waitMs, undefined, { signal });
+          }
+          const result = await synthesizeSentence({
+            text, voice, outputPath, rate, pitch, emotion, provider, signal, adapterOptions, rateLimitMaxAttempts, rateLimitBackoffMs,
+            onRetry({ attempt, maxAttempts, delayMs, rateLimited }) {
+              report(index, { retrying: true, attempt, maxAttempts, delayMs, rateLimited });
+            },
+          });
+          lastRequestEndAt = Date.now();
           checkCancellation(signal);
           cache?.put(key, outputPath);
           fileSize = result.fileSize;
         }
       }
-      entries.push({ filePath: outputPath, fileSize, fileName, speaker, text, emotion: line.emotion });
+      entries.push({ filePath: outputPath, fileSize, fileName, speaker, text, emotion });
       report(index + 1);
       checkCancellation(signal);
     } catch (error) {

@@ -84,3 +84,21 @@ test('Edge Provider 透传取消信号，合成结束时无残留文件', async 
     fs.rmSync(dir, { recursive: true });
   }
 });
+
+test('只提供一个默认音色时，两个角色都使用当前服务商音色', async t => {
+  const { synthesizeDialogueScript } = require('../src/services/ttsService');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'one-voice-'));
+  t.after(() => fs.rmSync(dir, { recursive: true }));
+  const voices = [];
+  const provider = { id: 'single', name: 'single', model: 'single', defaultVoices: { 小晓: 'single-voice' }, availableVoices: [],
+    synthesizeToFile({ voice, outputPath }) {
+      voices.push(voice);
+      const audio = makeMp3(2);
+      fs.writeFileSync(outputPath, audio);
+      return { bytes: audio.length, duration: 0.048 };
+    } };
+  assert.throws(() => registerTtsProvider({ ...provider, defaultVoices: {} }), TypeError);
+  registerTtsProvider(provider);
+  await synthesizeDialogueScript(['阿泽', '小晓'].map(speaker => ({ speaker, text: '两句' })), dir, undefined, { provider });
+  assert.deepEqual(voices, ['single-voice', 'single-voice']);
+});

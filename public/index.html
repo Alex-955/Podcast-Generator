@@ -2,256 +2,709 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>AI 妙听 - 随身双人播客生成器</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎙️</text></svg>">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>AI 妙听 · 双人播客工作台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23F5F2EB'/%3E%3Crect x='16' y='24' width='4.5' height='16' rx='2.25' fill='%231C5A73'/%3E%3Crect x='25' y='16' width='4.5' height='32' rx='2.25' fill='%23B03E24'/%3E%3Crect x='34' y='20' width='4.5' height='24' rx='2.25' fill='%23B03E24'/%3E%3Crect x='43' y='26' width='4.5' height='12' rx='2.25' fill='%231C5A73'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-  <div id="app" class="app-container">
-    <!-- 顶部导航栏 -->
-    <header class="header">
-      <div class="logo-group">
-        <div class="logo-icon">🎙️</div>
-        <div class="logo-text">
-          <h1>AI 妙听</h1>
-          <span class="badge">双人播客</span>
-        </div>
+  <div id="app" class="app-shell">
+    <!-- 紧凑单行顶栏 -->
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-mark" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 10v4M8.5 6.5v11M13 4.5v15M17.5 8v8M21 10.5v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <span class="brand-title">AI 妙听</span>
+        <span class="brand-sub">双人对话播客工作台</span>
       </div>
-      <div class="header-actions">
-        <button id="btnSettings" class="icon-button" title="设置 API Key">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3"></circle>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+
+      <div class="topbar-meta">
+        <div class="duo-badge" aria-label="固定双主播：阿泽与小晓">
+          <span class="duo-item">
+            <span class="duo-dot is-host" aria-hidden="true"></span>阿泽
+          </span>
+          <span class="duo-sep" aria-hidden="true">·</span>
+          <span class="duo-item">
+            <span class="duo-dot is-guest" aria-hidden="true"></span>小晓
+          </span>
+        </div>
+
+        <button type="button" id="btnSettings" class="btn-settings" aria-haspopup="dialog" aria-controls="settingsModal">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="4" y1="7" x2="20" y2="7"></line>
+            <line x1="4" y1="17" x2="20" y2="17"></line>
+            <circle cx="9" cy="7" r="2.5" fill="var(--bg-canvas)"></circle>
+            <circle cx="15" cy="17" r="2.5" fill="var(--bg-canvas)"></circle>
           </svg>
-          <span class="settings-hint-badge" id="apiKeyStatusDot"></span>
+          <span>模型与语音</span>
+          <span id="apiKeyStatusDot" class="status-dot" aria-hidden="true"></span>
         </button>
       </div>
     </header>
 
-    <!-- 主要内容区域 (两栏设计：左侧输入/剧本，右侧播放器/字幕) -->
-    <main class="main-content">
-      <!-- 左侧：输入与剧本工作区 -->
-      <section class="panel input-panel">
-        <div class="panel-header">
-          <h2>1. 导入长文 / 公众号</h2>
-          <div class="tabs">
-            <button class="tab-btn active" data-tab="tab-url">文章链接</button>
-            <button class="tab-btn" data-tab="tab-text">直接贴文字</button>
-          </div>
-        </div>
-
-        <div class="tab-content active" id="tab-url">
-          <div class="input-group">
-            <input type="text" id="inputUrl" placeholder="粘贴微信公众号文章、知乎或新闻网页链接..." />
-            <button id="btnFetchUrl" class="btn btn-secondary">解析文章</button>
-          </div>
-          <div class="quick-samples">
-            <span class="sample-label">示例体验：</span>
-            <button class="chip" data-sample="ai">AI智能体爆发</button>
-            <button class="chip" data-sample="deepseek">DeepSeek技术剖析</button>
-            <button class="chip" data-sample="work">数字游民新工作范式</button>
-          </div>
-        </div>
-
-        <div class="tab-content" id="tab-text">
-          <input type="text" id="inputTitle" placeholder="文章标题 (可选)" class="title-input" />
-          <textarea id="inputText" placeholder="粘贴任意长文本、读书笔记、行业研报或文章正文..." rows="6"></textarea>
-        </div>
-
-        <!-- 播客参数配置卡片 -->
-        <div class="config-card">
-          <div class="config-row">
-            <label>配音角色：</label>
-            <div class="role-selector">
-              <span class="role-tag host">阿泽 (男声·微软云希)</span>
-              <span class="vs-icon">🎙️</span>
-              <span class="role-tag guest">小晓 (女声·微软晓晓)</span>
-            </div>
-          </div>
-          <div class="config-row">
-            <label for="bgmSelect">背景轻音乐：</label>
-            <select id="bgmSelect" class="styled-select">
-              <option value="coffee_ambient">晨间咖啡·温暖电钢 (推荐)</option>
-              <option value="none">纯净人声 (无 BGM)</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- 操作按钮组 -->
-        <div class="actions-group">
-          <button id="btnOneClick" class="btn btn-primary btn-large">
-            <span class="btn-icon">⚡</span>
-            <span>一键生成双人播客</span>
-          </button>
-          <button id="btnOnlyScript" class="btn btn-outline">仅生成剧本草稿</button>
-        </div>
-
-        <!-- 进度与状态反馈 -->
-        <div id="statusContainer" class="status-container hidden">
-          <div class="status-indicator">
-            <div class="spinner"></div>
-            <span id="statusMessage">正在解析文章...</span>
-          </div>
-          <div class="progress-bar-bg">
-            <div id="progressBar" class="progress-bar-fill" style="width: 15%"></div>
-          </div>
-        </div>
-
-        <!-- 对话剧本卡片 -->
-        <div id="scriptSection" class="script-card hidden">
-          <div class="script-header">
-            <h3>播客对话剧本</h3>
-            <div class="script-actions">
-              <button id="btnRegenerateAudio" class="btn btn-sm btn-primary">按修改后剧本重新配音</button>
-            </div>
-          </div>
-          <p id="podcastSummary" class="podcast-summary"></p>
-          <div id="dialogueList" class="dialogue-list">
-            <!-- 剧本台词条目将渲染在此 -->
-          </div>
-        </div>
-      </section>
-
-      <!-- 右侧：沉浸式播客播放器与同步高亮对话字幕 -->
-      <section class="panel player-panel">
-        <div class="podcast-cover-card">
-          <div class="cover-visual">
-            <div class="cover-avatar host-avatar">
-              <div class="avatar-circle">泽</div>
-              <span>阿泽</span>
-            </div>
-            <div class="wave-visualizer" id="waveVisualizer">
-              <div class="bar"></div>
-              <div class="bar"></div>
-              <div class="bar"></div>
-              <div class="bar"></div>
-              <div class="bar"></div>
-              <div class="bar"></div>
-              <div class="bar"></div>
-              <div class="bar"></div>
-            </div>
-            <div class="cover-avatar guest-avatar">
-              <div class="avatar-circle">晓</div>
-              <span>小晓</span>
-            </div>
-          </div>
-
-          <h2 id="currentPodcastTitle" class="now-playing-title">等待播客生成</h2>
-          <p id="currentPodcastMeta" class="now-playing-meta">点击左侧生成即可开始收听</p>
-
-          <!-- 播放控制台 -->
-          <div class="player-controls">
-            <div class="progress-container">
-              <span id="currentTime" class="time-label">00:00</span>
-              <input type="range" id="seekSlider" class="seek-slider" min="0" max="100" value="0" step="0.1">
-              <span id="totalDuration" class="time-label">00:00</span>
-            </div>
-
-            <div class="control-buttons">
-              <button id="btnRewind10" class="btn-ctrl" title="后退 10 秒">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/>
-                </svg>
-                <span class="ctrl-sub">10s</span>
+    <!-- 双栏主工作区（桌面 420px + 1fr；≤900px 单栏流式） -->
+    <main class="workspace">
+      <!-- 左栏：文稿导入 · 确认预览 · 任务进度 · 历史播客 -->
+      <aside class="studio-rail" aria-label="文稿输入与任务管理">
+        <!-- 1. 文章导入区 -->
+        <section class="rail-section input-section enter-stagger-1">
+          <div class="section-head">
+            <h1 class="rail-heading">导入文稿</h1>
+            <div class="segmented segmented-3" role="tablist" aria-label="输入方式">
+              <div id="tabIndicator" class="segmented-indicator" aria-hidden="true"></div>
+              <button type="button" id="tabBtnUrl" class="segmented-btn is-active" role="tab" aria-selected="true" aria-controls="panelUrl" data-mode="url" aria-label="文章链接">
+                链接
               </button>
+              <button type="button" id="tabBtnText" class="segmented-btn" role="tab" aria-selected="false" aria-controls="panelText" data-mode="text" aria-label="直接贴正文">
+                正文
+              </button>
+              <button type="button" id="tabBtnImage" class="segmented-btn" role="tab" aria-selected="false" aria-controls="panelImage" data-mode="image" aria-label="长图识字">
+                识图
+              </button>
+            </div>
+          </div>
 
-              <button id="btnPlayPause" class="btn-play" title="播放 / 暂停">
-                <svg id="playIcon" width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
-                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          <!-- 链接模式 -->
+          <div id="panelUrl" class="tab-panel is-active" role="tabpanel" aria-labelledby="tabBtnUrl">
+            <label for="inputUrl" class="sr-only">文章或公众号链接</label>
+            <div class="url-field-wrap">
+              <input type="url" id="inputUrl" class="field-input" placeholder="粘贴文章或公众号链接 (https://...)" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="input-action-row">
+              <button type="button" id="btnFetchUrl" class="btn btn-primary btn-block">
+                <svg class="btn-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
                 </svg>
-                <svg id="pauseIcon" class="hidden" width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="6" y="4" width="4" height="16"></rect>
-                  <rect x="14" y="4" width="4" height="16"></rect>
+                <span>解析文章</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 正文模式 -->
+          <div id="panelText" class="tab-panel hidden" role="tabpanel" aria-labelledby="tabBtnText">
+            <label for="inputTitle" class="sr-only">文章标题（可选）</label>
+            <input type="text" id="inputTitle" class="field-input title-field" placeholder="文章标题（可选，留空将自动提炼）" maxlength="200">
+            <label for="inputText" class="sr-only">文章正文</label>
+            <textarea id="inputText" class="field-textarea" rows="5" placeholder="粘贴任意文章正文、读书笔记或行业长文（超过 1.2 万字将自动截取前段）..."></textarea>
+            <div class="text-footer">
+              <span id="textCharCount" class="char-counter">0 / 12,000 字</span>
+              <button type="button" id="btnPreviewText" class="btn btn-primary">
+                <span>预览并确认</span>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="9 18 15 12 9 6"></polyline>
                 </svg>
               </button>
+            </div>
+          </div>
 
-              <button id="btnForward10" class="btn-ctrl" title="快进 10 秒">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M13 17l5-5-5-5M6 17l5-5-5-5"/>
+          <!-- 长图识字模式 -->
+          <div id="panelImage" class="tab-panel hidden" role="tabpanel" aria-labelledby="tabBtnImage">
+            <div id="imageDropZone" class="image-dropzone" tabindex="0" role="button" aria-label="点击选择、拖拽或粘贴长截图文章">
+              <input type="file" id="inputImageFiles" class="sr-only" accept="image/png,image/jpeg,image/webp" multiple>
+              <svg class="dropzone-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="3"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <path d="M21 15l-5-5L5 21"></path>
+              </svg>
+              <div class="dropzone-copy">
+                <span class="dropzone-title">点击选图、拖拽或 Ctrl/Cmd+V 粘贴截图</span>
+                <span class="dropzone-sub">支持微信 / 小红书 / 微博长截图，超长图会自动分段切片提纯</span>
+              </div>
+            </div>
+            <div id="imagePreviewStrip" class="image-preview-strip hidden" aria-live="polite"></div>
+            <div class="text-footer image-footer">
+              <span id="imageSelectionMeta" class="char-counter">尚未选择图片</span>
+              <div class="image-actions-group">
+                <button type="button" id="btnClearImages" class="btn btn-ghost btn-sm hidden">清空</button>
+                <button type="button" id="btnExtractImages" class="btn btn-primary" disabled>
+                  <span>识别图片文字</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 解析/输入校验内联提示条（紧贴输入框与主按钮下方） -->
+          <div id="parseErrorBanner" class="inline-callout is-error hidden" role="alert">
+            <p id="parseErrorText" class="callout-msg"></p>
+            <div class="callout-actions">
+              <button type="button" id="btnOpenVisionFromParse" class="btn btn-subtle btn-sm hidden">配置识图模型</button>
+              <button type="button" id="btnSwitchToTextFromParse" class="btn btn-subtle btn-sm">切换到直接贴正文</button>
+              <button type="button" id="btnRetryParseUrl" class="btn btn-ghost btn-sm">原链接重试</button>
+            </div>
+          </div>
+
+          <!-- 内置试听示例 -->
+          <div class="samples-block" aria-label="内置快速示例">
+            <span class="samples-label">内置试听示例</span>
+            <div class="samples-list">
+              <button type="button" class="sample-pill" data-sample="ai">AI 智能体工作流</button>
+              <button type="button" class="sample-pill" data-sample="deepseek">DeepSeek 技术剖析</button>
+              <button type="button" class="sample-pill" data-sample="work">数字游民的自律</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. 确认预览区（解析成功或正文确认后展开；编辑输入或切 Tab 立即作废） -->
+        <section id="confirmCard" class="elevated-sheet confirm-sheet hidden" aria-label="文稿确认预览">
+          <div class="confirm-header">
+            <div class="confirm-badges">
+              <span id="confirmSourceBadge" class="meta-pill">链接解析</span>
+              <span id="confirmCharBadge" class="meta-pill is-num">0 字</span>
+              <span id="confirmTtsBadge" class="meta-pill">语音：Edge 免费</span>
+              <span id="confirmTruncatedBadge" class="meta-pill is-warn hidden">已截取前 1.2 万字</span>
+            </div>
+            <h2 id="confirmTitle" class="confirm-title">未命名文章</h2>
+          </div>
+
+          <p id="confirmExcerpt" class="confirm-excerpt"></p>
+
+          <div class="confirm-tools-row">
+            <button type="button" id="btnToggleFullPreview" class="link-toggle hidden" aria-expanded="false">
+              <span>展开全文预览</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+            <button type="button" id="btnPolishDraft" class="btn btn-subtle btn-sm">
+              <span>AI 纠错润色</span>
+            </button>
+          </div>
+
+          <div id="polishBanner" class="inline-callout is-polish hidden" aria-live="polite">
+            <p id="polishBannerText" class="callout-msg"></p>
+            <div id="polishBannerActions" class="callout-actions"></div>
+          </div>
+
+          <div class="confirm-actions">
+            <button type="button" id="btnEditInput" class="btn btn-subtle">修改输入</button>
+            <button type="button" id="btnStartGenerate" class="btn btn-primary btn-generate">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+              </svg>
+              <span>开始生成双人播客</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- 3. 四阶段真实任务进度区 -->
+        <section id="progressSection" class="elevated-sheet progress-sheet hidden" aria-live="polite" aria-label="播客生成进度">
+          <div class="progress-head">
+            <div class="progress-title-group">
+              <span id="progressStatusBadge" class="state-chip is-running">生成中</span>
+              <span id="stageElapsed" class="elapsed-time">已耗时 0s</span>
+            </div>
+            <button type="button" id="btnCancelTask" class="btn btn-ghost btn-sm">取消生成</button>
+          </div>
+
+          <h2 id="progressTaskTitle" class="progress-task-title">正在准备生成双人播客</h2>
+
+          <!-- 4 个真实阶段节点 -->
+          <ol class="stepper" id="stageStepper" aria-label="生成阶段">
+            <li class="step-node" data-stage="extract">
+              <span class="step-circle" aria-hidden="true">
+                <span class="step-num">1</span>
+                <svg class="step-check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"></polyline>
                 </svg>
-                <span class="ctrl-sub">10s</span>
-              </button>
+              </span>
+              <span class="step-label">抓取正文</span>
+            </li>
+            <li class="step-node" data-stage="script">
+              <span class="step-circle" aria-hidden="true">
+                <span class="step-num">2</span>
+                <svg class="step-check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+              </span>
+              <span class="step-label">剧本重构</span>
+            </li>
+            <li class="step-node" data-stage="tts">
+              <span class="step-circle" aria-hidden="true">
+                <span class="step-num">3</span>
+                <svg class="step-check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+              </span>
+              <span class="step-label">语音合成</span>
+            </li>
+            <li class="step-node" data-stage="merge">
+              <span class="step-circle" aria-hidden="true">
+                <span class="step-num">4</span>
+                <svg class="step-check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+              </span>
+              <span class="step-label">音频拼接</span>
+            </li>
+          </ol>
 
-              <button id="btnSpeed" class="btn-speed" title="倍速播放">1.0x</button>
+          <!-- 进度条：阶段 1/2/4 不定流光；阶段 3 严格 completedSegments / totalSegments -->
+          <div class="meter-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="taskMeterTrack">
+            <div id="taskMeterFill" class="meter-fill"></div>
+          </div>
+
+          <div class="progress-detail-row">
+            <p id="progressMessage" class="progress-message">准备中...</p>
+            <div class="progress-chips">
+              <span id="cacheHitBadge" class="meta-pill is-success hidden">缓存命中 0 句</span>
+              <span id="activeSpeakerChip" class="meta-pill hidden"></span>
+            </div>
+          </div>
+
+          <!-- 失败或取消恢复面板 -->
+          <div id="taskErrorBanner" class="inline-callout is-error hidden" role="alert">
+            <p id="taskErrorText" class="callout-msg"></p>
+            <p id="taskResumeHint" class="callout-hint hidden"></p>
+            <div id="taskErrorActions" class="callout-actions"></div>
+          </div>
+        </section>
+
+        <!-- 4. 本地历史播客 -->
+        <section id="historySection" class="rail-section history-section enter-stagger-2" aria-label="最近本地播客">
+          <div class="section-head">
+            <div class="history-title-wrap">
+              <h2 class="rail-heading">最近播客</h2>
+              <span id="historyCount" class="history-count">0 集</span>
+            </div>
+            <button type="button" id="btnRefreshHistory" class="btn-icon-quiet" title="刷新历史列表" aria-label="刷新最近播客列表">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+              </svg>
+            </button>
+          </div>
+
+          <div id="historyList" class="history-list">
+            <p class="history-empty">正在读取本地播客记录…</p>
+          </div>
+        </section>
+      </aside>
+
+      <!-- 右栏：声学放音舞台 + 同步对话字幕 -->
+      <section class="listening-stage enter-stagger-3" aria-label="播客播放器与同步字幕">
+        <!-- 上半部：双声道声学放音台 -->
+        <div id="playerDeck" class="player-deck" data-playing="false" data-speaker="none">
+          <!-- 双主播头像 + 24 柱精密竖向声纹舞台 -->
+          <div class="acoustic-stage">
+            <div class="speaker-seal is-host" id="sealHost" aria-label="主持人阿泽">
+              <div class="seal-ring">
+                <span class="seal-glyph">泽</span>
+              </div>
+              <div class="seal-meta">
+                <span class="seal-name">阿泽</span>
+                <span class="seal-role">主持</span>
+              </div>
             </div>
 
-            <div class="player-footer-tools">
-              <a id="btnDownloadAudio" class="download-link disabled" download="ai-podcast.mp3">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <div class="waveform" id="waveVisualizer" aria-hidden="true"></div>
+
+            <div class="speaker-seal is-guest" id="sealGuest" aria-label="嘉宾小晓">
+              <div class="seal-meta is-right">
+                <span class="seal-name">小晓</span>
+                <span class="seal-role">嘉宾</span>
+              </div>
+              <div class="seal-ring">
+                <span class="seal-glyph">晓</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 单集标题与摘要 -->
+          <div class="episode-info">
+            <div class="episode-meta-row">
+              <span id="currentPodcastMeta" class="episode-meta">尚无已选播客</span>
+            </div>
+            <h2 id="currentPodcastTitle" class="episode-title">导入一篇文章，或从左侧选择一期播客开始收听</h2>
+            <p id="currentPodcastSummary" class="episode-summary hidden"></p>
+          </div>
+
+          <!-- 进度条与时间 -->
+          <div class="scrubber-row">
+            <span id="currentTime" class="time-readout">00:00</span>
+            <div class="scrubber-wrap">
+              <label for="seekSlider" class="sr-only">播放进度</label>
+              <input type="range" id="seekSlider" class="seek-slider" min="0" max="100" value="0" step="0.1" disabled>
+            </div>
+            <span id="totalDuration" class="time-readout">00:00</span>
+          </div>
+
+          <!-- 控制与导出栏 -->
+          <div class="deck-toolbar">
+            <div class="toolbar-exports">
+              <a id="btnDownloadAudio" class="btn btn-subtle btn-sm is-disabled" aria-disabled="true" download="podcast.mp3">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                   <polyline points="7 10 12 15 17 10"></polyline>
                   <line x1="12" y1="15" x2="12" y2="3"></line>
                 </svg>
-                下载完整音频 (MP3)
+                <span>下载 MP3</span>
               </a>
+              <button type="button" id="btnCopyMarkdown" class="btn btn-subtle btn-sm" disabled>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>复制剧本</span>
+              </button>
+            </div>
+
+            <div class="toolbar-transport">
+              <button type="button" id="btnRewind10" class="btn-transport" title="后退 10 秒" aria-label="后退 10 秒" disabled>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M4.2 12.2a7.8 7.8 0 1 0 2.5-5.7L4.4 8.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M4.2 4.3v4.4h4.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  <text x="12" y="15" text-anchor="middle" fill="currentColor" font-size="7.5" font-weight="700" font-family="sans-serif">10</text>
+                </svg>
+              </button>
+
+              <button type="button" id="btnPlayPause" class="btn-play-main" title="播放 / 暂停" aria-label="播放或暂停" disabled>
+                <span class="play-ripple" id="playRipple" aria-hidden="true"></span>
+                <svg class="icon-play" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M7.5 5.25a.75.75 0 0 1 1.14-.64l10.5 6.75a.75.75 0 0 1 0 1.28l-10.5 6.75a.75.75 0 0 1-1.14-.64V5.25z"/>
+                </svg>
+                <svg class="icon-pause" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <rect x="6.5" y="5" width="3.75" height="14" rx="1.2"></rect>
+                  <rect x="13.75" y="5" width="3.75" height="14" rx="1.2"></rect>
+                </svg>
+              </button>
+
+              <button type="button" id="btnForward10" class="btn-transport" title="快进 10 秒" aria-label="快进 10 秒" disabled>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M19.8 12.2a7.8 7.8 0 1 1-2.5-5.7l2.3 2.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M19.8 4.3v4.4h-4.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  <text x="12" y="15" text-anchor="middle" fill="currentColor" font-size="7.5" font-weight="700" font-family="sans-serif">10</text>
+                </svg>
+              </button>
+            </div>
+
+            <div class="toolbar-speed">
+              <button type="button" id="btnBgmMode" class="btn-bgm" title="切换播客纯音乐配乐" aria-label="切换播客纯音乐配乐" data-bgm-mode="warm" disabled>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M9 18V5l12-2v13"></path>
+                  <circle cx="6" cy="18" r="3"></circle>
+                  <circle cx="18" cy="16" r="3"></circle>
+                </svg>
+                <span id="bgmModeLabel">暖调配乐</span>
+              </button>
+              <button type="button" id="btnSpeed" class="btn-speed" title="切换播放倍速" aria-label="切换播放倍速" disabled>1.0x</button>
             </div>
           </div>
         </div>
 
-        <!-- 实时滚动对话高亮区域 (小宇宙 / Apple Podcasts 样式) -->
-        <div class="subtitles-container">
-          <div class="subtitles-header">
-            <h3>双人对话字幕</h3>
-            <span class="subtitles-tip">逐句高亮为估算时间轴（MP3 帧计数口径），点击句子可跳转试听</span>
+        <!-- 下半部：双人同步对话字幕流 -->
+        <div class="transcript-area">
+          <div class="transcript-header">
+            <h3 class="transcript-heading">对话字幕</h3>
+            <span class="transcript-hint hint-desktop">点击或按回车跳转对应句 · 按 MP3 帧计数时间轴同步</span>
+            <span class="transcript-hint hint-mobile">点击句段跳转播放 · 按 MP3 帧时间轴同步</span>
           </div>
-          <div id="subtitlesList" class="subtitles-list">
-            <div class="empty-subtitles">
-              <span class="empty-icon">🎧</span>
-              <p>生成播客后，这里将同步滚动高亮主持人和嘉宾的观点交锋</p>
+
+          <div id="subtitlesList" class="subtitles-list" role="region" aria-label="双人对话字幕">
+            <div class="subtitles-empty">
+              <svg width="36" height="36" viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true">
+                <circle cx="18" cy="18" r="14"></circle>
+                <path d="M12 18h2M16 14v8M20 12v12M24 16v4"></path>
+              </svg>
+              <p>生成或打开一期播客后，这里将同步高亮阿泽与小晓的双人对话字幕。</p>
             </div>
           </div>
         </div>
       </section>
     </main>
 
-    <!-- 设置弹窗 (API Key / BaseURL / 模型自由配置) -->
-    <div id="settingsModal" class="modal-overlay hidden">
-      <div class="modal-card">
-        <div class="modal-header">
-          <h3>模型与 API 设置</h3>
-          <button id="btnCloseSettings" class="close-btn">&times;</button>
+    <!-- 模型与语音设置弹窗 -->
+    <div id="settingsModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+      <div class="modal-sheet">
+        <div class="modal-head">
+          <div>
+            <h2 id="settingsModalTitle" class="modal-title">模型与语音设置</h2>
+            <p class="modal-subtitle">剧本模型（OpenAI 兼容）与双人语音合成配置</p>
+          </div>
+          <button type="button" id="btnCloseSettings" class="btn-icon-quiet" aria-label="关闭设置弹窗">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
         </div>
-        <div class="modal-body">
-          <p class="modal-desc">
-            默认使用 <strong>DeepSeek</strong> 生成高质量双人对话播客剧本。一期播客仅消耗约 0.005 元人民币。
-          </p>
 
-          <div class="form-group">
-            <label for="settingApiKey">DeepSeek API Key：</label>
-            <input type="password" id="settingApiKey" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx" />
-            <small class="form-tip">Key 仅保存在你的本地浏览器缓存中，不会被泄露。</small>
-          </div>
-
-          <div class="form-group">
-            <label for="settingBaseUrl">API Base URL：</label>
-            <input type="text" id="settingBaseUrl" value="https://api.deepseek.com" />
-          </div>
-
-          <div class="form-group">
-            <label for="settingModel">模型名称：</label>
-            <input type="text" id="settingModel" value="deepseek-flash" />
-          </div>
-
-          <div class="modal-note">
-            💡 已验证 DeepSeek；也可尝试其他 OpenAI 兼容接口（如阿里百炼、Kimi、硅基流动等），修改 BaseURL 与 Key 即可，兼容性未逐一验证。
+        <div class="modal-tabs-bar">
+          <div class="segmented modal-segmented" role="tablist" aria-label="设置分类">
+            <div id="settingsTabIndicator" class="segmented-indicator" aria-hidden="true"></div>
+            <button type="button" id="settingsTabLlm" class="segmented-btn is-active" role="tab" aria-selected="true" aria-controls="settingsPanelLlm" data-settings-tab="llm">
+              剧本模型
+            </button>
+            <button type="button" id="settingsTabTts" class="segmented-btn" role="tab" aria-selected="false" aria-controls="settingsPanelTts" data-settings-tab="tts">
+              语音合成
+            </button>
           </div>
         </div>
-        <div class="modal-footer">
-          <button id="btnSaveSettings" class="btn btn-primary">保存配置</button>
-        </div>
+
+        <form id="settingsForm" class="modal-form" novalidate>
+          <div class="modal-scroll">
+            <!-- Tab 1：剧本模型 -->
+            <div id="settingsPanelLlm" class="settings-panel is-active" role="tabpanel" aria-labelledby="settingsTabLlm">
+              <div class="form-field">
+                <span class="form-label">厂商快捷预设</span>
+                <div class="preset-strip" id="llmPresetStrip" role="group" aria-label="大模型厂商快捷预设">
+                  <button type="button" class="preset-pill is-active" data-llm-preset="deepseek">DeepSeek · 推荐</button>
+                  <button type="button" class="preset-pill" data-llm-preset="kimi">Kimi API</button>
+                  <button type="button" class="preset-pill" data-llm-preset="kimi_coding">Kimi Code Plan</button>
+                  <button type="button" class="preset-pill" data-llm-preset="doubao">豆包</button>
+                  <button type="button" class="preset-pill" data-llm-preset="qwen">通义千问</button>
+                  <button type="button" class="preset-pill" data-llm-preset="mimo">小米 MiMo</button>
+                  <button type="button" class="preset-pill" data-llm-preset="siliconflow">硅基流动</button>
+                  <button type="button" class="preset-pill" data-llm-preset="custom">自定义</button>
+                </div>
+                <p id="llmPresetHint" class="provider-guide">支持文本与多模态识图（如 DeepSeek Flash）。填好 Key 后点「获取模型列表」即可直接勾选最新模型。</p>
+              </div>
+
+              <div class="form-field">
+                <label for="settingApiKey" class="form-label">1. API Key</label>
+                <div class="password-wrap">
+                  <input type="password" id="settingApiKey" class="field-input" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off" spellcheck="false">
+                  <button type="button" id="btnToggleKeyVisible" class="btn-reveal" aria-label="显示或隐藏 API Key">显示</button>
+                </div>
+                <p class="form-help">仅存于本机浏览器，绝不写入任务记录；留空将使用服务端 .env 配置。</p>
+              </div>
+
+              <div class="form-field">
+                <label for="settingBaseUrl" class="form-label">2. API Base URL</label>
+                <input type="url" id="settingBaseUrl" class="field-input" value="https://api.deepseek.com" placeholder="https://api.deepseek.com" spellcheck="false">
+              </div>
+
+              <div class="form-field">
+                <div class="label-with-toggle">
+                  <label for="settingModel" class="form-label">3. 选择或填写模型</label>
+                  <button type="button" id="btnFetchLlmModels" class="btn btn-subtle btn-sm">获取模型列表</button>
+                </div>
+                <span id="llmModelsStatus" class="test-status" aria-live="polite"></span>
+
+                <div id="llmModelPickerWrap" class="model-picker-wrap hidden">
+                  <input type="search" id="settingModelFilter" class="field-input model-filter-input hidden" placeholder="搜索筛选已拉取的模型名…" autocomplete="off" spellcheck="false">
+                  <select id="settingModelSelect" class="field-select" aria-label="从厂商模型列表勾选"></select>
+                </div>
+
+                <input type="text" id="settingModel" class="field-input" value="deepseek-flash" placeholder="点击上方「获取模型列表」勾选，或手动输入模型名" spellcheck="false">
+              </div>
+
+              <div class="test-action-row">
+                <button type="button" id="btnTestLlm" class="btn btn-subtle btn-sm">测试所选模型</button>
+                <span id="llmTestStatus" class="test-status" aria-live="polite"></span>
+              </div>
+
+              <details id="visionSettingsDisclosure" class="advanced-disclosure vision-disclosure">
+                <summary>单独配置识图模型（可选 · 默认直接复用上方模型）</summary>
+                <div class="vision-fields">
+                  <p class="form-help">当前已默认允许所有主力模型（含 DeepSeek Flash）直接用于长图识字；仅当主力模型不支持视觉输入时，再在此单独填写。</p>
+                  <div class="preset-strip" id="visionPresetStrip" role="group" aria-label="识图模型快捷预设">
+                    <button type="button" class="preset-pill is-active" data-vision-preset="reuse">同剧本模型</button>
+                    <button type="button" class="preset-pill" data-vision-preset="kimi">Kimi API</button>
+                    <button type="button" class="preset-pill" data-vision-preset="kimi_coding">Kimi Code Plan</button>
+                    <button type="button" class="preset-pill" data-vision-preset="doubao">豆包视觉</button>
+                    <button type="button" class="preset-pill" data-vision-preset="qwen">通义千问 VL</button>
+                  </div>
+                  <div class="form-field">
+                    <label for="settingVisionApiKey" class="form-label">识图 API Key（填独立地址时须填写）</label>
+                    <div class="password-wrap">
+                      <input type="password" id="settingVisionApiKey" class="field-input" placeholder="留空默认复用上方主配置" autocomplete="off" spellcheck="false">
+                      <button type="button" id="btnToggleVisionKey" class="btn-reveal" aria-label="显示或隐藏识图 API Key">显示</button>
+                    </div>
+                  </div>
+                  <div class="form-field">
+                    <label for="settingVisionBaseUrl" class="form-label">识图 Base URL</label>
+                    <input type="url" id="settingVisionBaseUrl" class="field-input" placeholder="留空复用上方地址" spellcheck="false">
+                  </div>
+                  <div class="form-field">
+                    <div class="label-with-toggle">
+                      <label for="settingVisionModel" class="form-label">识图模型名称</label>
+                      <button type="button" id="btnFetchVisionModels" class="btn btn-subtle btn-sm">获取识图模型</button>
+                    </div>
+                    <span id="visionModelsStatus" class="test-status" aria-live="polite"></span>
+                    <select id="settingVisionModelSelect" class="field-select hidden" aria-label="从识图模型列表选择"></select>
+                    <input type="text" id="settingVisionModel" class="field-input" placeholder="拉取后点选，或手动输入视觉模型名" spellcheck="false">
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            <!-- Tab 2：语音合成 -->
+            <div id="settingsPanelTts" class="settings-panel hidden" role="tabpanel" aria-labelledby="settingsTabTts">
+              <div class="form-field">
+                <span class="form-label">语音合成服务商</span>
+                <div class="provider-switcher" role="radiogroup" aria-label="语音合成服务商">
+                  <button type="button" class="provider-option is-active" data-tts-provider="minimax" role="radio" aria-checked="true">
+                    <span class="provider-name">MiniMax Speech</span>
+                    <span class="provider-tag">拟真推荐</span>
+                  </button>
+                  <button type="button" class="provider-option" data-tts-provider="volcengine" role="radio" aria-checked="false">
+                    <span class="provider-name">火山 · 豆包</span>
+                    <span class="provider-tag">妙听同款</span>
+                  </button>
+                  <button type="button" class="provider-option" data-tts-provider="edge" role="radio" aria-checked="false">
+                    <span class="provider-name">Edge 免费</span>
+                    <span class="provider-tag">免密钥试用</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- MiniMax Speech -->
+              <div id="ttsFieldsMinimax" class="tts-provider-fields">
+                <div class="form-field">
+                  <label for="settingMinimaxKey" class="form-label">MiniMax API Key</label>
+                  <div class="password-wrap">
+                    <input type="password" id="settingMinimaxKey" class="field-input" placeholder="填入 MiniMax 开放平台 API Key" autocomplete="off" spellcheck="false">
+                    <button type="button" id="btnToggleMinimaxKey" class="btn-reveal" aria-label="显示或隐藏 MiniMax API Key">显示</button>
+                  </div>
+                  <p id="minimaxServerHint" class="form-help is-server-ready hidden">服务端 .env 已配置兜底 Key，留空亦可直接使用官方地址生成。</p>
+                </div>
+
+                <div class="form-field">
+                  <label for="settingMinimaxModel" class="form-label">合成模型</label>
+                  <select id="settingMinimaxModel" class="field-select"></select>
+                </div>
+
+                <div class="field-row-2">
+                  <div class="form-field">
+                    <label for="settingMinimaxVoiceHost" class="form-label">阿泽（主持音色）</label>
+                    <select id="settingMinimaxVoiceHost" class="field-select"></select>
+                  </div>
+                  <div class="form-field">
+                    <label for="settingMinimaxVoiceGuest" class="form-label">小晓（嘉宾音色）</label>
+                    <select id="settingMinimaxVoiceGuest" class="field-select"></select>
+                  </div>
+                </div>
+
+                <details class="advanced-disclosure">
+                  <summary>高级选项 · 自定义接口地址（可选）</summary>
+                  <div class="form-field advanced-field">
+                    <label for="settingMinimaxEndpoint" class="form-label">MiniMax Endpoint</label>
+                    <input type="url" id="settingMinimaxEndpoint" class="field-input" placeholder="https://api.minimaxi.com/v1/t2a_v2" spellcheck="false">
+                    <p class="form-help">国内版官方地址已默认内置；填写自定义地址时须同时填写上方 API Key。</p>
+                  </div>
+                </details>
+              </div>
+
+              <!-- 火山引擎 · 豆包 -->
+              <div id="ttsFieldsVolcengine" class="tts-provider-fields hidden">
+                <div class="form-field">
+                  <div class="label-with-toggle">
+                    <span class="form-label">鉴权方式</span>
+                    <div class="auth-mode-switch" role="group" aria-label="火山引擎鉴权方式">
+                      <button type="button" class="auth-mode-btn is-active" data-volc-auth="apiKey">单 API Key（推荐）</button>
+                      <button type="button" class="auth-mode-btn" data-volc-auth="appIdAccessKey">AppID + Access Key</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="volcAuthApiKeyGroup" class="form-field">
+                  <label for="settingVolcApiKey" class="form-label">火山语音 API Key</label>
+                  <div class="password-wrap">
+                    <input type="password" id="settingVolcApiKey" class="field-input" placeholder="填入火山引擎控制台语音 API Key" autocomplete="off" spellcheck="false">
+                    <button type="button" id="btnToggleVolcApiKey" class="btn-reveal" aria-label="显示或隐藏火山语音 API Key">显示</button>
+                  </div>
+                </div>
+
+                <div id="volcAuthAppGroup" class="field-row-2 hidden">
+                  <div class="form-field">
+                    <label for="settingVolcAppId" class="form-label">AppID</label>
+                    <input type="text" id="settingVolcAppId" class="field-input" placeholder="应用 AppID" autocomplete="off" spellcheck="false">
+                  </div>
+                  <div class="form-field">
+                    <label for="settingVolcAccessKey" class="form-label">Access Key</label>
+                    <div class="password-wrap">
+                      <input type="password" id="settingVolcAccessKey" class="field-input" placeholder="Access Token" autocomplete="off" spellcheck="false">
+                      <button type="button" id="btnToggleVolcAccessKey" class="btn-reveal" aria-label="显示或隐藏 Access Key">显示</button>
+                    </div>
+                  </div>
+                </div>
+
+                <p id="volcServerHint" class="form-help is-server-ready hidden">服务端 .env 已配置兜底凭据，留空亦可直接使用官方地址生成。</p>
+
+                <div class="form-field">
+                  <label for="settingVolcResource" class="form-label">语音资源版本（Resource ID）</label>
+                  <select id="settingVolcResource" class="field-select"></select>
+                </div>
+
+                <div class="field-row-2">
+                  <div class="form-field">
+                    <label for="settingVolcVoiceHost" class="form-label">阿泽（主持音色）</label>
+                    <select id="settingVolcVoiceHost" class="field-select"></select>
+                  </div>
+                  <div class="form-field">
+                    <label for="settingVolcVoiceGuest" class="form-label">小晓（嘉宾音色）</label>
+                    <select id="settingVolcVoiceGuest" class="field-select"></select>
+                  </div>
+                </div>
+
+                <details class="advanced-disclosure">
+                  <summary>高级选项 · 自定义接口地址（可选）</summary>
+                  <div class="form-field advanced-field">
+                    <label for="settingVolcEndpoint" class="form-label">火山引擎 Endpoint</label>
+                    <input type="url" id="settingVolcEndpoint" class="field-input" placeholder="https://openspeech.bytedance.com/api/v3/tts/unidirectional" spellcheck="false">
+                    <p class="form-help">填写自定义地址时须同时填写上方火山凭据；2.0 与 1.0 音色会自动按资源版本筛选匹配。</p>
+                  </div>
+                </details>
+              </div>
+
+              <!-- Edge 免费 -->
+              <div id="ttsFieldsEdge" class="tts-provider-fields hidden">
+                <div class="field-row-2">
+                  <div class="form-field">
+                    <label for="settingEdgeVoiceHost" class="form-label">阿泽（主持音色）</label>
+                    <select id="settingEdgeVoiceHost" class="field-select"></select>
+                  </div>
+                  <div class="form-field">
+                    <label for="settingEdgeVoiceGuest" class="form-label">小晓（嘉宾音色）</label>
+                    <select id="settingEdgeVoiceGuest" class="field-select"></select>
+                  </div>
+                </div>
+              </div>
+
+              <p id="ttsProviderGuide" class="provider-guide"></p>
+
+              <div class="test-action-row">
+                <button type="button" id="btnTestTts" class="btn btn-subtle btn-sm">测试语音合成</button>
+                <span id="ttsTestStatus" class="test-status" aria-live="polite"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-foot">
+            <button type="button" id="btnCancelSettings" class="btn btn-subtle">取消</button>
+            <button type="submit" id="btnSaveSettings" class="btn btn-primary">保存配置</button>
+          </div>
+        </form>
       </div>
     </div>
 
-    <!-- 隐藏的音频播放元素 -->
-    <audio id="mainAudioPlayer" preload="auto"></audio>
-    <audio id="bgmAudioPlayer" loop preload="auto"></audio>
+    <audio id="mainAudioPlayer" preload="metadata"></audio>
+
+    <!-- 手机端浏览长字幕时吸顶迷你放音控制条 -->
+    <div id="mobileMiniPlayer" class="mini-player hidden" data-playing="false" data-speaker="none" aria-label="迷你播放器">
+      <span class="mini-speaker-dot" aria-hidden="true"></span>
+      <span id="miniTitle" class="mini-title">AI 妙听</span>
+      <span id="miniTime" class="mini-time">00:00</span>
+      <button type="button" id="btnMiniSpeed" class="mini-speed" aria-label="切换倍速">1.0x</button>
+      <button type="button" id="btnMiniPlayPause" class="mini-play-btn" aria-label="播放或暂停">
+        <svg class="icon-play" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M7.5 5.25a.75.75 0 0 1 1.14-.64l10.5 6.75a.75.75 0 0 1 0 1.28l-10.5 6.75a.75.75 0 0 1-1.14-.64V5.25z"/>
+        </svg>
+        <svg class="icon-pause" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <rect x="6.5" y="5" width="3.75" height="14" rx="1.2"></rect>
+          <rect x="13.75" y="5" width="3.75" height="14" rx="1.2"></rect>
+        </svg>
+      </button>
+      <span class="mini-progress-track" aria-hidden="true"><span id="miniProgressFill" class="mini-progress-fill"></span></span>
+    </div>
+
+    <div id="toastStack" class="toast-stack" aria-live="polite"></div>
   </div>
 
   <script src="inputSource.js"></script>
+  <script src="audioEngine.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -6,12 +6,14 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { getEventListeners } = require('node:events');
-const axios = require('axios');
 const { generatePodcastScript, normalizeDialogue } = require('../src/services/scriptEngine');
+const { upstreamError } = require('../src/services/providerHttp');
+const { assertCancellationCleanup, completion, configureLlm, response } = require('./helpers/llmFixture');
 
-const SCRIPT_INPUT = { content: '离线测试正文', apiKey: 'test-key' };
+const SCRIPT_INPUT = { content: '离线测试正文', apiKey: 'test-key', baseURL: 'https://script-fixture.example/team/v1/' };
+const dialogueFixture = { podcastTitle: '标题', summary: '概要', dialogue: [{ speaker: '阿泽', text: '正文' }] };
 
-function waitForAbort(_url, _body, { signal }) {
+function waitForAbort(_url, { signal }) {
   return new Promise((_, reject) => {
     signal.addEventListener('abort', () => reject(new Error('transport cancelled')), { once: true });
   });
@@ -88,18 +90,19 @@ test('全部无效时报错而不是返回空剧本', () => {
 });
 
 test('预先取消时，剧本生成抛 AbortError 且不发请求', async (t) => {
-  const post = t.mock.method(axios, 'post', () => assert.fail('已取消，不应发起请求'));
+  const llmRequest = t.mock.fn();
   const signal = AbortSignal.abort('cancel');
-  await assert.rejects(generatePodcastScript({ ...SCRIPT_INPUT, signal }), { name: 'AbortError' });
-  assert.strictEqual(post.mock.callCount(), 0);
+  await assert.rejects(generatePodcastScript({ ...SCRIPT_INPUT, signal, llmRequest }),
+    error => error.name === 'AbortError' && error.statusCode === undefined);
+  assert.strictEqual(llmRequest.mock.callCount(), 0);
 });
 
 test('剧本生成中途取消会中止底层请求并抛 AbortError', async (t) => {
-  const post = t.mock.method(axios, 'post', waitForAbort);
+  const llmRequest = t.mock.fn(waitForAbort);
   const controller = new AbortController();
   const { signal } = controller;
-  const result = generatePodcastScript({ ...SCRIPT_INPUT, signal });
-  const requestSignal = post.mock.calls[0].arguments[2].signal;
+  const result = generatePodcastScript({ ...SCRIPT_INPUT, signal, llmRequest });
+  const requestSignal = llmRequest.mock.calls[0].arguments[1].signal;
 
   assert.notStrictEqual(requestSignal, signal);
   assert.strictEqual(getEventListeners(signal, 'abort').length, 1);
@@ -110,13 +113,85 @@ test('剧本生成中途取消会中止底层请求并抛 AbortError', async (t)
 });
 
 test('剧本生成超时仍报 502 并清理外部取消监听', async (t) => {
-  t.mock.method(axios, 'post', waitForAbort);
+  const llmRequest = t.mock.fn(waitForAbort);
   const { signal } = new AbortController();
-  await assert.rejects(generatePodcastScript({ ...SCRIPT_INPUT, signal, timeoutMs: 25 }), {
+  await assert.rejects(generatePodcastScript({ ...SCRIPT_INPUT, signal, llmRequest, timeoutMs: 25 }), {
     name: 'UpstreamError',
     statusCode: 502,
     message: /剧本生成超时/,
   });
   assert.strictEqual(signal.aborted, false);
   assert.strictEqual(getEventListeners(signal, 'abort').length, 0);
+});
+
+test('剧本使用规范化后的服务地址并保留原请求契约', async t => {
+  configureLlm(t, { LLM_BASE_URL: 'http://127.0.0.1:7345/team/v1/' });
+  const stream = response({ ...completion('```json\n' + JSON.stringify(dialogueFixture) + '\n```'), usage: { total_tokens: 100 } });
+  const llmRequest = t.mock.fn(async (url, options) => {
+    assert.equal(url, 'http://127.0.0.1:7345/team/v1/chat/completions');
+    assert.equal(options.allowPrivateEndpoint, true);
+    assert.equal(options.method, 'POST');
+    assert.equal(options.headers.Authorization, 'Bearer ' + SCRIPT_INPUT.apiKey);
+    const body = JSON.parse(options.body);
+    assert.equal(body.model, 'organization/model:latest');
+    assert.deepEqual(body.response_format, { type: 'json_object' });
+    assert.equal(body.messages[0].role, 'system');
+    assert.match(body.messages[1].content, /离线测试正文/);
+    return stream;
+  });
+  const result = await generatePodcastScript({ ...SCRIPT_INPUT, baseURL: 'http://127.0.0.1:7345/team', model: 'organization/model:latest', llmRequest });
+  assert.deepEqual(result, { success: true, ...dialogueFixture, usage: { total_tokens: 100 } });
+  assert.equal(stream.destroyed, true);
+  assert.equal(llmRequest.mock.callCount(), 1);
+});
+
+test('剧本请求在发出前拒绝错误模型和私网地址，DNS 回答也必须为公开地址', async t => {
+  configureLlm(t, { LLM_BASE_URL: 'http://127.0.0.1:7345/team/v1/', VISION_API_KEY: 'server-vision-secret' });
+  const llmRequest = t.mock.fn();
+  for (const model of [123, true, {}, 'C:/private/model', 'ns/../model', 'server-vision-secret']) {
+    await assert.rejects(generatePodcastScript({ ...SCRIPT_INPUT, model, llmRequest }), { statusCode: 400, message: /模型名称无效/ });
+  }
+  for (const baseURL of ['http://127.0.0.1:7345/other', 'http://[::1]', 'http://model.local']) {
+    await assert.rejects(generatePodcastScript({ ...SCRIPT_INPUT, baseURL, llmRequest }), { statusCode: 400, message: /受限网络/ });
+  }
+  for (const baseURL of [undefined, 'https://example.com#', 'file:///tmp/model']) {
+    await assert.rejects(generatePodcastScript({ ...SCRIPT_INPUT, baseURL, llmRequest }), { statusCode: 400, message: /接口地址无效/ });
+  }
+  assert.equal(llmRequest.mock.callCount(), 0);
+  let calls = 0;
+  await assert.rejects(generatePodcastScript({ ...SCRIPT_INPUT, async lookup(host, options) {
+    calls++;
+    assert.equal(host, 'script-fixture.example');
+    assert.equal(options.all, true);
+    return [{ address: '8.8.8.8', family: 4 }, { address: '127.0.0.1', family: 4 }];
+  } }), { statusCode: 400, message: /受限网络/ });
+  assert.equal(calls, 1);
+});
+
+test('剧本限制响应大小、脱敏错误并报告可操作的上游状态', async t => {
+  configureLlm(t);
+  const secretDetail = SCRIPT_INPUT.apiKey + ' ' + SCRIPT_INPUT.baseURL + ' C:/Users/private/script C:\\Users\\private\\script';
+  for (const [statusCode, guidance] of [[401, /API Key/], [403, /模型访问权限/], [404, /模型名称/], [405, /支持对话的接口地址/]]) {
+    const stream = response({ error: secretDetail }, statusCode);
+    await assert.rejects(generatePodcastScript({ ...SCRIPT_INPUT, llmRequest: async () => stream }), error =>
+      error.name === 'UpstreamError' && error.statusCode === 502 && !error.retryable &&
+      guidance.test(error.message) && error.message.includes('HTTP ' + statusCode) && !error.message.includes(SCRIPT_INPUT.apiKey));
+    assert.equal(stream.destroyed, true);
+  }
+  for (const [stream, message] of [
+    [response('{}', 200, { 'content-length': 4 * 1024 * 1024 + 1 }), /大小限制/],
+    [response('A'.repeat(4 * 1024 * 1024 + 1)), /大小限制/],
+    [response(completion('无效 JSON ' + secretDetail)), /剧本不是有效 JSON/],
+  ]) {
+    await assert.rejects(generatePodcastScript({ ...SCRIPT_INPUT, llmRequest: async () => stream }), { statusCode: 502, message });
+    assert.equal(stream.destroyed, true);
+  }
+  await assert.rejects(generatePodcastScript({ ...SCRIPT_INPUT, llmRequest: async () => { throw upstreamError('失败 ' + secretDetail); } }),
+    { statusCode: 502, message: '失败 *** *** *** ***' });
+});
+
+test('剧本响应流成功、超时和取消均清理响应、定时器和外部监听', async t => {
+  configureLlm(t);
+  await assertCancellationCleanup(t, (payload, options) => generatePodcastScript({ ...payload, ...options }),
+    SCRIPT_INPUT, completion(JSON.stringify(dialogueFixture)));
 });

@@ -4,31 +4,42 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { once } = require('node:events');
+const { Readable } = require('node:stream');
 const { setTimeout: delay } = require('node:timers/promises');
 const { extractArticle } = require('../src/services/extractor');
 const { makeMp3 } = require('./helpers/mp3Fixtures');
+const { completion, response } = require('./helpers/llmFixture');
+const { upstreamError } = require('../src/services/providerHttp');
 
 const apiKey = 'offline-credential';
-const payload = { mode: 'text', content: '离线文章正文', apiKey };
+const baseURL = 'https://offline-task.example';
+const payload = { mode: 'text', content: '离线文章正文', apiKey, baseURL };
 let root, publicDir, server, base, previousEnv;
-let generate;
+let generate, llmRequest, observeProbe;
+const { getTtsProvider } = require('../src/services/ttsProvider');
 
 test.before(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'podcast-routes-'));
   publicDir = path.join(root, 'public');
   fs.mkdirSync(publicDir);
-  for (const file of ['index.html', 'style.css', 'app.js', 'inputSource.js']) {
+  for (const file of ['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js']) {
     fs.writeFileSync(path.join(publicDir, file), file);
   }
   const settings = {
     DATA_DIR: path.join(root, 'data'), PODCASTS_DIR: path.join(publicDir, 'external-audio'),
-    CORS_ORIGIN: 'https://one.example, https://two.example', DEEPSEEK_API_KEY: '',
+    CORS_ORIGIN: 'https://one.example, https://two.example', DEEPSEEK_API_KEY: '', TTS_PROVIDER: '',
   };
   previousEnv = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
   Object.assign(process.env, settings);
   const { createApp } = require('../server');
   const app = createApp({
     publicDir, dataDir: path.join(publicDir, 'custom-data'),
+    llmRequest: (...args) => llmRequest(...args),
+    getTtsProviderById(id) {
+      const provider = getTtsProvider(id);
+      if (!observeProbe) return provider;
+      return { ...provider, synthesizeToFile(args) { observeProbe(args); return provider.synthesizeToFile(args); } };
+    },
     extractor(params) {
       if (params.url === 'https://offline.example/fail') {
         throw Object.assign(new Error('抓取错误 Bearer private-value'), { statusCode: 502 });
@@ -97,6 +108,62 @@ test('健康、文章预览、CORS 白名单与上游错误脱敏', async () => 
   }
 });
 
+test('图片提取接口按顺序发送多张图片并返回结构化正文', async () => {
+  const images = ['data:image/png;base64,YQ==', 'data:image/webp;base64,Yg=='];
+  const visionBaseURL = 'https://offline-vision.example/API/v1/';
+  const visionApiKey = 'offline-request-vision-token';
+  let calls = 0;
+  llmRequest = async (url, options) => {
+    calls++;
+    assert.equal(url, 'https://offline-vision.example/API/v1/chat/completions');
+    assert.equal(options.headers.Authorization, 'Bearer ' + visionApiKey);
+    const { model, messages } = JSON.parse(options.body);
+    assert.equal(model, 'vision-fixture');
+    assert.deepEqual(messages[1].content.filter(item => item.type === 'image_url').map(item => item.image_url.url), images);
+    const response = Readable.from([Buffer.from(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ title: '长截图', content: '第一段\n\n第二段' }) } }],
+    }))]);
+    return Object.assign(response, { statusCode: 200, headers: {} });
+  };
+  const result = await request('extract-image', 200, { images, visionApiKey, visionBaseURL, visionModel: 'vision-fixture' });
+  assert.deepEqual(result, { success: true, data: { title: '长截图', content: '第一段\n\n第二段', length: 8, truncated: false,
+    imageCount: 2, hasIssues: false, issueHint: '' } });
+  assert.equal(calls, 1);
+});
+
+test('图片提取接口遮盖请求和服务端的视觉配置，拒绝无效请求与超限请求', async t => {
+  const visionApiKey = 'offline-request-vision-secret';
+  const visionBaseURL = 'https://caller-vision.example/private';
+  const VISION_API_KEY = 'offline-server-vision-secret';
+  const VISION_BASE_URL = 'https://server-vision.example/private';
+  setEnv(t, { VISION_API_KEY, VISION_BASE_URL, VISION_MODEL: 'test-vision' });
+  const images = ['data:image/jpeg;base64,YQ=='];
+  const body = { images, visionApiKey, visionBaseURL, visionModel: 'test-vision' };
+  const sensitive = [visionApiKey, visionBaseURL, VISION_API_KEY, VISION_BASE_URL];
+  let calls = 0;
+  llmRequest = async () => {
+    calls++;
+    throw upstreamError('识图失败 ' + sensitive.join(' '));
+  };
+  const failed = await request('extract-image', 502, body);
+  assert.equal(failed.error, '识图失败 *** *** *** ***');
+  for (const invalid of [[], '截图', ['data:image/gif;base64,YQ==']]) {
+    const result = await request('extract-image', 400, { ...body, images: invalid });
+    assert.ok(sensitive.every(value => !JSON.stringify(result).includes(value)));
+  }
+  const invalidJson = await fetch(base + '/api/extract-image', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body).slice(0, -1),
+  });
+  assert.equal(invalidJson.status, 400);
+  assert.equal((await invalidJson.json()).error, '请求体必须是有效 JSON');
+  const img = 'data:image/png;base64,' + 'A'.repeat(5.5 * 1024 * 1024);
+  await request('extract-image', 502, { ...body, images: [img, img] });
+  await request('extract-article', 413, { rawText: img + img });
+  const oversized = await request('extract-image', 413, { ...body, padding: 'A'.repeat(25 * 1024 * 1024) });
+  assert.ok(sensitive.every(value => !JSON.stringify(oversized).includes(value)));
+  assert.equal(calls, 2);
+});
+
 test('任务入参、不存在资源、非法 ID 与移除的接口', async () => {
   for (const body of [
     { mode: 'text', content: '正文' }, { ...payload, mode: 'unknown' },
@@ -120,7 +187,7 @@ test('前端只公开指定的 GET/HEAD 文件，运行目录只通过音频路�
   const bytes = makeMp3(2);
   fs.writeFileSync(path.join(audioDir, 'clip.mp3'), bytes);
 
-  for (const route of ['/', '/index.html', '/style.css', '/app.js', '/inputSource.js']) {
+  for (const route of ['/', '/index.html', '/style.css', '/app.js', '/inputSource.js', '/audioEngine.js']) {
     const get = await fetch(base + route);
     assert.equal(get.status, 200);
     assert.equal(await get.text(), route === '/' ? 'index.html' : route.slice(1));
@@ -154,7 +221,7 @@ test('创建、单活冲突、取消、续跑、轮询成品、历史与外置�
   await request(route + '/resume', 400, {});
 
   generate = async () => ({ podcastTitle: '路由测试', summary: '测试', dialogue: [{ speaker: '阿泽', text: '开场' }] });
-  await request(route + '/resume', 202, { apiKey });
+  await request(route + '/resume', 202, { apiKey, baseURL });
   let completed;
   for (let i = 0; i < 100; i++) {
     completed = (await request(route, 200)).data;
@@ -172,6 +239,360 @@ test('创建、单活冲突、取消、续跑、轮询成品、历史与外置�
   }
   assert.ok(fs.existsSync(path.join(publicDir, 'custom-data', 'tasks', task.id + '.json')));
   assert.ok(fs.existsSync(path.join(publicDir, 'external-audio', task.id, 'meta.json')));
-  await request(route + '/resume', 409, { apiKey });
+  await request(route + '/resume', 409, { apiKey, baseURL });
   await request(route + '/cancel', 409, {});
+});
+
+test('语音服务目录实时报告配置状态，创建任务同步拒绝缺失凭据与端点错配', async t => {
+  const env = {
+    TTS_PROVIDER: 'minimax', MINIMAX_API_KEY: '', MINIMAX_TTS_ENDPOINT: 'https://minimax-private.example/speech',
+    VOLCENGINE_TTS_API_KEY: '', VOLCENGINE_TTS_APP_ID: '', VOLCENGINE_TTS_ACCESS_KEY: '',
+    VOLCENGINE_TTS_ENDPOINT: 'https://volc-private.example/speech',
+  };
+  for (const [key, value] of Object.entries(env)) {
+    const old = process.env[key];
+    t.after(() => { if (old === undefined) delete process.env[key]; else process.env[key] = old; });
+    process.env[key] = value;
+  }
+  const list = async () => {
+    const response = await fetch(base + '/api/tts/providers');
+    assert.equal(response.status, 200);
+    const { success, data } = await response.json();
+    assert.equal(success, true);
+    assert.equal(data.defaultProvider, 'minimax');
+    assert.deepEqual(data.items.map(p => p.id), ['edge', 'minimax', 'volcengine']);
+    for (const value of [env.MINIMAX_TTS_ENDPOINT, env.VOLCENGINE_TTS_ENDPOINT, 'fake-mini-key', 'fake-app-id', 'fake-access-key']) {
+      assert.ok(!JSON.stringify(data).includes(value));
+    }
+    return data.items.map(p => p.serverConfigured);
+  };
+  assert.deepEqual(await list(), [true, false, false]);
+  await request('tasks', 400, payload);
+  for (const provider of ['minimax', 'volcengine', 'missing']) await request('tasks', 400, { ...payload, tts: { provider } });
+  Object.assign(process.env, { MINIMAX_API_KEY: 'fake-mini-key', VOLCENGINE_TTS_APP_ID: 'fake-app-id', VOLCENGINE_TTS_ACCESS_KEY: 'fake-access-key' });
+  assert.deepEqual(await list(), [true, true, true]);
+  const endpoint = 'https://other-offline.example/audio';
+  for (const tts of [{ provider: 'minimax' }, { provider: 'volcengine' }, { provider: 'volcengine', appId: 'own-app' },
+    { provider: 'volcengine', accessKey: 'own-access' }]) {
+    const error = await request('tasks', 400, { ...payload, tts: { ...tts, endpoint } });
+    assert.ok(!JSON.stringify(error).includes(endpoint));
+  }
+  await request('tasks', 400, { ...payload, tts: { provider: 'minimax', apiKey: 'own-key', endpoint: 'file:///tmp/' } });
+});
+
+function setEnv(t, values) {
+  for (const [name, value] of Object.entries(values)) {
+    const previous = process.env[name];
+    t.after(() => { if (previous === undefined) delete process.env[name]; else process.env[name] = previous; });
+    process.env[name] = value;
+  }
+}
+
+test('模型配置目录屏蔽误填为模型名称的带空白凭据', async t => {
+  const secret = 'misconfigured-credential';
+  setEnv(t, { MINIMAX_API_KEY: '  ' + secret + '  ', MINIMAX_TTS_MODEL: secret });
+  const { data } = await (await fetch(base + '/api/tts/providers')).json();
+  assert.equal(data.items.find(item => item.id === 'minimax').defaultModel, 'speech-2.8-turbo');
+  assert.ok(!JSON.stringify(data).includes(secret));
+});
+
+test('模型连接测试校验绑定与鉴权，404/405 时尝试一个 token 的对话', async t => {
+  const endpoint = 'https://llm-service.example/api/v1/';
+  setEnv(t, { DEEPSEEK_API_KEY: '', LLM_BASE_URL: endpoint, LLM_MODEL: 'server-model' });
+  const calls = [];
+  let status = 200;
+  llmRequest = async (url, args) => {
+    assert.ok(args.signal instanceof AbortSignal);
+    calls.push({ url, ...args });
+    const chat = url.endsWith('/chat/completions');
+    const body = chat ? { choices: [{ message: { content: 'hi' } }] } : { data: [{ id: 'server-model' }], detail: '/Users/private/secret' };
+    const response = Readable.from([Buffer.from(JSON.stringify(body))]);
+    response.statusCode = chat ? 200 : status;
+    response.headers = {};
+    return response;
+  };
+  await request('llm/test', 400, {});
+  process.env.DEEPSEEK_API_KEY = apiKey;
+  await request('llm/test', 400, { baseURL: 'https://other-service.example' });
+  await request('llm/test', 400, { model: apiKey });
+  assert.equal(calls.length, 0);
+  const result = await request('llm/test', 200, {});
+  assert.equal(result.data.ok, true);
+  assert.equal(result.data.model, 'server-model');
+  assert.equal(result.data.message, '连接成功，模型接口可用');
+  assert.ok(result.data.latencyMs >= 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, endpoint + 'models');
+  assert.equal(calls[0].headers.Authorization, 'Bearer ' + apiKey);
+  for (status of [404, 405]) {
+    calls.length = 0;
+    await request('llm/test', 200, { apiKey: 'own-key', baseURL: 'https://own.example', model: 'choice' });
+    assert.deepEqual(calls.map(c => [c.method, c.url]), [['GET', 'https://own.example/v1/models'], ['POST', 'https://own.example/v1/chat/completions']]);
+    assert.equal(calls[0].signal, calls[1].signal);
+    assert.equal(JSON.parse(calls[1].body).max_tokens, 1);
+    assert.equal(JSON.parse(calls[1].body).model, 'choice');
+  }
+  status = 401;
+  calls.length = 0;
+  const failed = await request('llm/test', 502, {});
+  assert.equal(calls.length, 1);
+  assert.match(failed.error, /401/);
+  assert.ok(!JSON.stringify(failed).includes(endpoint));
+  llmRequest = () => { throw new Error('private-value /Users/unknown/path'); };
+  assert.equal((await request('llm/test', 502, {})).error, '模型接口连接失败');
+});
+
+test('verifyChat 为 true 时只发送最小对话并按结果判断模型能否响应', async t => {
+  const baseURL = 'https://offline-model.example/service';
+  setEnv(t, { LLM_BASE_URL: '', LLM_MODEL: '', DEEPSEEK_API_KEY: '' });
+  let status = 200;
+  llmRequest = t.mock.fn(async (url, options) => {
+    assert.equal(url, baseURL + '/v1/chat/completions');
+    assert.equal(options.method, 'POST');
+    assert.equal(options.headers.Authorization, 'Bearer ' + apiKey);
+    assert.deepEqual(JSON.parse(options.body), { model: 'selected-model', messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 });
+    return response(completion('hi'), status);
+  });
+  const body = { apiKey, baseURL, model: 'selected-model', verifyChat: true };
+  const result = await request('llm/test', 200, body);
+  assert.equal(result.data.ok, true);
+  assert.equal(result.data.model, body.model);
+  for (const [invalidStatus, guidance] of [[401, /API Key/], [403, /模型访问权限/], [404, /模型名称/], [405, /支持对话的接口地址/]]) {
+    status = invalidStatus;
+    const { error } = await request('llm/test', 502, body);
+    assert.match(error, new RegExp('HTTP ' + status));
+    assert.match(error, guidance);
+  }
+  assert.equal(llmRequest.mock.callCount(), 5);
+});
+
+test('调用方主模型或独立识图 Key 缺少各自接口地址时返回 400，并且不发请求或保存任务', async t => {
+  const llmBase = 'https://configured-llm.example/v1/';
+  const visionBase = 'https://configured-vision.example/v1/';
+  setEnv(t, { LLM_BASE_URL: llmBase, VISION_BASE_URL: visionBase,
+    DEEPSEEK_API_KEY: 'configured-llm-key', VISION_API_KEY: 'configured-vision-key' });
+  llmRequest = t.mock.fn();
+  generate = t.mock.fn();
+  const tasksDir = path.join(publicDir, 'custom-data', 'tasks');
+  const filesBefore = fs.existsSync(tasksDir) ? fs.readdirSync(tasksDir) : [];
+  const article = { mode: 'text', apiKey, content: '正文', images: ['data:image/png;base64,YQ=='] };
+  for (const route of ['llm/models', 'llm/test', 'polish-text', 'extract-image', 'tasks']) {
+    const response = await request(route, 400, article);
+    assert.equal(response.error, '填写自定义 API Key 时，请同时填写对应的接口地址（Base URL）');
+  }
+  for (const route of ['llm/models', 'extract-image']) {
+    const imageRequest = { scope: 'vision', images: article.images, visionApiKey: apiKey, baseURL: llmBase };
+    const response = await request(route, 400, imageRequest);
+    assert.equal(response.error, '填写独立识图 API Key 时，请同时填写对应的识图 Base URL');
+  }
+  assert.deepEqual(fs.existsSync(tasksDir) ? fs.readdirSync(tasksDir) : [], filesBefore);
+  assert.equal(llmRequest.mock.callCount(), 0);
+  assert.equal(generate.mock.callCount(), 0);
+});
+
+test('连接测试和模型列表拒绝非法或敏感模型字段，并在发请求前校验地址', async t => {
+  const configuredSecret = 'configured-vision-secret';
+  const callerSecret = 'caller-vision-secret';
+  setEnv(t, { VISION_API_KEY: configuredSecret, LLM_BASE_URL: 'http://127.0.0.1:7913/llm/v1/', LLM_MODEL: 'configured-model' });
+  llmRequest = t.mock.fn(async (url, args) => {
+    assert.equal(url, 'http://127.0.0.1:7913/llm/v1/chat/completions');
+    assert.equal(args.allowPrivateEndpoint, true);
+    return response(completion('hi'));
+  });
+  const body = { apiKey, baseURL: 'http://127.0.0.1:7913/llm', verifyChat: true, visionApiKey: callerSecret };
+  const badModels = [null, 123, false, {}, 'C:/local/model', 'c:\\local\\model', 'a/../b', ' x',
+    'a'.repeat(161), configuredSecret, callerSecret];
+  for (const route of ['llm/test', 'llm/models']) {
+    for (const fields of [...badModels.map(model => ({ model })), { visionModel: null }]) {
+      const result = await request(route, 400, { ...body, ...fields });
+      assert.equal(result.error, '模型名称无效或包含敏感配置');
+    }
+  }
+  for (const baseURL of [body.baseURL + '#', body.baseURL + '?', body.baseURL + '/other']) {
+    await request('llm/test', 400, { ...body, baseURL });
+  }
+  assert.equal(llmRequest.mock.callCount(), 0);
+  const result = await request('llm/test', 200, { ...body, model: '', visionModel: '' });
+  assert.equal(result.data.ok, true);
+  assert.equal(result.data.model, 'configured-model');
+  assert.equal(llmRequest.mock.callCount(), 1);
+});
+
+test('模型列表过滤请求中的 TTS 凭据和冒号后路径，保留 HTTPS 链接及模型标签', async t => {
+  const tts = { apiKey: 'offline-tts-credential', accessKey: 'offline-tts-access', appId: 'offline-tts-app',
+    endpoint: 'https://offline-tts.example/service' };
+  const publicURL = 'https://docs.example/v1/models';
+  const secrets = Object.values(tts);
+  llmRequest = t.mock.fn(async () => response({ data: [
+    ...secrets.map(id => ({ id })),
+    { id: 'vendor/model:fast', owned_by: [...secrets, 'path:C:/Users/private', 'path:/Users/private/a', publicURL].join(' ') },
+  ] }));
+  const result = await request('llm/models', 200, { apiKey, baseURL: 'https://offline-model.example', tts });
+  assert.equal(result.data.count, 1);
+  assert.deepEqual(result.data.models, [{ id: 'vendor/model:fast', ownedBy: '*** *** *** *** path:*** path:*** ' + publicURL }]);
+  assert.equal(llmRequest.mock.callCount(), 1);
+});
+
+test('模型列表路由返回模型或手动填写提示，并校验查询范围', async t => {
+  setEnv(t, { DEEPSEEK_API_KEY: '', LLM_BASE_URL: '', VISION_API_KEY: '', VISION_BASE_URL: '' });
+  const visionBaseURL = 'https://offline-vision.example';
+  let status = 200;
+  llmRequest = t.mock.fn(async (url, options) => {
+    assert.equal(url, visionBaseURL + '/v1/models');
+    assert.equal(options.method, 'GET');
+    assert.equal(options.headers.Authorization, 'Bearer ' + apiKey);
+    return response({ data: [{ id: 'vision-test', owned_by: 'fixture' }] }, status);
+  });
+  const body = { scope: 'vision', visionApiKey: apiKey, visionBaseURL };
+  const listed = await request('llm/models', 200, body);
+  assert.equal(listed.success, true);
+  assert.equal(listed.data.supported, true);
+  assert.equal(listed.data.count, 1);
+  assert.deepEqual(listed.data.models, [{ id: 'vision-test', ownedBy: 'fixture' }]);
+  status = 405;
+  const unsupported = await request('llm/models', 200, body);
+  assert.equal(unsupported.data.supported, false);
+  assert.match(unsupported.data.message, /手动填写/);
+  await request('llm/models', 400, { ...body, scope: 'other' });
+  assert.equal(llmRequest.mock.callCount(), 2);
+});
+
+test('正文润色路由返回脱敏结果，并在无正文时不调用上游', async t => {
+  const baseURL = 'https://offline-model.example';
+  llmRequest = t.mock.fn(async (url, options) => {
+    assert.equal(url, baseURL + '/v1/chat/completions');
+    assert.equal(options.method, 'POST');
+    assert.equal(options.headers.Authorization, 'Bearer ' + apiKey);
+    return response(completion(JSON.stringify({ content: '正文。', changeSummary: '修正标点 ' + baseURL })));
+  });
+  const body = { apiKey, baseURL, title: '原始标题', content: '正文' };
+  const polished = await request('polish-text', 200, body);
+  assert.deepEqual(polished, { success: true, data: {
+    title: '原始标题', content: '正文。', length: 3, truncated: false, changeSummary: '修正标点 ***',
+  } });
+  await request('polish-text', 400, { ...body, content: '' });
+  assert.equal(llmRequest.mock.callCount(), 1);
+});
+
+test('模型列表和润色路由在客户端断开时取消上游请求', { timeout: 5000 }, async () => {
+  for (const route of ['llm/models', 'polish-text']) {
+    const client = new AbortController();
+    let ready, stopped;
+    const started = new Promise(resolve => { ready = resolve; });
+    const abortedUpstream = new Promise(resolve => { stopped = resolve; });
+    llmRequest = (url, { signal }) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => {
+        reject(signal.reason);
+        stopped();
+      }, { once: true });
+      ready();
+    });
+    const pending = fetch(base + '/api/' + route, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: client.signal,
+      body: JSON.stringify({ apiKey, baseURL: 'https://offline-model.example', content: '正文' }),
+    });
+    const failed = assert.rejects(pending, { name: 'AbortError' });
+    try {
+      await started;
+      client.abort();
+      await Promise.all([failed, abortedUpstream]);
+    } finally {
+      client.abort();
+    }
+  }
+});
+
+test('语音连接测试仅在临时目录合成，成功和错误后都清理', async t => {
+  const { httpTtsFixture } = require('./helpers/httpTtsFixture');
+  let status = 200;
+  const { endpoint, requests } = await httpTtsFixture(t, res => {
+    res.statusCode = status;
+    res.end(status === 200 ? JSON.stringify({ base_resp: { status_code: 0 }, data: { audio: makeMp3(3).toString('hex') } }) :
+      'private-value ' + endpoint + ' /Users/private/unknown');
+  });
+  setEnv(t, { MINIMAX_TTS_ENDPOINT: endpoint, MINIMAX_API_KEY: '', MINIMAX_TTS_MODEL: 'speech-02-hd', ALLOW_PRIVATE_TTS_ENDPOINT: '1' });
+  const files = fs.readdirSync(root, { recursive: true });
+  let outputPath;
+  observeProbe = args => { outputPath = args.outputPath; assert.equal(args.text, '你好'); };
+  t.after(() => { observeProbe = undefined; });
+  const tts = { provider: 'minimax', model: 'speech-02-turbo', voiceMapping: { 阿泽: 'S_probe' } };
+  await request('tts/test', 400, { tts });
+  process.env.MINIMAX_API_KEY = apiKey;
+  await request('tts/test', 400, { tts: { ...tts, endpoint: 'https://other-service.example' } });
+  assert.match((await request('tts/test', 200, { tts: { provider: 'edge' } })).data.message, /未发起/);
+  assert.equal(requests.length, 0);
+  const result = await request('tts/test', 200, { tts });
+  assert.equal(result.data.provider, 'minimax');
+  assert.equal(result.data.model, 'speech-02-turbo');
+  assert.equal(result.data.duration, 0.072);
+  assert.equal(result.data.ok, true);
+  assert.equal(requests[0].body.voice_setting.voice_id, 'S_probe');
+  assert.equal(requests[0].body.model, 'speech-02-turbo');
+  assert.equal(path.dirname(path.dirname(outputPath)), path.resolve(os.tmpdir()));
+  assert.ok(!fs.existsSync(path.dirname(outputPath)));
+  status = 403;
+  const failed = await request('tts/test', 502, { tts });
+  assert.match(failed.error, /403/);
+  assert.ok(!failed.error.includes('/Users') && !failed.error.includes(endpoint));
+  assert.ok(!fs.existsSync(path.dirname(outputPath)));
+  assert.deepEqual(fs.readdirSync(root, { recursive: true }), files);
+});
+
+test('本地模型服务经实际 HTTP 传输完成 /models 及最小对话探测', async t => {
+  const http = require('node:http');
+  const { requestProvider } = require('../src/services/providerHttp');
+  const calls = [];
+  let catalogue, chatStatus;
+  let chatBody = { choices: [{ message: { content: 'hi' } }] };
+  const fixture = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    calls.push({ url: req.url, method: req.method, auth: req.headers.authorization, body: Buffer.concat(chunks).toString() });
+    if (req.method === 'GET') return res.end(catalogue);
+    res.writeHead(chatStatus).end(chatStatus === 200 ? JSON.stringify(chatBody) : '{"error":"model not found"}');
+  });
+  fixture.listen(0, '127.0.0.1');
+  await once(fixture, 'listening');
+  t.after(() => new Promise(resolve => fixture.close(resolve)));
+  setEnv(t, { LLM_BASE_URL: 'http://127.0.0.1:' + fixture.address().port, DEEPSEEK_API_KEY: apiKey, LLM_MODEL: 'local-model' });
+  llmRequest = requestProvider;
+  for (const [list, chat, expectedStatus, needsChat] of [
+    [{ data: [null, { id: 'local-model' }] }, 404, 200, false],
+    [{ error: 'invalid catalogue', data: [{ id: 'local-model' }] }, 404, 502, true],
+    [{ data: [{ id: 'other-model' }] }, 404, 502, true],
+    [{ data: [{ id: 'other-model' }] }, 200, 200, true],
+    [{ data: [] }, 200, 200, true],
+    [{ models: [] }, 200, 200, true],
+    ['not JSON', 200, 200, true],
+  ]) {
+    calls.length = 0;
+    catalogue = typeof list === 'string' ? list : JSON.stringify(list);
+    chatStatus = chat;
+    const response = await request('llm/test', expectedStatus, {});
+    if (expectedStatus === 502) assert.match(response.error, /模型.*404/);
+    else assert.equal(response.data.ok, true);
+    assert.equal(calls.length, needsChat ? 2 : 1);
+    assert.deepEqual(calls[0], { url: '/v1/models', method: 'GET', auth: 'Bearer ' + apiKey, body: '' });
+    if (needsChat) {
+      assert.equal(calls[1].url, '/v1/chat/completions');
+      assert.equal(calls[1].method, 'POST');
+      assert.equal(calls[1].auth, 'Bearer ' + apiKey);
+      assert.deepEqual(JSON.parse(calls[1].body), { model: 'local-model', messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 });
+    }
+  }
+  catalogue = JSON.stringify({ data: [] });
+  chatStatus = 200;
+  for (const first of [null, {}, [], 'hi', { message: { content: 42 } },
+    { message: { content: '' } }, { message: { reasoning_content: '   ' } }, { text: '' }]) {
+    chatBody = { choices: [first, { text: 'only the first choice counts' }] };
+    const result = await request('llm/test', 502, {});
+    assert.equal(result.error, '模型接口响应格式无效');
+  }
+  for (const first of [{ message: { content: '', reasoning_content: ' hi ' } }, { text: 'hi' }]) {
+    chatBody = { choices: [first] };
+    assert.equal((await request('llm/test', 200, {})).data.ok, true);
+  }
+  calls.length = 0;
+  await request('llm/test', 400, { apiKey, baseURL: process.env.LLM_BASE_URL + '/untrusted' });
+  assert.equal(calls.length, 0);
 });

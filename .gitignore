@@ -4,4 +4,5 @@ node_modules/
 .DS_Store
 data/
 /public/podcasts/
+/启动 AI 妙听.app/
 *.log

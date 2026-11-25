@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 const { buildCacheKey, createTtsCache } = require('../src/services/ttsCache');
 const { makeMp3 } = require('./helpers/mp3Fixtures');
 const { getMp3DurationSeconds } = require('../src/services/mp3Utils');
@@ -16,6 +17,17 @@ test('缓存键稳定且区分所有影响声音的字段', () => {
   for (const field of Object.keys(input)) {
     assert.notEqual(buildCacheKey({ ...input, [field]: input[field] + '2' }), key);
   }
+});
+
+test('情绪区分缓存，省略或填写空情绪均保留旧缓存键', () => {
+  const previousFields = [input.provider, input.model, input.voice, input.rate, input.pitch, input.text, 'scope'];
+  const oldKey = createHash('sha256').update(JSON.stringify(previousFields)).digest('hex');
+  const scoped = { ...input, scopeHash: 'scope' };
+  for (const emotion of [undefined, '', '  ', 1]) assert.equal(buildCacheKey({ ...scoped, emotion }), oldKey);
+  const curiousKey = buildCacheKey({ ...scoped, emotion: '好奇' });
+  assert.equal(buildCacheKey({ ...scoped, emotion: ' 好奇 ' }), curiousKey);
+  assert.notEqual(curiousKey, oldKey);
+  assert.notEqual(curiousKey, buildCacheKey({ ...scoped, emotion: '笑意' }));
 });
 
 test('缓存校验原始音频，原子复制，损坏时清除并允许重建', t => {
@@ -73,4 +85,45 @@ test('逐句合成优先复用工作目录，然后查缓存，且报告两种�
   assert.deepEqual(progress, [[0, 0, 0], [1, 1, 1], [1, 1, 1], [2, 2, 1], [2, 2, 1], [3, 2, 1]]);
   assert.equal(result.cachedSegments, 2);
   assert.equal(result.reusedSegments, 1);
+});
+
+test('每次合成选择的模型同时用于上游请求与缓存键，缺省音色来自当前服务商', async t => {
+  const { synthesizeDialogueScript } = require('../src/services/ttsService');
+  const { createMinimaxProvider } = require('../src/services/minimaxTtsProvider');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tts-model-cache-'));
+  t.after(() => fs.rmSync(root, { recursive: true }));
+  const cache = createTtsCache(path.join(root, 'cache'));
+  const calls = [];
+  const provider = {
+    ...createMinimaxProvider({ minRequestIntervalMs: 0 }), synthesizeToFile({ outputPath, voice, emotion, adapterOptions }) {
+      calls.push([voice, adapterOptions.model, emotion]);
+      const audio = makeMp3(5);
+      fs.writeFileSync(outputPath, audio);
+      return { bytes: audio.length, duration: 0.12 };
+    },
+  };
+  const cases = [
+    ['speech-02-hd', undefined, 0], ['speech-02-turbo', undefined, 0], ['speech-02-hd', undefined, 1],
+    ['speech-02-hd', '好奇', 0], ['speech-02-hd', '好奇', 1],
+  ];
+  for (const [index, [ttsModel, emotion, hits]] of cases.entries()) {
+    const result = await synthesizeDialogueScript([{ speaker: '小晓', text: '相同台词', emotion }], path.join(root, String(index)),
+      undefined, { cache, provider, ttsModel });
+    assert.equal(result.cachedSegments, hits);
+  }
+  assert.deepEqual(calls, cases.filter(([, , hits]) => hits === 0).map(([model, emotion]) => [provider.defaultVoices.小晓, model, emotion]));
+});
+
+test('官方预置音色共享缓存，自定义服务只使用实际选中的认证方式生成摘要', () => {
+  const { volcengineProvider: provider, DEFAULT_VOLCENGINE_ENDPOINT } = require('../src/services/volcengineTtsProvider');
+  const voice = provider.defaultVoices.阿泽;
+  const hash = (options, id = voice) => provider.getScopeHash([id], options);
+  assert.equal(hash({ apiKey: 'key-A' }), hash({ endpoint: DEFAULT_VOLCENGINE_ENDPOINT, apiKey: 'key-B' }));
+  assert.notEqual(hash({ apiKey: 'key-A' }, 'S_private'), hash({ apiKey: 'key-B' }, 'S_private'));
+  const endpoint = 'https://custom.example/speech';
+  assert.equal(hash({ endpoint, apiKey: 'key-A' }), hash({ endpoint, apiKey: ' key-A ', appId: 'unused', accessKey: 'unused' }));
+  const pair = { endpoint, appId: 'app-A', accessKey: 'access-A' };
+  assert.equal(hash(pair), hash({ ...pair, appId: ' app-A ', accessKey: ' access-A ' }));
+  assert.notEqual(hash(pair), hash({ ...pair, appId: 'app-B' }));
+  assert.notEqual(hash(pair), hash({ ...pair, accessKey: 'access-B' }));
 });

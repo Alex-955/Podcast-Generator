@@ -150,3 +150,45 @@ test('多段带 ID3v2 头、ID3v1 尾的音频拼接后可逐帧解析，字幕�
   assert.strictEqual(combined.length, expectedFrames * FRAME_SIZE_24K);
   approx(timeline.totalDuration, analyzeMp3(combined).durationSeconds);
 });
+
+test('同采样率的不同码率片段按实际帧数合并，与时间轴一致', t => {
+  const { dir, entries } = setupEntries([5]);
+  t.after(() => fs.rmSync(dir, { recursive: true }));
+  entries.push(writeEntry(dir, 1, 7, { header: Buffer.from([0xff, 0xf3, 0x84, 0xc0]), frameSize: 192 }));
+  const timeline = buildSentenceTimeline(entries);
+  const file = path.join(dir, 'full_podcast.mp3');
+  concatenateAudioFiles(entries.map(e => e.filePath), file);
+  const bytes = fs.readFileSync(file);
+  const analysis = analyzeMp3(bytes);
+  assert.equal(analysis.ok, true);
+  assert.equal(bytes.toString('ascii', 13, 17), 'Xing');
+  assert.equal(bytes.readUInt32BE(21), analysis.frameCount);
+  assert.equal(bytes.readUInt32BE(25), bytes.length);
+  const toc = [...bytes.subarray(29, 129)];
+  assert.deepEqual(toc, [...toc].sort((a, b) => a - b));
+  assert.ok(toc.at(-1) > 0);
+  assert.equal(analysis.frameCount, 12 + timeline.sentenceGapFrames);
+  approx(analysis.durationSeconds, timeline.totalDuration);
+});
+
+test('Xing、Info 和 VBRI 单段统计不计入字幕与完整节目时长', t => {
+  const { dir, entries } = setupEntries([7, 9, 10]);
+  t.after(() => fs.rmSync(dir, { recursive: true }));
+  const tags = ['Xing', 'Info', 'VBRI'];
+  for (const [index, entry] of entries.entries()) {
+    const tag = makeMp3(1);
+    const pos = index === 2 ? 36 : 13;
+    tag.write(tags[index], pos);
+    tag.writeUInt32BE(7, pos + 4);
+    tag.writeUInt32BE(999999, pos + 8);
+    fs.writeFileSync(entry.filePath, Buffer.concat([tag, fs.readFileSync(entry.filePath)]));
+  }
+  const timeline = buildSentenceTimeline(entries);
+  const out = path.join(dir, 'full.mp3');
+  concatenateAudioFiles(entries.map(e => e.filePath), out);
+  const bytes = fs.readFileSync(out);
+  for (const tag of tags) assert.equal(bytes.indexOf(tag), -1);
+  const analysis = analyzeMp3(bytes);
+  assert.equal(analysis.frameCount, 26 + 2 * timeline.sentenceGapFrames);
+  approx(timeline.totalDuration, analysis.durationSeconds);
+});
