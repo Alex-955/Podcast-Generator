@@ -22,7 +22,7 @@ test.before(async () => {
   }
   const settings = {
     DATA_DIR: path.join(root, 'data'), PODCASTS_DIR: path.join(publicDir, 'external-audio'),
-    CORS_ORIGIN: 'https://one.example, https://two.example', DEEPSEEK_API_KEY: '',
+    CORS_ORIGIN: 'https://one.example, https://two.example', DEEPSEEK_API_KEY: '', TTS_PROVIDER: '',
   };
   previousEnv = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
   Object.assign(process.env, settings);
@@ -174,4 +174,41 @@ test('创建、单活冲突、取消、续跑、轮询成品、历史与外置�
   assert.ok(fs.existsSync(path.join(publicDir, 'external-audio', task.id, 'meta.json')));
   await request(route + '/resume', 409, { apiKey });
   await request(route + '/cancel', 409, {});
+});
+
+test('语音服务目录实时报告配置状态，创建任务同步拒绝缺失凭据与端点错配', async t => {
+  const env = {
+    TTS_PROVIDER: 'minimax', MINIMAX_API_KEY: '', MINIMAX_TTS_ENDPOINT: 'https://minimax-private.example/speech',
+    VOLCENGINE_TTS_API_KEY: '', VOLCENGINE_TTS_APP_ID: '', VOLCENGINE_TTS_ACCESS_KEY: '',
+    VOLCENGINE_TTS_ENDPOINT: 'https://volc-private.example/speech',
+  };
+  for (const [key, value] of Object.entries(env)) {
+    const old = process.env[key];
+    t.after(() => { if (old === undefined) delete process.env[key]; else process.env[key] = old; });
+    process.env[key] = value;
+  }
+  const list = async () => {
+    const response = await fetch(base + '/api/tts/providers');
+    assert.equal(response.status, 200);
+    const { success, data } = await response.json();
+    assert.equal(success, true);
+    assert.equal(data.defaultProvider, 'minimax');
+    assert.deepEqual(data.items.map(p => p.id), ['edge', 'minimax', 'volcengine']);
+    for (const value of [env.MINIMAX_TTS_ENDPOINT, env.VOLCENGINE_TTS_ENDPOINT, 'fake-mini-key', 'fake-app-id', 'fake-access-key']) {
+      assert.ok(!JSON.stringify(data).includes(value));
+    }
+    return data.items.map(p => p.serverConfigured);
+  };
+  assert.deepEqual(await list(), [true, false, false]);
+  await request('tasks', 400, payload);
+  for (const provider of ['minimax', 'volcengine', 'missing']) await request('tasks', 400, { ...payload, tts: { provider } });
+  Object.assign(process.env, { MINIMAX_API_KEY: 'fake-mini-key', VOLCENGINE_TTS_APP_ID: 'fake-app-id', VOLCENGINE_TTS_ACCESS_KEY: 'fake-access-key' });
+  assert.deepEqual(await list(), [true, true, true]);
+  const endpoint = 'https://other-offline.example/audio';
+  for (const tts of [{ provider: 'minimax' }, { provider: 'volcengine' }, { provider: 'volcengine', appId: 'own-app' },
+    { provider: 'volcengine', accessKey: 'own-access' }]) {
+    const error = await request('tasks', 400, { ...payload, tts: { ...tts, endpoint } });
+    assert.ok(!JSON.stringify(error).includes(endpoint));
+  }
+  await request('tasks', 400, { ...payload, tts: { provider: 'minimax', apiKey: 'own-key', endpoint: 'file:///tmp/' } });
 });

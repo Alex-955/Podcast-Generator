@@ -9,7 +9,9 @@ const cors = require('cors');
 const path = require('node:path');
 const { extractArticle } = require('./src/services/extractor');
 const { createTaskManager } = require('./src/services/taskManager');
-const { InputError, redactSecrets } = require('./src/services/validation');
+const { InputError, redactSecrets, ttsSecrets } = require('./src/services/validation');
+
+const { getPublicTtsProviders, resolveDefaultProviderId } = require('./src/services/ttsProvider');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const FRONTEND_FILES = new Set(['/index.html', '/style.css', '/app.js', '/inputSource.js']);
@@ -39,6 +41,9 @@ function createApp(options = {}) {
   }
   app.use('/api', express.json({ limit: '10mb' }));
 
+  app.get('/api/tts/providers', (req, res) => res.json({
+    success: true, data: { items: getPublicTtsProviders(), defaultProvider: resolveDefaultProviderId() },
+  }));
   app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
   app.post('/api/extract-article', async (req, res) => {
     const { url, rawText } = req.body || {};
@@ -74,7 +79,8 @@ function createApp(options = {}) {
     let detail = err.message;
     if (status === 500 || err.path) detail = '本地服务未能完成请求';
     if (err.type === 'entity.parse.failed') detail = '请求体必须是有效 JSON';
-    const sensitive = [req.body?.apiKey, req.body?.baseURL, process.env.DEEPSEEK_API_KEY, dataDir, podcastsDir];
+    const sensitive = [req.body?.apiKey, req.body?.baseURL, process.env.DEEPSEEK_API_KEY, process.env.LLM_BASE_URL,
+      ...ttsSecrets(req.body?.tts ?? {}), dataDir, podcastsDir];
     const error = redactSecrets(detail, sensitive);
     const code = typeof err.code === 'string' ? redactSecrets(err.code, sensitive) : undefined;
     res.status(status).json({ success: false, error, code });

@@ -1,4 +1,7 @@
 const { EdgeTtsAdapter } = require('./edgeTtsAdapter');
+const { ttsSecrets, redactSecrets } = require('./validation');
+const { minimaxProvider } = require('./minimaxTtsProvider');
+const { volcengineProvider } = require('./volcengineTtsProvider');
 // 默认角色语音配置（微软神经网络语音）
 const DEFAULT_VOICES = {
   阿泽: 'zh-CN-YunxiNeural', // 沉稳、年轻而温暖的男声（云希）
@@ -44,7 +47,8 @@ function listTtsProviders() {
 }
 
 registerTtsProvider({
-  id: DEFAULT_PROVIDER_ID,
+  id: DEFAULT_PROVIDER_ID, name: 'Microsoft Edge', requiresAuth: false, authModes: [],
+  availableModels: ['edge-readaloud-24k48k'],
   model: 'edge-readaloud-24k48k',
   defaultVoices: DEFAULT_VOICES,
   availableVoices: AVAILABLE_VOICES,
@@ -54,7 +58,42 @@ registerTtsProvider({
   },
 });
 
+registerTtsProvider(minimaxProvider);
+registerTtsProvider(volcengineProvider);
+
+function resolveDefaultProviderId() {
+  const id = process.env.TTS_PROVIDER?.trim();
+  return providers.has(id) ? id : DEFAULT_PROVIDER_ID;
+}
+
+function resolveDefaultModel(provider = getTtsProvider(resolveDefaultProviderId())) {
+  if (typeof provider === 'string') provider = getTtsProvider(provider);
+  if (provider.id === 'minimax') return process.env.MINIMAX_TTS_MODEL?.trim() || provider.model;
+  if (provider.id === 'volcengine') return process.env.VOLCENGINE_TTS_RESOURCE_ID?.trim() || provider.model;
+  return provider.model;
+}
+
+function getPublicProviderInfo(provider = getTtsProvider(resolveDefaultProviderId())) {
+  if (typeof provider === 'string') provider = getTtsProvider(provider);
+  const { id, name, requiresAuth = false, authModes = [], availableModels = [], defaultVoices, availableVoices } = provider;
+  const env = process.env;
+  let serverConfigured = !requiresAuth;
+  if (id === 'minimax') serverConfigured = Boolean(env.MINIMAX_API_KEY?.trim());
+  if (id === 'volcengine') serverConfigured = Boolean(env.VOLCENGINE_TTS_API_KEY?.trim() ||
+    (env.VOLCENGINE_TTS_APP_ID?.trim() && env.VOLCENGINE_TTS_ACCESS_KEY?.trim()));
+  const configuredModel = resolveDefaultModel(provider);
+  const safeModel = /^[a-zA-Z0-9_.:-]{1,120}$/.test(configuredModel) &&
+    redactSecrets(configuredModel, [...ttsSecrets(), env.DEEPSEEK_API_KEY]) === configuredModel;
+  return { id, name, requiresAuth, authModes, availableModels, defaultModel: safeModel ? configuredModel : provider.model,
+    defaultVoices, availableVoices, serverConfigured };
+}
+
+function getPublicTtsProviders() {
+  return listTtsProviders().map(getPublicProviderInfo);
+}
+
 module.exports = {
+  resolveDefaultProviderId, resolveDefaultModel, getPublicProviderInfo, getPublicTtsProviders,
   DEFAULT_VOICES,
   AVAILABLE_VOICES,
   AVAILABLE_VOICE_IDS,

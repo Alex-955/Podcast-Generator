@@ -6,7 +6,6 @@
  * - 上游错误（502）：抓取/LLM/TTS 失败（由各服务抛出并带 statusCode）
  * - 其他（500）：内部错误
  */
-const { AVAILABLE_VOICE_IDS } = require('./ttsProvider');
 
 const MAX_TITLE_LENGTH = 200;
 const MAX_CONTENT_LENGTH = 12000; // 与 extractor.MAX_CONTENT_LENGTH 一致的确定性截断语义
@@ -88,31 +87,41 @@ function validateDialogueList(dialogue) {
 /**
  * 校验音色映射：值必须在 AVAILABLE_VOICES 白名单内。
  */
-function validateVoiceMapping(mapping) {
+function validateVoiceMapping(mapping, providerOrAllowedIds) {
   if (mapping === undefined || mapping === null) {
     return undefined;
   }
   if (typeof mapping !== 'object' || Array.isArray(mapping)) {
     throw new InputError('voiceMapping 格式无效');
   }
+  const id = providerOrAllowedIds?.id || providerOrAllowedIds;
+  const commercial = id === 'minimax' || id === 'volcengine';
+  const allowedIds = Array.isArray(providerOrAllowedIds) ? providerOrAllowedIds : require('./ttsProvider').AVAILABLE_VOICE_IDS;
   const normalized = {};
   for (const [speaker, voice] of Object.entries(mapping)) {
-    if (typeof voice !== 'string' || !AVAILABLE_VOICE_IDS.includes(voice)) {
-      throw new InputError(`不支持的音色：${String(voice).slice(0, 40)}`);
+    if (commercial && !['阿泽', '小晓'].includes(speaker)) throw new InputError('不支持的播客角色');
+    const valid = typeof voice === 'string' && (commercial ? /^[a-zA-Z0-9_() .:-]{1,120}$/.test(voice) && voice.trim() : allowedIds.includes(voice));
+    if (!valid) {
+      throw new InputError('不支持的音色');
     }
     normalized[speaker] = voice;
   }
   return normalized;
 }
 
+function ttsSecrets(tts = {}) {
+  const env = process.env;
+  return [tts.apiKey, tts.appId, tts.accessKey, tts.endpoint, env.MINIMAX_API_KEY, env.MINIMAX_TTS_ENDPOINT,
+    env.VOLCENGINE_TTS_API_KEY, env.VOLCENGINE_TTS_APP_ID, env.VOLCENGINE_TTS_ACCESS_KEY, env.VOLCENGINE_TTS_ENDPOINT];
+}
+
 /** 日志/错误消息脱敏：去掉 API Key 形态的凭据 */
 function redactSecrets(text, sensitiveValues = []) {
   let message = String(text);
-  for (const value of sensitiveValues) {
-    if (typeof value === 'string' && value) message = message.replaceAll(value, '***');
-  }
+  const values = sensitiveValues.filter(value => typeof value === 'string' && value).sort((a, b) => b.length - a.length);
+  for (const value of values) message = message.replaceAll(value, '***');
   return message
-    .replace(/(?:Authorization|apiKey|baseURL|filePath)["']?\s*[:=]\s*["']?(?:Bearer\s+|Basic\s+)?[^\s,"'}]+/gi, '***')
+    .replace(/(?:Authorization|X-Api-(?:Access-Key|App-Id|Key)|accessKey|appId|apiKey|baseURL|endpoint|filePath)["']?\s*[:=]\s*["']?(?:Bearer\s+|Basic\s+)?[^\s,"'}]+/gi, '***')
     .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer ***')
     .replace(/sk-[A-Za-z0-9_-]{6,}/g, 'sk-***')
     .replace(/((?:api[-_]?key|token|secret)[\"'\s:=]+)[A-Za-z0-9._~+/-]{6,}/gi, '$1***');
@@ -129,4 +138,5 @@ module.exports = {
   validateDialogueList,
   validateVoiceMapping,
   redactSecrets,
+  ttsSecrets,
 };

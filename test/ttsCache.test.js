@@ -74,3 +74,27 @@ test('逐句合成优先复用工作目录，然后查缓存，且报告两种�
   assert.equal(result.cachedSegments, 2);
   assert.equal(result.reusedSegments, 1);
 });
+
+test('每次合成选择的模型同时用于上游请求与缓存键，缺省音色来自当前服务商', async t => {
+  const { synthesizeDialogueScript } = require('../src/services/ttsService');
+  const { getTtsProvider } = require('../src/services/ttsProvider');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tts-model-cache-'));
+  t.after(() => fs.rmSync(root, { recursive: true }));
+  const cache = createTtsCache(path.join(root, 'cache'));
+  const calls = [];
+  const provider = {
+    ...getTtsProvider('minimax'), synthesizeToFile({ outputPath, voice, adapterOptions }) {
+      calls.push([voice, adapterOptions.model]);
+      const audio = makeMp3(5);
+      fs.writeFileSync(outputPath, audio);
+      return { bytes: audio.length, duration: 0.12 };
+    },
+  };
+  const models = ['speech-02-hd', 'speech-02-turbo', 'speech-02-hd'];
+  for (const [index, ttsModel] of models.entries()) {
+    const result = await synthesizeDialogueScript([{ speaker: '小晓', text: '相同台词' }], path.join(root, String(index)),
+      undefined, { cache, provider, ttsModel });
+    assert.equal(result.cachedSegments, index === 2 ? 1 : 0);
+  }
+  assert.deepEqual(calls, models.slice(0, 2).map(m => [provider.defaultVoices.小晓, m]));
+});

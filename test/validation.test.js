@@ -91,3 +91,16 @@ test('redactSecrets：API Key 形态凭据被脱敏', () => {
   // 普通文案不受影响
   assert.strictEqual(redactSecrets('生成播客失败: 连接超时'), '生成播客失败: 连接超时');
 });
+
+test('商业服务允许自定义音色且限定角色与字符；服务商凭据形态脱敏', () => {
+  for (const provider of ['minimax', 'volcengine']) {
+    const mapping = { 阿泽: 'Chinese (Mandarin)_Radio_Host', 小晓: 'S_cloned:2.0' };
+    assert.deepStrictEqual(validateVoiceMapping(mapping, provider), mapping);
+    for (const invalid of [{ 旁白: 'S_new' }, { 阿泽: '../path' }, { 小晓: 'a'.repeat(121) }]) {
+      assert.throws(() => validateVoiceMapping(invalid, provider), InputError);
+    }
+  }
+  for (const field of ['X-Api-Key', 'X-Api-Access-Key', 'X-Api-App-Id', 'accessKey', 'appId', 'endpoint']) {
+    assert.ok(!redactSecrets(JSON.stringify({ [field]: 'private-value' })).includes('private-value'));
+  }
+});

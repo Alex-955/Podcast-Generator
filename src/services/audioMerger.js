@@ -3,6 +3,7 @@ const path = require('path');
 const {
   extractMp3Body,
   analyzeMp3,
+  compatibleFrameFormat,
   buildSilenceFrames,
   computeGap,
   SENTENCE_GAP_SECONDS,
@@ -14,7 +15,7 @@ const {
  * 一致的真实静音帧。
  *
  * B0-5 契约（不再静默跳过）：
- * - 缺失片段、无效 MP3、编码格式不一致（版本/码率/采样率）一律抛错；
+ * - 缺失片段、无效 MP3、编码格式不一致（版本/帧采样数/采样率）一律抛错；
  * - 句间 gap 经 computeGap 按帧量化，与 ttsService.buildSentenceTimeline
  *   使用同一口径，保证字幕时间轴与合并产物精确一致。
  */
@@ -36,11 +37,7 @@ function concatenateAudioFiles(filePaths, outputFilePath, { gapSeconds = SENTENC
     }
     if (!format) {
       format = frame;
-    } else if (
-      frame.versionBits !== format.versionBits ||
-      frame.bitrateIdx !== format.bitrateIdx ||
-      frame.samplerateIdx !== format.samplerateIdx
-    ) {
+    } else if (!compatibleFrameFormat(frame, format)) {
       throw new Error(`音频片段编码格式与其他片段不一致，拒绝拼接：${path.basename(filePath)}`);
     }
     cleanedBuffers.push(extractMp3Body(raw).subarray(frame.frameOffset));

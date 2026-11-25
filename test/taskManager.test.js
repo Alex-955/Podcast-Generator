@@ -442,3 +442,124 @@ test('上游错误即使回显整段凭据或存储路径，也不会进入任�
   noLeaks(failed, root);
   noLeaks(JSON.parse(fs.readFileSync(path.join(config.tasksDir, id + '.json'))), root);
 });
+
+test('换语音服务后从首句重配，旧句与成品同步清理，沿用原文与剧本', async t => {
+  const { httpTtsFixture } = require('./helpers/httpTtsFixture');
+  const { HEADER_48K, FRAME_SIZE_48K } = require('./helpers/mp3Fixtures');
+  const audio = makeMp3(4, { header: HEADER_48K, frameSize: FRAME_SIZE_48K });
+  const { endpoint, requests } = await httpTtsFixture(t, res => res.end(JSON.stringify({ code: 20000000, data: audio.toString('base64') })));
+  const oldEndpoint = process.env.VOLCENGINE_TTS_ENDPOINT;
+  process.env.VOLCENGINE_TTS_ENDPOINT = endpoint;
+  t.after(() => { if (oldEndpoint === undefined) delete process.env.VOLCENGINE_TTS_ENDPOINT; else process.env.VOLCENGINE_TTS_ENDPOINT = oldEndpoint; });
+  let llmCalls = 0;
+  const edge = {
+    ...getTtsProvider(), synthesizeToFile({ outputPath, text }) {
+      if (text !== dialogue[0].text) throw Object.assign(new Error('模拟中断'), { statusCode: 400 });
+      fs.writeFileSync(outputPath, makeMp3(1));
+      return { bytes: 144, duration: 0.024 };
+    },
+  };
+  const { config, manager } = setup(t, { ttsProvider: edge, scriptGenerator: () => { llmCalls++; return script; } });
+  const { id } = manager.createTask(payload);
+  const failed = await waitFor(() => manager.getTask(id), x => x.status === 'failed');
+  assert.equal(failed.error.failedSegmentIndex, 1);
+  const dir = path.join(config.podcastsDir, id);
+  assert.deepEqual(fs.readdirSync(dir), ['sentence_000.mp3']);
+  fs.writeFileSync(path.join(dir, 'full_podcast.mp3'), makeMp3(1));
+  const appId = 'offline-app-value', accessKey = 'offline-access-value';
+  const tts = { provider: 'volcengine', appId, accessKey, endpoint, resourceId: 'seed-tts-1.0', voiceMapping: { 阿泽: 'S_cloned' } };
+  const resumed = manager.resumeTask(id, { tts });
+  assert.deepEqual(fs.readdirSync(dir), []);
+  const done = await waitFor(() => manager.getTask(id), x => x.status === 'completed');
+  assert.equal(llmCalls, 1);
+  assert.equal(done.progress.cachedSegments, 0);
+  assert.deepEqual(requests.map(r => r.body.req_params.text), dialogue.map(l => l.text));
+  assert.deepEqual(requests.map(r => r.body.req_params.speaker), ['S_cloned', getTtsProvider('volcengine').defaultVoices.小晓, 'S_cloned']);
+  assert.ok(requests.every(r => r.headers['x-api-resource-id'] === tts.resourceId && r.headers['x-api-app-id'] === appId));
+  const stored = JSON.parse(fs.readFileSync(path.join(config.tasksDir, id + '.json')));
+  assert.deepEqual(stored.script, script);
+  assert.equal(stored.sourceContent.length, 12000);
+  for (const record of [resumed, done, stored, JSON.parse(fs.readFileSync(path.join(dir, 'meta.json')))]) {
+    assert.equal(record.ttsProvider, 'volcengine');
+    assert.equal(record.ttsModel, 'seed-tts-1.0');
+    assert.equal(record.voiceMapping.阿泽, 'S_cloned');
+    for (const secret of [appId, accessKey, endpoint]) assert.ok(!JSON.stringify(record).includes(secret));
+  }
+});
+
+test('TTS 凭据回显在首次落盘、抓取、模型输出和失败记录边界均被拦截或脱敏', async t => {
+  const tts = { provider: 'minimax', apiKey: 'private-mini-key', endpoint: 'https://mini-private.example/v1' };
+  let modelOutput = script;
+  const { config, manager } = setup(t, {
+    extractor: () => ({ title: '正文', content: '回显 ' + tts.apiKey }),
+    scriptGenerator: () => modelOutput,
+    ttsSynthesizer: () => { throw new Error(`连接 ${tts.endpoint} 时凭据 ${tts.apiKey} 失效`); },
+  });
+  for (const fields of [{ content: tts.apiKey }, { title: tts.endpoint }, { tts: { ...tts, model: tts.apiKey } },
+    { tts: { ...tts, voiceMapping: { 阿泽: tts.apiKey } } }]) {
+    assert.throws(() => manager.createTask({ ...payload, tts, ...fields }), { statusCode: 400 });
+  }
+  for (const stage of ['extract', 'script', 'tts']) {
+    modelOutput = stage === 'script' ? { ...script, summary: '回显 ' + tts.endpoint } : script;
+    const input = stage === 'extract' ? { mode: 'url', url: 'https://article.example/item' } : {};
+    const { id } = manager.createTask({ ...payload, tts, ...input });
+    const failed = await waitFor(() => manager.getTask(id), x => x.status === 'failed');
+    assert.equal(failed.error.stage, stage);
+    const json = fs.readFileSync(path.join(config.tasksDir, id + '.json'), 'utf8') + JSON.stringify(failed);
+    for (const secret of [tts.apiKey, tts.endpoint]) assert.ok(!json.includes(secret));
+    assert.throws(() => manager.resumeTask(id, { apiKey, tts: { provider: 'volcengine', endpoint: 'https://other.example' } }), { statusCode: 400 });
+  }
+});
+
+test('合成输入错误仅尝试一次', async () => {
+  const { InputError } = require('../src/services/validation');
+  const error = new InputError('无效音色');
+  const attempts = [];
+  await assert.rejects(synthesizeSentence({ text: '台词', provider: { synthesizeToFile() { throw error; } },
+    onAttempt: n => attempts.push(n) }), e => e === error);
+  assert.deepEqual(attempts, [1]);
+});
+
+test('同一家服务换模型或换音色时清理工作目录，补凭据续跑时复用原片段', async t => {
+  const calls = [];
+  const provider = {
+    ...getTtsProvider('minimax'),
+    synthesizeToFile({ outputPath, adapterOptions, voice }) {
+      calls.push({ model: adapterOptions.model, voice });
+      const audio = makeMp3(2);
+      fs.writeFileSync(outputPath, audio);
+      return { bytes: audio.length, duration: 0.048 };
+    },
+  };
+  let llmCalls = 0, finish = false;
+  const { manager, config } = setup(t, {
+    getTtsProviderById: id => id === provider.id ? provider : getTtsProvider(id),
+    scriptGenerator() { llmCalls++; return script; },
+    audioMerger(...args) {
+      if (!finish) throw new Error('模拟合并中断');
+      return require('../src/services/audioMerger').concatenateAudioFiles(...args);
+    },
+  });
+  const credentials = { apiKey: 'offline-mini-credential' };
+  const { id } = manager.createTask({ ...payload, tts: { provider: 'minimax', ...credentials, model: 'speech-02-hd' } });
+  const dir = path.join(config.podcastsDir, id);
+  const status = target => waitFor(() => manager.getTask(id), task => task.status === target);
+  await status('failed');
+  for (const [change, shouldClear] of [
+    [{}, false],
+    [{ model: 'speech-02-turbo' }, true],
+    [{ voiceMapping: { 小晓: 'S_new_voice' } }, true],
+  ]) {
+    manager.resumeTask(id, { tts: { ...credentials, ...change } });
+    assert.equal(fs.readdirSync(dir).length === 0, shouldClear);
+    await status('failed');
+  }
+  assert.equal(llmCalls, 1);
+  assert.deepEqual(calls.map(item => item.model), [...Array(3).fill('speech-02-hd'), ...Array(4).fill('speech-02-turbo')]);
+  assert.equal(calls.at(-1).voice, 'S_new_voice');
+  finish = true;
+  manager.resumeTask(id, { tts: credentials });
+  const done = await status('completed');
+  assert.equal(done.progress.cachedSegments, 3);
+  assert.equal(calls.length, 7);
+});

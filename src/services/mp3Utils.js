@@ -94,6 +94,12 @@ function scanMp3Format(buffer) {
   return null;
 }
 
+function compatibleFrameFormat(frame, format) {
+  return frame.versionBits === format.versionBits &&
+    frame.sampleRate === format.sampleRate &&
+    frame.samplesPerFrame === format.samplesPerFrame;
+}
+
 /**
  * B-F2 严格完整性分析：校验完整帧边界、截断尾帧与帧序列一致性。
  * - 首帧前允许少量前导字节（scanMp3Format 容错），容忍 ID3v2 头与 ID3v1 'TAG' 尾标签
@@ -122,11 +128,7 @@ function analyzeMp3(buffer) {
     // 完整帧边界：整帧必须落在 buffer 内，截断尾帧直接拒绝
     if (offset + frame.frameLength > body.length) return fail('truncated-tail');
     // 帧序列一致性：版本 / 采样率 / 每帧采样数必须一致
-    if (
-      frame.versionBits !== format.versionBits ||
-      frame.sampleRate !== format.sampleRate ||
-      frame.samplesPerFrame !== format.samplesPerFrame
-    ) {
+    if (!compatibleFrameFormat(frame, format)) {
       return fail('mixed-format');
     }
     totalSamples += frame.samplesPerFrame;
@@ -191,6 +193,7 @@ module.exports = {
   SENTENCE_GAP_SECONDS,
   stripID3,
   extractMp3Body,
+  compatibleFrameFormat,
   parseFrameHeader,
   scanMp3Format,
   analyzeMp3,

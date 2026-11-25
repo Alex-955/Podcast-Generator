@@ -150,3 +150,16 @@ test('多段带 ID3v2 头、ID3v1 尾的音频拼接后可逐帧解析，字幕�
   assert.strictEqual(combined.length, expectedFrames * FRAME_SIZE_24K);
   approx(timeline.totalDuration, analyzeMp3(combined).durationSeconds);
 });
+
+test('同采样率的不同码率片段按实际帧数合并，与时间轴一致', t => {
+  const { dir, entries } = setupEntries([5]);
+  t.after(() => fs.rmSync(dir, { recursive: true }));
+  entries.push(writeEntry(dir, 1, 7, { header: Buffer.from([0xff, 0xf3, 0x84, 0xc0]), frameSize: 192 }));
+  const timeline = buildSentenceTimeline(entries);
+  const file = path.join(dir, 'full_podcast.mp3');
+  concatenateAudioFiles(entries.map(e => e.filePath), file);
+  const analysis = analyzeMp3(fs.readFileSync(file));
+  assert.equal(analysis.ok, true);
+  assert.equal(analysis.frameCount, 12 + timeline.sentenceGapFrames);
+  approx(analysis.durationSeconds, timeline.totalDuration);
+});

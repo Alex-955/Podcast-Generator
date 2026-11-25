@@ -5,10 +5,11 @@ const { atomicWrite } = require('./atomicWrite');
 const { extractArticle, assertValidUrl, assertSafeFetchTarget } = require('./extractor');
 const { generatePodcastScript } = require('./scriptEngine');
 const { synthesizeDialogueScript, DEFAULT_VOICES } = require('./ttsService');
-const { getTtsProvider } = require('./ttsProvider');
+const { getTtsCredentials } = require('./ttsCredentials');
+const { getTtsProvider, DEFAULT_PROVIDER_ID } = require('./ttsProvider');
 const { createTtsCache } = require('./ttsCache');
 const { concatenateAudioFiles } = require('./audioMerger');
-const { InputError, validateScriptRequest, validateVoiceMapping, redactSecrets } = require('./validation');
+const { InputError, validateScriptRequest, validateVoiceMapping, redactSecrets, ttsSecrets } = require('./validation');
 
 const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
 const STAGES = {
@@ -96,14 +97,22 @@ function validTaskRecord(task, id) {
   return hasText(task.sourceContent) || (task.input.mode === 'url' && hasText(task.input.url));
 }
 
-function containsApiKey(apiKey, ...fields) {
-  return Boolean(apiKey) && fields.some(value => typeof value === 'string' && value.includes(apiKey));
+function containsSecrets(secrets, ...fields) {
+  function contains(value) {
+    if (typeof value === 'string') return secrets.some(secret => value.includes(secret));
+    if (value && typeof value === 'object') return Object.values(value).some(contains);
+    return false;
+  }
+  return fields.some(contains);
 }
 
-function assertScriptSafeToSave({ podcastTitle, summary, dialogue }, apiKey) {
-  if (containsApiKey(apiKey, podcastTitle, summary) ||
-      dialogue.some(line => containsApiKey(apiKey, line.text, line.emotion))) {
-    throw new Error('模型返回内容包含敏感凭据，已拦截并中止保存');
+function clearAudio(dir) {
+  if (!fs.existsSync(dir)) return;
+  if (!fs.lstatSync(dir).isDirectory()) throw new Error('任务音频目录无效');
+  for (const entry of readDirectory(dir)) {
+    if (!entry.isDirectory() && (/^sentence_.*\.mp3$/.test(entry.name) || entry.name === 'full_podcast.mp3')) {
+      fs.unlinkSync(path.join(dir, entry.name));
+    }
   }
 }
 
@@ -118,14 +127,41 @@ function publicSentences(id, sentences) {
 
 function createTaskManager({
   tasksDir, podcastsDir, cacheDir, extractor = extractArticle, scriptGenerator = generatePodcastScript,
-  ttsSynthesizer = synthesizeDialogueScript, audioMerger = concatenateAudioFiles, ttsProvider = getTtsProvider(),
+  ttsSynthesizer = synthesizeDialogueScript, audioMerger = concatenateAudioFiles, ttsProvider, getTtsProviderById = getTtsProvider,
 }) {
   const cache = createTtsCache(cacheDir);
   let active = null;
 
+  function resolveSpeech(payload, creds, task) {
+    const tts = payload.tts ?? {};
+    if (typeof tts !== 'object' || Array.isArray(tts)) throw new InputError('语音配置格式无效');
+    const previousId = task && (task.ttsProvider || DEFAULT_PROVIDER_ID);
+    const id = tts.provider ?? previousId ?? (process.env.TTS_PROVIDER?.trim() || ttsProvider?.id || DEFAULT_PROVIDER_ID);
+    let provider;
+    try { provider = id === ttsProvider?.id ? ttsProvider : getTtsProviderById(id); }
+    catch { throw new InputError('未注册的 TTS Provider'); }
+    if (!provider) throw new InputError('未注册的 TTS Provider');
+    const sameProvider = id === previousId;
+    const adapterOptions = getTtsCredentials(provider, tts, sameProvider && task.ttsModel);
+    const defaults = provider.defaultVoices || DEFAULT_VOICES;
+    const previousMapping = sameProvider ? task.voiceMapping : undefined;
+    const mapping = validateVoiceMapping(tts.voiceMapping ?? payload.voiceMapping ?? previousMapping, provider);
+    const voiceMapping = Object.fromEntries(Object.entries(defaults).map(([name, voice]) => [name, mapping?.[name] || voice]));
+    const settings = { ttsProvider: provider.id, ttsModel: adapterOptions.model, voiceMapping };
+    const secrets = [creds.apiKey, creds.baseURL !== 'https://api.deepseek.com' && creds.baseURL,
+      ...ttsSecrets(tts), adapterOptions.apiKey, adapterOptions.accessKey, adapterOptions.appId, adapterOptions.endpoint]
+      .filter(value => typeof value === 'string' && value.trim()).map(value => value.trim());
+    if (containsSecrets(secrets, settings, payload.title, payload.content, payload.url, task?.sourceContent, task?.input, task?.script)) {
+      throw new InputError('输入内容包含敏感凭据，已拦截并中止保存');
+    }
+    const changed = task && (!sameProvider || (task.ttsModel || provider.model) !== settings.ttsModel ||
+      Object.keys(voiceMapping).some(name => (previousMapping?.[name] || defaults[name]) !== voiceMapping[name]));
+    return { provider, adapterOptions, secrets, settings, changed };
+  }
+
   function save(task) {
     task.updatedAt = now();
-    const record = { ...toDTO(task), sourceContent: task.sourceContent, script: task.script, voiceMapping: task.voiceMapping };
+    const record = { ...toDTO(task), sourceContent: task.sourceContent, script: task.script, ...(task.clearPending && { clearPending: true }) };
     atomicWrite(path.join(tasksDir, task.id + '.json'), JSON.stringify(record));
   }
 
@@ -176,6 +212,7 @@ function createTaskManager({
       const { podcastTitle, summary = '', sourceTruncated = false, createAt, totalDuration, sentenceGap, measurement } = meta;
       return {
         id, podcastTitle, summary, sourceTruncated, createAt, totalDuration, sentenceGap, measurement,
+        ...(meta.ttsProvider && { ttsProvider: meta.ttsProvider, ttsModel: meta.ttsModel, voiceMapping: meta.voiceMapping }),
         fullAudioUrl: `/podcasts/${id}/full_podcast.mp3`, sentences: publicSentences(id, meta.sentences || []),
       };
     } catch (error) {
@@ -201,7 +238,8 @@ function createTaskManager({
   function toDTO(task) {
     const { id, status, stage, input, progress, script, podcastId, error, createdAt, updatedAt } = task;
     return {
-      id, status, stage, input: { ...input }, progress: { ...progress }, hasScript: Boolean(script),
+      id, status, stage, ttsProvider: task.ttsProvider, ttsModel: task.ttsModel, voiceMapping: task.voiceMapping,
+      input: { ...input }, progress: { ...progress }, hasScript: Boolean(script),
       podcastTitle: script?.podcastTitle || '', summary: script?.summary || '', podcastId,
       podcast: status === 'completed' ? getPodcast(podcastId) : null, error, createdAt, updatedAt,
     };
@@ -211,7 +249,7 @@ function createTaskManager({
     if (active) throw httpError(409, '当前已有任务正在生成，请等待完成或先取消当前任务', 'TASK_ALREADY_RUNNING');
   }
 
-  async function runPipeline(task, creds, signal) {
+  async function runPipeline(task, creds, speech, signal) {
     const workDir = path.join(podcastsDir, task.id);
     function enter(stage) {
       signal.throwIfAborted();
@@ -220,12 +258,17 @@ function createTaskManager({
       save(task);
     }
     try {
+      signal.throwIfAborted();
+      if (task.clearPending) {
+        clearAudio(workDir);
+        delete task.clearPending;
+      }
       task.status = 'running';
       if (!task.sourceContent && !task.script) {
         enter('extract');
         const article = await extractor({ url: task.input.url }, { signal });
         signal.throwIfAborted();
-        if (containsApiKey(creds.apiKey, article.title, article.content)) {
+        if (containsSecrets(speech.secrets, article.title, article.content)) {
           throw new Error('抓取内容包含敏感凭据，已拦截并中止保存');
         }
         const source = validateScriptRequest(article);
@@ -240,7 +283,7 @@ function createTaskManager({
           title: task.input.title, content: task.sourceContent, ...creds, signal,
         });
         signal.throwIfAborted();
-        assertScriptSafeToSave(script, creds.apiKey);
+        if (containsSecrets(speech.secrets, script)) throw new Error('模型返回内容包含敏感凭据，已拦截并中止保存');
         const { podcastTitle, summary, dialogue } = script;
         task.script = {
           podcastTitle, summary,
@@ -251,8 +294,8 @@ function createTaskManager({
       Object.assign(task.progress, { completedSegments: 0, totalSegments: task.script.dialogue.length, cachedSegments: 0 });
       enter('tts');
       fs.mkdirSync(workDir, { recursive: true });
-      const result = await ttsSynthesizer(task.script.dialogue, workDir, task.voiceMapping || DEFAULT_VOICES, {
-        provider: ttsProvider, cache, signal,
+      const result = await ttsSynthesizer(task.script.dialogue, workDir, task.voiceMapping, {
+        provider: speech.provider, ttsModel: task.ttsModel, adapterOptions: speech.adapterOptions, cache, signal,
         onProgress({ index, completedSegments, totalSegments, cachedSegments, speaker }) {
           signal.throwIfAborted();
           const action = completedSegments > index ? '已完成' : '正在合成';
@@ -274,7 +317,7 @@ function createTaskManager({
         fs.rmSync(tempAudio, { force: true });
       }
       const meta = {
-        id: task.id, podcastTitle: task.script.podcastTitle, summary: task.script.summary,
+        ...speech.settings, id: task.id, podcastTitle: task.script.podcastTitle, summary: task.script.summary,
         sourceTruncated: task.input.sourceTruncated, createAt: now(), totalDuration: result.totalDuration,
         measurement: result.measurement, sentenceGap: result.sentenceGap,
         fullAudioUrl: `/podcasts/${task.id}/full_podcast.mp3`, sentences: publicSentences(task.id, result.dialogue),
@@ -293,7 +336,7 @@ function createTaskManager({
         task.status = 'failed';
         task.error = {
           stage: task.stage, message: redactSecrets(error.path ? '本地文件读写失败' : error.message,
-            [creds.apiKey, creds.baseURL, workDir, cacheDir, tasksDir]),
+            [...speech.secrets, creds.baseURL, workDir, cacheDir, tasksDir]),
           retryable: true, failedSegmentIndex: error.segmentIndex ?? null,
         };
       }
@@ -301,14 +344,14 @@ function createTaskManager({
     }
   }
 
-  function start(task, creds) {
+  function start(task, creds, speech) {
     save(task);
     const controller = new AbortController();
     // Resume may arrive before the cancelled provider has closed its stream.
     const ready = active?.finished || new Promise(resolve => setImmediate(resolve));
     const run = { task, controller };
     active = run;
-    run.finished = ready.then(() => runPipeline(task, creds, controller.signal))
+    run.finished = ready.then(() => runPipeline(task, creds, speech, controller.signal))
       .catch(() => console.error('任务状态写入失败，请检查数据目录'))
       .finally(() => { if (active === run) active = null; });
     return toDTO(task);
@@ -317,19 +360,15 @@ function createTaskManager({
   function createTask(payload = {}) {
     assertIdle();
     const creds = getCredentials(payload);
-    if (containsApiKey(creds.apiKey, payload.title, payload.mode === 'url' ? payload.url : payload.content)) {
-      throw new InputError('输入内容包含敏感凭据，已拦截并中止保存');
-    }
+    const speech = resolveSpeech(payload, creds);
     const source = getInput(payload);
-    const mapping = validateVoiceMapping(payload.voiceMapping) || DEFAULT_VOICES;
-    const voiceMapping = Object.fromEntries(Object.keys(DEFAULT_VOICES).map(speaker => [speaker, mapping[speaker] || DEFAULT_VOICES[speaker]]));
     if (!creds.apiKey) throw new InputError('缺少 API Key，请先配置后再生成');
     const task = {
-      id: randomUUID(), status: 'queued', stage: 'extract', ...source, voiceMapping, script: null,
+      id: randomUUID(), status: 'queued', stage: 'extract', ...source, ...speech.settings, script: null,
       progress: { ...stageProgress('extract'), message: '等待生成', completedSegments: 0, totalSegments: 0, cachedSegments: 0 },
       createdAt: now(), podcastId: null, error: null,
     };
-    return start(task, creds);
+    return start(task, creds, speech);
   }
 
   function cancelTask(id) {
@@ -349,9 +388,17 @@ function createTaskManager({
     if (!['failed', 'cancelled'].includes(task.status)) throw httpError(409, '当前任务状态无法续跑');
     const creds = getCredentials(payload);
     if (!task.script && !creds.apiKey) throw new InputError('尚未生成剧本，请先配置 API Key 后再继续');
+    const speech = resolveSpeech(payload, creds, task);
+    if (speech.changed || task.clearPending) {
+      clearAudio(path.join(podcastsDir, id));
+      // A cancelled adapter may still publish its last write before it drains.
+      // Persist the second cleanup across a process restart as well.
+      task.clearPending = Boolean(drainingSameTask);
+    }
+    Object.assign(task, speech.settings);
     task.status = 'running';
     task.error = null;
-    return start(task, creds);
+    return start(task, creds, speech);
   }
 
   return { createTask, getTask: id => toDTO(readTask(id)), cancelTask, resumeTask, listPodcasts, getPodcast };

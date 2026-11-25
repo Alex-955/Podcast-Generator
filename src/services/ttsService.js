@@ -6,10 +6,13 @@ const { DEFAULT_VOICES, AVAILABLE_VOICES, AVAILABLE_VOICE_IDS, getTtsProvider } 
 const { buildCacheKey } = require('./ttsCache');
 const {
   analyzeMp3,
+  compatibleFrameFormat,
   computeGap,
   isValidMp3,
   SENTENCE_GAP_SECONDS,
 } = require('./mp3Utils');
+
+const { InputError } = require('./validation');
 
 const MAX_SYNTHESIS_ATTEMPTS = 3;
 
@@ -63,6 +66,7 @@ async function synthesizeSentence({
       };
     } catch (error) {
       checkCancellation(signal);
+      if (error instanceof InputError || error.statusCode === 400) throw error;
       if (error instanceof TtsCancelledError || error.name === 'AbortError') throw error;
       lastError = error;
       if (attempt < MAX_SYNTHESIS_ATTEMPTS) {
@@ -102,11 +106,7 @@ function buildSentenceTimeline(entries, { gapSeconds = SENTENCE_GAP_SECONDS } = 
     }
     if (!format) {
       format = frame;
-    } else if (
-      frame.versionBits !== format.versionBits ||
-      frame.bitrateIdx !== format.bitrateIdx ||
-      frame.samplerateIdx !== format.samplerateIdx
-    ) {
+    } else if (!compatibleFrameFormat(frame, format)) {
       throw new Error(`音频片段 ${entry.fileName} 编码格式与其他片段不一致，拒绝生成时间轴`);
     }
     return durationSeconds;
@@ -145,9 +145,16 @@ function buildSentenceTimeline(entries, { gapSeconds = SENTENCE_GAP_SECONDS } = 
  * 逐句合成 + 构建精确时间轴。
  * 返回 dialogue 元素保留 filePath（供任务引擎拼接，成品元数据只保留公开字段）。
  */
-async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping = DEFAULT_VOICES, options = {}) {
-  const voices = voiceMapping && typeof voiceMapping === 'object' ? voiceMapping : DEFAULT_VOICES;
-  const { provider = getTtsProvider(), cache, signal, onProgress, adapterOptions } = options;
+async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping, options = {}) {
+  const { provider = getTtsProvider(), cache, signal, onProgress, ttsModel } = options;
+  let adapterOptions = options.adapterOptions;
+  if (ttsModel) {
+    adapterOptions = { ...adapterOptions, model: ttsModel };
+    if (provider.id === 'volcengine') adapterOptions.resourceId = ttsModel;
+  }
+  const cacheModel = adapterOptions?.resourceId || adapterOptions?.model || provider.model;
+  const defaultVoices = provider.defaultVoices || DEFAULT_VOICES;
+  const voices = voiceMapping || defaultVoices;
   fs.mkdirSync(workDir, { recursive: true });
   const entries = [];
   const totalSegments = dialogueList.length;
@@ -155,7 +162,7 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping = DE
   let reusedSegments = 0;
   for (const [index, line] of dialogueList.entries()) {
     const { speaker, text, rate = '+0%', pitch = '+0Hz' } = line;
-    const voice = voices[speaker] || DEFAULT_VOICES[speaker] || DEFAULT_VOICES.阿泽;
+    const voice = voices[speaker] || defaultVoices[speaker] || DEFAULT_VOICES[speaker] || Object.values(defaultVoices)[0];
     const fileName = sentenceFileName(index);
     const outputPath = path.join(workDir, fileName);
     const report = completedSegments => onProgress?.({
@@ -172,7 +179,7 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping = DE
         cachedSegments++;
         fileSize = existing.length;
       } else {
-        const key = cache && buildCacheKey({ provider: provider.id, model: provider.model, voice, rate, pitch, text });
+        const key = cache && buildCacheKey({ provider: provider.id, model: cacheModel, voice, rate, pitch, text });
         const cached = cache?.get(key, outputPath);
         if (cached?.hit) {
           cachedSegments++;
