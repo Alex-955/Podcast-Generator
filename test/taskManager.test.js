@@ -470,7 +470,7 @@ test('换语音服务后从首句重配，旧句与成品同步清理，沿用�
   assert.deepEqual(fs.readdirSync(dir), ['sentence_000.mp3']);
   fs.writeFileSync(path.join(dir, 'full_podcast.mp3'), makeMp3(1));
   const appId = 'offline-app-value', accessKey = 'offline-access-value';
-  const tts = { provider: 'volcengine', appId, accessKey, endpoint, resourceId: 'seed-tts-1.0', voiceMapping: { 阿泽: 'S_cloned' } };
+  const tts = { provider: 'volcengine', appId, accessKey, endpoint, resourceId: 'seed-tts-1.0-concurr', voiceMapping: { 阿泽: 'S_cloned' } };
   const resumed = manager.resumeTask(id, { tts });
   assert.deepEqual(fs.readdirSync(dir), []);
   const done = await waitFor(() => manager.getTask(id), x => x.status === 'completed');
@@ -484,7 +484,7 @@ test('换语音服务后从首句重配，旧句与成品同步清理，沿用�
   assert.equal(stored.sourceContent.length, 12000);
   for (const record of [resumed, done, stored, JSON.parse(fs.readFileSync(path.join(dir, 'meta.json')))]) {
     assert.equal(record.ttsProvider, 'volcengine');
-    assert.equal(record.ttsModel, 'seed-tts-1.0');
+    assert.equal(record.ttsModel, tts.resourceId);
     assert.equal(record.voiceMapping.阿泽, 'S_cloned');
     for (const secret of [appId, accessKey, endpoint]) assert.ok(!JSON.stringify(record).includes(secret));
   }
@@ -567,7 +567,7 @@ test('同一家服务换模型或换音色时清理工作目录，补凭据续�
   assert.equal(calls.length, 7);
 });
 
-test('切换端点及私有音色账号均清除断点，缓存按真实音源隔离', async t => {
+async function checkAccountIsolation(t, voice) {
   const { httpTtsFixture } = require('./helpers/httpTtsFixture');
   const old = process.env.ALLOW_PRIVATE_TTS_ENDPOINT;
   process.env.ALLOW_PRIVATE_TTS_ENDPOINT = '1';
@@ -586,7 +586,7 @@ test('切换端点及私有音色账号均清除断点，缓存按真实音源�
       return require('../src/services/audioMerger').concatenateAudioFiles(...args);
     },
   });
-  const tts = { provider: 'minimax', endpoint: first.endpoint, apiKey: accountA, voiceMapping: { 阿泽: 'S_custom' } };
+  const tts = { provider: 'minimax', endpoint: first.endpoint, apiKey: accountA, voiceMapping: { 阿泽: voice } };
   const { id } = manager.createTask({ ...payload, tts });
   const work = path.join(config.podcastsDir, id), record = path.join(config.tasksDir, id + '.json');
   const done = status => waitFor(() => manager.getTask(id), x => x.status === status);
@@ -616,14 +616,18 @@ test('切换端点及私有音色账号均清除断点，缓存按真实音源�
   for (const secret of [first.endpoint, second.endpoint, accountA, accountB]) {
     assert.ok(!(fs.readFileSync(record, 'utf8') + meta + JSON.stringify(completed)).includes(secret));
   }
-});
+}
 
+test('切换端点及私有音色账号均清除断点，缓存按真实音源隔离', t => checkAccountIsolation(t, 'S_custom'));
+test('自定义端点的内置同名音色按账号隔离断点与缓存', t => checkAccountIsolation(t, 'male-qn-jingying'));
 test('豆包已知音色版本错配在创建与续跑时同步拒绝', async t => {
   const { manager } = setup(t, { scriptGenerator() { throw new Error('待续跑'); } });
   const { id } = manager.createTask(payload);
   await waitFor(() => manager.getTask(id), task => task.status === 'failed');
   for (const [model, voice] of [['seed-tts-1.0', 'zh_female_vv_uranus_bigtts'],
-    ['seed-tts-2.0', 'zh_male_yangguangqingnian_moon_bigtts'], ['seed-tts-2.0', 'zh_female_cancan_mars_bigtts']]) {
+    ['seed-tts-2.0', 'zh_male_yangguangqingnian_moon_bigtts'], ['seed-tts-2.0', 'zh_female_cancan_mars_bigtts'],
+    ['seed-tts-2.0', 'zh_male_xudong_conversation_wvae_bigtts'], ['seed-tts-2.0-concurr', 'zh_male_xudong_conversation_wvae_bigtts'],
+    ['seed-tts-1.0-concurr', 'zh_female_vv_uranus_bigtts']]) {
     const tts = { provider: 'volcengine', apiKey: 'voice-secret', model, voiceMapping: { 小晓: voice } };
     assert.throws(() => manager.createTask({ ...payload, tts }), { statusCode: 400 });
     assert.throws(() => manager.resumeTask(id, { ...payload, tts }), { statusCode: 400 });

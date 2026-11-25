@@ -4,10 +4,13 @@ const { createHash } = require('node:crypto');
 const { isValidMp3, getMp3DurationSeconds } = require('./mp3Utils');
 const { atomicWrite } = require('./atomicWrite');
 
-function speechScopeHash(endpoint, credentials, voices, publicVoices) {
-  const scope = [new URL(endpoint).href];
-  if (voices.some(voice => !publicVoices.some(item => item.id === voice))) {
-    scope.push(credentials.apiKey || '', credentials.appId || '', credentials.accessKey || '');
+function speechScopeHash(endpoint, credentials, voices, publicVoices, officialEndpoint) {
+  const normalizedEndpoint = new URL(endpoint).href;
+  const scope = [normalizedEndpoint];
+  if (normalizedEndpoint !== officialEndpoint || voices.some(voice => !publicVoices.some(item => item.id === voice))) {
+    const apiKey = credentials.apiKey?.trim();
+    if (apiKey) scope.push(apiKey, '', '');
+    else scope.push('', credentials.appId?.trim() || '', credentials.accessKey?.trim() || '');
   }
   return createHash('sha256').update(JSON.stringify(scope)).digest('hex');
 }

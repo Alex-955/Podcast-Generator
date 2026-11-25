@@ -22,7 +22,7 @@ async function readAudio(response, limit) {
   const body = await readJson(response, limit);
   const code = body?.base_resp?.status_code;
   if (code !== 0) {
-    const permanent = [1004, 1008, 1026, 1042, 2013, 2038, 2049].includes(code);
+    const permanent = [1004, 1008, 1026, 1042, 2013, 20132, 2038, 2043, 2049].includes(code);
     const reason = code === 1004 ? '鉴权失败' : permanent ? '请检查账户与请求参数' : '服务商返回错误';
     throw upstreamError(`状态码 ${Number.isSafeInteger(code) ? code : '未知'}：${reason}`, !permanent);
   }
@@ -41,7 +41,8 @@ function createMinimaxProvider(options = {}) {
     defaultVoices: DEFAULT_MINIMAX_VOICES, availableVoices: AVAILABLE_MINIMAX_VOICES,
     getScopeHash(voices, overrides) {
       const credentials = { ...options, ...overrides };
-      return speechScopeHash(credentials.endpoint || DEFAULT_MINIMAX_ENDPOINT, credentials, voices, AVAILABLE_MINIMAX_VOICES);
+      const endpoint = credentials.endpoint || DEFAULT_MINIMAX_ENDPOINT;
+      return speechScopeHash(endpoint, credentials, voices, AVAILABLE_MINIMAX_VOICES, DEFAULT_MINIMAX_ENDPOINT);
     },
     async synthesizeToFile({ text, voice, rate, outputPath, signal, adapterOptions }) {
       if (signal?.aborted) throw new TtsCancelledError();

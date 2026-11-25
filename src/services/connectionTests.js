@@ -39,16 +39,18 @@ async function testLlmConnection(payload, { llmRequest = requestProvider } = {})
     });
     try {
       if (!body && [404, 405].includes(response.statusCode)) return false;
+      if (body && response.statusCode === 404) throw upstreamError('所选模型或对话接口不存在（HTTP 404）', false);
       if (response.statusCode !== 200) throw httpStatusError(response.statusCode);
-      const data = await readJson(response, 2 * 1024 * 1024);
-      if (!(body ? Array.isArray(data?.choices) && data.choices.length : Array.isArray(data?.data))) {
+      const data = await readJson(response, 2 * 1024 * 1024, { allowInvalidJson: !body });
+      if (!body) return Array.isArray(data?.data) && data.data.some(item => item?.id === model);
+      if (!Array.isArray(data?.choices) || !data.choices.length || data.error) {
         throw upstreamError('模型接口响应格式无效');
       }
       return true;
     } finally { response.destroy(); }
   }
   try {
-    if (!await probe('/models')) await probe('/chat/completions', { model, messages: [{ role: 'user', content: 'Hi' }], max_tokens: 1 });
+    if (!await probe('/models')) await probe('/chat/completions', { model, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 });
     return { ok: true, model, latencyMs: Date.now() - started, message: '连接成功，模型接口可用' };
   } catch (error) {
     if (error instanceof InputError || error instanceof ProviderError) throw error;

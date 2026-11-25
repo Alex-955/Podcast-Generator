@@ -236,7 +236,7 @@ test('模型配置目录屏蔽误填为模型名称的带空白凭据', async t 
   assert.ok(!JSON.stringify(data).includes(secret));
 });
 
-test('模型连接测试校验绑定、鉴权，404/405 才尝试一个 token 的对话', async t => {
+test('模型连接测试校验绑定与鉴权，404/405 时尝试一个 token 的对话', async t => {
   const { Readable } = require('node:stream');
   const endpoint = 'https://llm-service.example/api/v1/';
   setEnv(t, { DEEPSEEK_API_KEY: '', LLM_BASE_URL: endpoint, LLM_MODEL: 'server-model' });
@@ -246,7 +246,7 @@ test('模型连接测试校验绑定、鉴权，404/405 才尝试一个 token �
     assert.ok(args.signal instanceof AbortSignal);
     calls.push({ url, ...args });
     const chat = url.endsWith('/chat/completions');
-    const body = chat ? { choices: [{}] } : { data: [], detail: '/Users/private/secret' };
+    const body = chat ? { choices: [{}] } : { data: [{ id: 'server-model' }], detail: '/Users/private/secret' };
     const response = Readable.from([Buffer.from(JSON.stringify(body))]);
     response.statusCode = chat ? 200 : status;
     response.headers = {};
@@ -262,12 +262,14 @@ test('模型连接测试校验绑定、鉴权，404/405 才尝试一个 token �
   assert.equal(result.data.model, 'server-model');
   assert.equal(result.data.message, '连接成功，模型接口可用');
   assert.ok(result.data.latencyMs >= 0);
+  assert.equal(calls.length, 1);
   assert.equal(calls[0].url, endpoint + 'models');
   assert.equal(calls[0].headers.Authorization, 'Bearer ' + apiKey);
   for (status of [404, 405]) {
     calls.length = 0;
     await request('llm/test', 200, { apiKey: 'own-key', baseURL: 'https://own.example', model: 'choice' });
     assert.deepEqual(calls.map(c => [c.method, c.url]), [['GET', 'https://own.example/v1/models'], ['POST', 'https://own.example/v1/chat/completions']]);
+    assert.equal(calls[0].signal, calls[1].signal);
     assert.equal(JSON.parse(calls[1].body).max_tokens, 1);
     assert.equal(JSON.parse(calls[1].body).model, 'choice');
   }
@@ -321,22 +323,43 @@ test('本地模型服务经实际 HTTP 传输完成 /models 及最小对话探�
   const http = require('node:http');
   const { requestProvider } = require('../src/services/providerHttp');
   const calls = [];
+  let catalogue, chatStatus;
   const fixture = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     calls.push({ url: req.url, method: req.method, auth: req.headers.authorization, body: Buffer.concat(chunks).toString() });
-    if (req.method === 'GET') return res.writeHead(405).end();
-    res.end('{"choices":[{}]}');
+    if (req.method === 'GET') return res.end(catalogue);
+    res.writeHead(chatStatus).end(chatStatus === 200 ? '{"choices":[{"message":{"content":"hi"}}]}' : '{"error":"model not found"}');
   });
   fixture.listen(0, '127.0.0.1');
   await once(fixture, 'listening');
   t.after(() => new Promise(resolve => fixture.close(resolve)));
   setEnv(t, { LLM_BASE_URL: 'http://127.0.0.1:' + fixture.address().port, DEEPSEEK_API_KEY: apiKey, LLM_MODEL: 'local-model' });
   llmRequest = requestProvider;
-  await request('llm/test', 200, {});
-  assert.deepEqual(calls.map(c => [c.url, c.method, c.auth]),
-    [['/v1/models', 'GET', 'Bearer ' + apiKey], ['/v1/chat/completions', 'POST', 'Bearer ' + apiKey]]);
-  assert.equal(JSON.parse(calls[1].body).max_tokens, 1);
+  for (const [list, chat, expectedStatus, needsChat] of [
+    [{ data: [null, { id: 'local-model' }] }, 404, 200, false],
+    [{ data: [{ id: 'other-model' }] }, 404, 502, true],
+    [{ data: [{ id: 'other-model' }] }, 200, 200, true],
+    [{ data: [] }, 200, 200, true],
+    [{ models: [] }, 200, 200, true],
+    ['not JSON', 200, 200, true],
+  ]) {
+    calls.length = 0;
+    catalogue = typeof list === 'string' ? list : JSON.stringify(list);
+    chatStatus = chat;
+    const response = await request('llm/test', expectedStatus, {});
+    if (expectedStatus === 502) assert.match(response.error, /模型.*404/);
+    else assert.equal(response.data.ok, true);
+    assert.equal(calls.length, needsChat ? 2 : 1);
+    assert.deepEqual(calls[0], { url: '/v1/models', method: 'GET', auth: 'Bearer ' + apiKey, body: '' });
+    if (needsChat) {
+      assert.equal(calls[1].url, '/v1/chat/completions');
+      assert.equal(calls[1].method, 'POST');
+      assert.equal(calls[1].auth, 'Bearer ' + apiKey);
+      assert.deepEqual(JSON.parse(calls[1].body), { model: 'local-model', messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 });
+    }
+  }
+  calls.length = 0;
   await request('llm/test', 400, { apiKey, baseURL: process.env.LLM_BASE_URL + '/untrusted' });
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 0);
 });

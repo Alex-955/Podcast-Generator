@@ -81,11 +81,14 @@ async function* boundedChunks(response, limit) {
   }
 }
 
-async function readJson(response, limit) {
+async function readJson(response, limit, { allowInvalidJson = false } = {}) {
   const chunks = [];
   for await (const chunk of boundedChunks(response, limit)) chunks.push(chunk);
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
-  catch { throw upstreamError('响应不是有效 JSON'); }
+  catch {
+    if (allowInvalidJson) return null;
+    throw upstreamError('响应不是有效 JSON');
+  }
 }
 
 function httpStatusError(status) {

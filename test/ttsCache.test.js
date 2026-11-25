@@ -98,3 +98,17 @@ test('每次合成选择的模型同时用于上游请求与缓存键，缺省�
   }
   assert.deepEqual(calls, models.slice(0, 2).map(m => [provider.defaultVoices.小晓, m]));
 });
+
+test('官方预置音色共享缓存，自定义服务只使用实际选中的认证方式生成摘要', () => {
+  const { volcengineProvider: provider, DEFAULT_VOLCENGINE_ENDPOINT } = require('../src/services/volcengineTtsProvider');
+  const voice = provider.defaultVoices.阿泽;
+  const hash = (options, id = voice) => provider.getScopeHash([id], options);
+  assert.equal(hash({ apiKey: 'key-A' }), hash({ endpoint: DEFAULT_VOLCENGINE_ENDPOINT, apiKey: 'key-B' }));
+  assert.notEqual(hash({ apiKey: 'key-A' }, 'S_private'), hash({ apiKey: 'key-B' }, 'S_private'));
+  const endpoint = 'https://custom.example/speech';
+  assert.equal(hash({ endpoint, apiKey: 'key-A' }), hash({ endpoint, apiKey: ' key-A ', appId: 'unused', accessKey: 'unused' }));
+  const pair = { endpoint, appId: 'app-A', accessKey: 'access-A' };
+  assert.equal(hash(pair), hash({ ...pair, appId: ' app-A ', accessKey: ' access-A ' }));
+  assert.notEqual(hash(pair), hash({ ...pair, appId: 'app-B' }));
+  assert.notEqual(hash(pair), hash({ ...pair, accessKey: 'access-B' }));
+});

@@ -88,3 +88,41 @@ test('跨包 NDJSON 单行缓存有上限', async t => {
   await assert.rejects(provider.synthesizeToFile({ outputPath, adapterOptions: { apiKey, endpoint } }), /响应行超过/);
   assert.ok(!fs.existsSync(outputPath));
 });
+
+test('豆包资源系列后缀和大小写均使用对应版本的默认音色', async t => {
+  const { endpoint, outputPath, requests } = await httpTtsFixture(t, res =>
+    res.end(JSON.stringify({ code: 20000000, data: audio.toString('base64') })));
+  for (const [resourceId, voice] of [['seed-tts-1.0-concurr', 'zh_male_yangguangqingnian_moon_bigtts'],
+    ['SEED-TTS-1.0-concurr', 'zh_male_yangguangqingnian_moon_bigtts'], ['seed-tts-2.0-concurr', 'zh_male_m191_uranus_bigtts']]) {
+    await provider.synthesizeToFile({ outputPath, text: '你好', adapterOptions: { endpoint, apiKey, resourceId } });
+    assert.equal(requests.at(-1).headers['x-api-resource-id'], resourceId);
+    assert.equal(requests.at(-1).body.req_params.speaker, voice);
+  }
+});
+
+test('豆包 HTTP 200 中的参数、音色或授权错误只请求一次，并发限流仍重试', async t => {
+  const { synthesizeSentence } = require('../src/services/ttsService');
+  let record;
+  const { endpoint, outputPath, requests } = await httpTtsFixture(t, res => res.end(JSON.stringify(record) + '\n'));
+  for (const [code, message, count] of [
+    [40402003, 'text too long', 1], [45000001, '', 1], [45000002, '', 1], [45000010, '', 1],
+    [45000000, 'speaker not granted for this resource', 1], [45000000, 'permission denied', 1],
+    [45000000, 'quota not enough for voice', 1], [45000000, 'resource concurrency limit exceeded', 3],
+  ]) {
+    record = { code, message };
+    const before = requests.length;
+    await assert.rejects(synthesizeSentence({ text: '你好', provider, outputPath, adapterOptions: { endpoint, apiKey } }),
+      error => error.message.includes(String(code)) && (count === 3 || error.retryable === false));
+    assert.equal(requests.length - before, count, message);
+  }
+});
+
+test('完整的无权限错误即使缺少末尾换行且连接保活也只请求一次', async t => {
+  const { synthesizeSentence } = require('../src/services/ttsService');
+  const { endpoint, outputPath, requests } = await httpTtsFixture(t, res =>
+    res.write('{"code":45000000,"message":"speaker not granted"}'));
+  await assert.rejects(synthesizeSentence({ text: '你好', provider, outputPath, adapterOptions: { endpoint, apiKey, timeoutMs: 1000 } }),
+    { statusCode: 502, retryable: false });
+  assert.equal(requests.length, 1);
+  assert.equal(fs.existsSync(outputPath), false);
+});

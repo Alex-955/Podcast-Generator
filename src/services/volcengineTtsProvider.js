@@ -9,14 +9,17 @@ const DEFAULT_VOLCENGINE_ENDPOINT = 'https://openspeech.bytedance.com/api/v3/tts
 const DEFAULT_VOLCENGINE_RESOURCE_ID = 'seed-tts-2.0';
 const DEFAULT_VOLCENGINE_VOICES = { 阿泽: 'zh_male_m191_uranus_bigtts', 小晓: 'zh_female_vv_uranus_bigtts' };
 const V1_VOICES = { 阿泽: 'zh_male_yangguangqingnian_moon_bigtts', 小晓: 'zh_female_cancan_mars_bigtts' };
+const V1_RESOURCE = /^seed-tts-1\.0/i;
+const V2_RESOURCE = /^seed-tts-2\.0/i;
+
 function defaultVolcengineVoices(resourceId) {
-  return resourceId === 'seed-tts-1.0' ? V1_VOICES : DEFAULT_VOLCENGINE_VOICES;
+  return V1_RESOURCE.test(resourceId) ? V1_VOICES : DEFAULT_VOLCENGINE_VOICES;
 }
 
 function validateVolcengineVoice(resourceId, voice) {
   if (voice.startsWith('S_')) return;
-  if ((resourceId === 'seed-tts-1.0' && voice.endsWith('_uranus_bigtts')) ||
-      (resourceId === 'seed-tts-2.0' && /_(?:moon|mars)_bigtts$/.test(voice))) {
+  if ((V1_RESOURCE.test(resourceId) && voice.endsWith('_uranus_bigtts')) ||
+      (V2_RESOURCE.test(resourceId) && /_(?:moon|mars|wvae)_bigtts$/.test(voice))) {
     throw new InputError('所选音色与豆包语音资源版本不匹配');
   }
 }
@@ -33,6 +36,15 @@ const AVAILABLE_VOLCENGINE_VOICES = [
   { id: V1_VOICES.小晓, name: '灿灿 1.0', gender: 'female' },
 ];
 
+function permanentBusinessError(code, message) {
+  if ([400, 401, 403, 404, 422, 40402003, 45000001, 45000002, 45000010, 45001001].includes(code)) return true;
+  if (code === 45000000) {
+    if (/limit|concur|qps|\brate\b|throttl|too many|限流|并发|频率/i.test(message)) return false;
+    if (/grant|permission|quota.{0,128}not.{0,32}enough|not allowed|unsupported|not (?:found|exist)|resource|speaker|voice|auth|access denied|权限|授权|音色|资源|不支持|不存在/i.test(message)) return true;
+  }
+  return /unauthorized|forbidden|invalid (?:token|parameter|speaker)|鉴权失败|参数错误/i.test(message);
+}
+
 async function readAudio(response, limit) {
   const chunks = [];
   function readLine(line) {
@@ -46,8 +58,7 @@ async function readAudio(response, limit) {
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw upstreamError('响应行格式无效');
     if (obj.code !== undefined && obj.code !== 0 && obj.code !== 20000000) {
       const code = obj.code;
-      const permanent = [400, 401, 403, 404, 422, 45000001, 45001001].includes(code) ||
-        /unauthorized|forbidden|invalid (?:token|parameter|speaker)|鉴权失败|参数错误/i.test(String(obj.message || ''));
+      const permanent = permanentBusinessError(code, typeof obj.message === 'string' ? obj.message : '');
       throw upstreamError(`状态码 ${Number.isSafeInteger(code) ? code : '未知'}：语音请求失败`, !permanent);
     }
     if (typeof obj.data === 'string' && obj.data.length) {
@@ -97,12 +108,12 @@ async function readAudio(response, limit) {
     const tail = chunk.subarray(start);
     append(tail);
     // Some servers send the complete last object without a delimiter and keep HTTP open.
-    // Only a complete terminal object may terminate without a newline.
+    // Both a completion code and an error code end the stream without a newline.
     if (closesObject(tail)) {
       let record;
       try { record = JSON.parse(Buffer.concat(pending, size).toString()); }
       catch { /* The regular line parser reports malformed records at the delimiter or EOF. */ }
-      if (record?.code === 20000000 && consumeRecord(record)) return Buffer.concat(chunks);
+      if (record?.code !== undefined && record.code !== 0 && consumeRecord(record)) return Buffer.concat(chunks);
     }
   }
   if (size && readLine(Buffer.concat(pending, size).toString())) return Buffer.concat(chunks);
@@ -116,7 +127,8 @@ function createVolcengineProvider(options = {}) {
     defaultVoices: defaultVolcengineVoices(options.resourceId), defaultVoicesForModel: defaultVolcengineVoices, availableVoices: AVAILABLE_VOLCENGINE_VOICES,
     getScopeHash(voices, overrides) {
       const credentials = { ...options, ...overrides };
-      return speechScopeHash(credentials.endpoint || DEFAULT_VOLCENGINE_ENDPOINT, credentials, voices, AVAILABLE_VOLCENGINE_VOICES);
+      const endpoint = credentials.endpoint || DEFAULT_VOLCENGINE_ENDPOINT;
+      return speechScopeHash(endpoint, credentials, voices, AVAILABLE_VOLCENGINE_VOICES, DEFAULT_VOLCENGINE_ENDPOINT);
     },
     async synthesizeToFile({ text, voice, outputPath, signal, adapterOptions }) {
       if (signal?.aborted) throw new TtsCancelledError();

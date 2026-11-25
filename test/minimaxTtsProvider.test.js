@@ -103,3 +103,17 @@ test('真实 HTTP 适配器只重试可恢复错误，拒绝重定向与超限�
   body = 'oversize';
   await assert.rejects(minimaxProvider.synthesizeToFile({ outputPath, adapterOptions: { apiKey, endpoint } }), /大小限制/);
 });
+
+test('MiniMax HTTP 200 中的确定性业务错误只请求一次，限流仍重试', async t => {
+  const { synthesizeSentence } = require('../src/services/ttsService');
+  let status;
+  const { endpoint, outputPath, requests } = await httpTtsFixture(t, res =>
+    res.end(JSON.stringify({ base_resp: { status_code: status } })));
+  for (const code of [20132, 2043, 1002]) {
+    status = code;
+    const before = requests.length;
+    await assert.rejects(synthesizeSentence({ text: '你好', provider: minimaxProvider, outputPath, adapterOptions: { endpoint, apiKey } }),
+      error => error.message.includes(String(code)) && (code === 1002 || error.retryable === false));
+    assert.equal(requests.length - before, code === 1002 ? 3 : 1);
+  }
+});

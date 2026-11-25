@@ -14,8 +14,8 @@ async function httpTtsFixture(t, reply) {
     requests.push(request);
     const resource = req.headers['x-api-resource-id'];
     const speaker = request.body.req_params?.speaker || '';
-    if (!speaker.startsWith('S_') && ((resource === 'seed-tts-1.0' && speaker.endsWith('_uranus_bigtts')) ||
-        (resource === 'seed-tts-2.0' && /_(?:moon|mars)_bigtts$/.test(speaker)))) {
+    if (!speaker.startsWith('S_') && ((/^seed-tts-1\.0/i.test(resource) && speaker.endsWith('_uranus_bigtts')) ||
+        (/^seed-tts-2\.0/i.test(resource) && /_(?:moon|mars|wvae)_bigtts$/.test(speaker)))) {
       res.writeHead(422).end();
       return;
     }
