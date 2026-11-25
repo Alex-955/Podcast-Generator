@@ -4,7 +4,7 @@
  * 分别调用 generatePodcastScript（死 baseURL）与 defaultFetcher（死地址，需放开内网校验），
  * 两者都应快速拒绝；随后让事件循环自然排空——若实现里残留 ref'd 定时器
  * （如 axios timeout 选项的 connectPhaseTimer），进程会存活到定时器触发，
- * 父测试按墙钟时间断言失败。
+ * 父测试的自然退出阈值短于 8 秒的请求定时器。
  * 用法：node llmFailChild.js run（由 test/llmDeadline.test.js spawn；
  * 被 node --test 发现时不做任何事）。
  */
@@ -16,6 +16,7 @@ const assert = require('node:assert/strict');
 const { generatePodcastScript } = require('../../src/services/scriptEngine');
 const { defaultFetcher } = require('../../src/services/extractor');
 const { requestProvider } = require('../../src/services/providerHttp');
+const timeoutMs = 8000;
 
 async function main() {
   let connectionError;
@@ -26,7 +27,7 @@ async function main() {
       apiKey: 'k',
       baseURL: 'http://127.0.0.1:9',
       model: 'm',
-      timeoutMs: 4000,
+      timeoutMs,
       async llmRequest(url, options) {
         try {
           return await requestProvider(url, options);
@@ -45,7 +46,7 @@ async function main() {
   }
 
   try {
-    await defaultFetcher('http://127.0.0.1:9/x', {}, { timeoutMs: 4000 });
+    await defaultFetcher('http://127.0.0.1:9/x', {}, { timeoutMs });
     console.error('UNEXPECTED_RESOLVE_FETCH');
     process.exit(3);
   } catch (error) {

@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { performance } = require('node:perf_hooks');
 const { setTimeout: delay } = require('node:timers/promises');
 const { TtsCancelledError } = require('./edgeTtsAdapter');
 const { DEFAULT_VOICES, AVAILABLE_VOICES, AVAILABLE_VOICE_IDS, getTtsProvider } = require('./ttsProvider');
@@ -271,9 +272,14 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping, opt
           cachedSegments++;
           fileSize = cached.bytes;
         } else {
-          if (lastRequestEndAt !== null && intervalMs > 0) {
-            const waitMs = Math.max(0, lastRequestEndAt + intervalMs - Date.now());
-            if (waitMs > 0) await delay(waitMs, undefined, { signal });
+          if (lastRequestEndAt !== null && Number.isFinite(intervalMs) && intervalMs > 0) {
+            let elapsedMs = performance.now() - lastRequestEndAt;
+            // A timer can wake early, so recheck elapsed time before sending.
+            while (elapsedMs < intervalMs) {
+              const waitMs = Math.min(0x7fffffff, Math.ceil(intervalMs - elapsedMs));
+              await delay(waitMs, undefined, { signal });
+              elapsedMs = performance.now() - lastRequestEndAt;
+            }
           }
           const result = await synthesizeSentence({
             text, voice, outputPath, rate, pitch, emotion, provider, signal, adapterOptions, rateLimitMaxAttempts, rateLimitBackoffMs,
@@ -281,7 +287,7 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping, opt
               report(index, { retrying: true, attempt, maxAttempts, delayMs, rateLimited });
             },
           });
-          lastRequestEndAt = Date.now();
+          lastRequestEndAt = performance.now();
           checkCancellation(signal);
           cache?.put(key, outputPath);
           fileSize = result.fileSize;

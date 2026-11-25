@@ -242,7 +242,7 @@ test('两次信号均未结束启动失败的进程时保留可停止的 PID 记
   const { options, pidFile } = fixture(t);
   fs.writeFileSync(path.join(options.projectDir, 'server.js'), [
     'process.send({ port: 0 });',
-    'setTimeout(() => {}, 8000);',
+    'setTimeout(() => {}, 20000);',
   ].join('\n'));
   t.mock.method(ChildProcess.prototype, 'kill', () => true);
   await assert.rejects(startPortable({ ...options, port: 0 }), /启动失败且子进程未能正常退出/);
