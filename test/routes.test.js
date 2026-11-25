@@ -246,7 +246,7 @@ test('模型连接测试校验绑定与鉴权，404/405 时尝试一个 token �
     assert.ok(args.signal instanceof AbortSignal);
     calls.push({ url, ...args });
     const chat = url.endsWith('/chat/completions');
-    const body = chat ? { choices: [{}] } : { data: [{ id: 'server-model' }], detail: '/Users/private/secret' };
+    const body = chat ? { choices: [{ message: { content: 'hi' } }] } : { data: [{ id: 'server-model' }], detail: '/Users/private/secret' };
     const response = Readable.from([Buffer.from(JSON.stringify(body))]);
     response.statusCode = chat ? 200 : status;
     response.headers = {};
@@ -324,12 +324,13 @@ test('本地模型服务经实际 HTTP 传输完成 /models 及最小对话探�
   const { requestProvider } = require('../src/services/providerHttp');
   const calls = [];
   let catalogue, chatStatus;
+  let chatBody = { choices: [{ message: { content: 'hi' } }] };
   const fixture = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     calls.push({ url: req.url, method: req.method, auth: req.headers.authorization, body: Buffer.concat(chunks).toString() });
     if (req.method === 'GET') return res.end(catalogue);
-    res.writeHead(chatStatus).end(chatStatus === 200 ? '{"choices":[{"message":{"content":"hi"}}]}' : '{"error":"model not found"}');
+    res.writeHead(chatStatus).end(chatStatus === 200 ? JSON.stringify(chatBody) : '{"error":"model not found"}');
   });
   fixture.listen(0, '127.0.0.1');
   await once(fixture, 'listening');
@@ -338,6 +339,7 @@ test('本地模型服务经实际 HTTP 传输完成 /models 及最小对话探�
   llmRequest = requestProvider;
   for (const [list, chat, expectedStatus, needsChat] of [
     [{ data: [null, { id: 'local-model' }] }, 404, 200, false],
+    [{ error: 'invalid catalogue', data: [{ id: 'local-model' }] }, 404, 502, true],
     [{ data: [{ id: 'other-model' }] }, 404, 502, true],
     [{ data: [{ id: 'other-model' }] }, 200, 200, true],
     [{ data: [] }, 200, 200, true],
@@ -358,6 +360,17 @@ test('本地模型服务经实际 HTTP 传输完成 /models 及最小对话探�
       assert.equal(calls[1].auth, 'Bearer ' + apiKey);
       assert.deepEqual(JSON.parse(calls[1].body), { model: 'local-model', messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 });
     }
+  }
+  catalogue = JSON.stringify({ data: [] });
+  chatStatus = 200;
+  for (const first of [null, {}, [], 'hi', { message: { content: 42 } }]) {
+    chatBody = { choices: [first, { text: 'only the first choice counts' }] };
+    const result = await request('llm/test', 502, {});
+    assert.equal(result.error, '模型接口响应格式无效');
+  }
+  for (const first of [{ message: { reasoning_content: 'hi' } }, { text: 'hi' }]) {
+    chatBody = { choices: [first] };
+    assert.equal((await request('llm/test', 200, {})).data.ok, true);
   }
   calls.length = 0;
   await request('llm/test', 400, { apiKey, baseURL: process.env.LLM_BASE_URL + '/untrusted' });

@@ -107,6 +107,12 @@ test('豆包 HTTP 200 中的参数、音色或授权错误只请求一次，并�
   for (const [code, message, count] of [
     [40402003, 'text too long', 1], [45000001, '', 1], [45000002, '', 1], [45000010, '', 1],
     [45000000, 'speaker not granted for this resource', 1], [45000000, 'permission denied', 1],
+    [45002001, 'no readable text', 1],
+    [45000000, 'permission denied for seed-tts-1.0-concurr', 1],
+    [45000000, 'unauthorized for concurrent requests', 1],
+    [45000000, 'request body too large', 1],
+    [45000000, 'payload size exceeds the rate limit', 1],
+    [45000000, 'generic provider error', 1],
     [45000000, 'quota not enough for voice', 1], [45000000, 'resource concurrency limit exceeded', 3],
   ]) {
     record = { code, message };
