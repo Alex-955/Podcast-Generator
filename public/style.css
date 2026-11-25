@@ -835,6 +835,46 @@ button {
   transform: rotate(180deg);
 }
 
+.confirm-tools-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.confirm-tools-row .link-toggle.hidden + #btnPolishDraft {
+  margin-left: auto;
+}
+
+.inline-callout.is-polish {
+  background: var(--warn-soft);
+}
+
+.inline-callout.is-polish .callout-msg {
+  color: var(--warn);
+}
+
+.inline-callout.is-polish.is-done {
+  background: var(--ok-soft);
+}
+
+.inline-callout.is-polish.is-done .callout-msg {
+  color: var(--ok);
+}
+
+.model-picker-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.model-filter-input {
+  padding-top: 7px;
+  padding-bottom: 7px;
+  font-size: 13px;
+}
+
 .confirm-actions {
   display: flex;
   align-items: center;

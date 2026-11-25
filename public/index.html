@@ -160,12 +160,22 @@
 
           <p id="confirmExcerpt" class="confirm-excerpt"></p>
 
-          <button type="button" id="btnToggleFullPreview" class="link-toggle hidden" aria-expanded="false">
-            <span>展开全文预览</span>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-          </button>
+          <div class="confirm-tools-row">
+            <button type="button" id="btnToggleFullPreview" class="link-toggle hidden" aria-expanded="false">
+              <span>展开全文预览</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+            <button type="button" id="btnPolishDraft" class="btn btn-subtle btn-sm">
+              <span>AI 纠错润色</span>
+            </button>
+          </div>
+
+          <div id="polishBanner" class="inline-callout is-polish hidden" aria-live="polite">
+            <p id="polishBannerText" class="callout-msg"></p>
+            <div id="polishBannerActions" class="callout-actions"></div>
+          </div>
 
           <div class="confirm-actions">
             <button type="button" id="btnEditInput" class="btn btn-subtle">修改输入</button>
@@ -440,18 +450,19 @@
                 <span class="form-label">厂商快捷预设</span>
                 <div class="preset-strip" id="llmPresetStrip" role="group" aria-label="大模型厂商快捷预设">
                   <button type="button" class="preset-pill is-active" data-llm-preset="deepseek">DeepSeek · 推荐</button>
-                  <button type="button" class="preset-pill" data-llm-preset="kimi">Kimi</button>
+                  <button type="button" class="preset-pill" data-llm-preset="kimi">Kimi API</button>
+                  <button type="button" class="preset-pill" data-llm-preset="kimi_coding">Kimi Code Plan</button>
                   <button type="button" class="preset-pill" data-llm-preset="doubao">豆包</button>
                   <button type="button" class="preset-pill" data-llm-preset="qwen">通义千问</button>
                   <button type="button" class="preset-pill" data-llm-preset="mimo">小米 MiMo</button>
                   <button type="button" class="preset-pill" data-llm-preset="siliconflow">硅基流动</button>
                   <button type="button" class="preset-pill" data-llm-preset="custom">自定义</button>
                 </div>
-                <p id="llmPresetHint" class="provider-guide">性价比与中文播客口语感兼顾（推荐）。前往 DeepSeek 开放平台（platform.deepseek.com）创建 API Key。</p>
+                <p id="llmPresetHint" class="provider-guide">支持文本与多模态识图（如 DeepSeek Flash）。填好 Key 后点「获取模型列表」即可直接勾选最新模型。</p>
               </div>
 
               <div class="form-field">
-                <label for="settingApiKey" class="form-label">API Key</label>
+                <label for="settingApiKey" class="form-label">1. API Key</label>
                 <div class="password-wrap">
                   <input type="password" id="settingApiKey" class="field-input" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off" spellcheck="false">
                   <button type="button" id="btnToggleKeyVisible" class="btn-reveal" aria-label="显示或隐藏 API Key">显示</button>
@@ -460,46 +471,60 @@
               </div>
 
               <div class="form-field">
-                <label for="settingBaseUrl" class="form-label">API Base URL</label>
+                <label for="settingBaseUrl" class="form-label">2. API Base URL</label>
                 <input type="url" id="settingBaseUrl" class="field-input" value="https://api.deepseek.com" placeholder="https://api.deepseek.com" spellcheck="false">
               </div>
 
               <div class="form-field">
-                <label for="settingModel" class="form-label">模型名称</label>
-                <input type="text" id="settingModel" class="field-input" value="deepseek-flash" placeholder="deepseek-chat" spellcheck="false">
+                <div class="label-with-toggle">
+                  <label for="settingModel" class="form-label">3. 选择或填写模型</label>
+                  <button type="button" id="btnFetchLlmModels" class="btn btn-subtle btn-sm">获取模型列表</button>
+                </div>
+                <span id="llmModelsStatus" class="test-status" aria-live="polite"></span>
+
+                <div id="llmModelPickerWrap" class="model-picker-wrap hidden">
+                  <input type="search" id="settingModelFilter" class="field-input model-filter-input hidden" placeholder="搜索筛选已拉取的模型名…" autocomplete="off" spellcheck="false">
+                  <select id="settingModelSelect" class="field-select" aria-label="从厂商模型列表勾选"></select>
+                </div>
+
+                <input type="text" id="settingModel" class="field-input" value="deepseek-flash" placeholder="点击上方「获取模型列表」勾选，或手动输入模型名" spellcheck="false">
               </div>
 
               <div class="test-action-row">
-                <button type="button" id="btnTestLlm" class="btn btn-subtle btn-sm">测试模型连接</button>
+                <button type="button" id="btnTestLlm" class="btn btn-subtle btn-sm">测试所选模型</button>
                 <span id="llmTestStatus" class="test-status" aria-live="polite"></span>
               </div>
 
               <details id="visionSettingsDisclosure" class="advanced-disclosure vision-disclosure">
-                <summary>长图识字模型（可选 · DeepSeek 等纯文本模型专用）</summary>
+                <summary>单独配置识图模型（可选 · 默认直接复用上方模型）</summary>
                 <div class="vision-fields">
-                  <p class="form-help">若上方剧本模型已选 Kimi（kimi-k2.5）、豆包或通义千问多模态版，此处留空即可自动复用；若剧本用 DeepSeek，可单独配一个识图模型。</p>
+                  <p class="form-help">当前已默认允许所有主力模型（含 DeepSeek Flash）直接用于长图识字；仅当主力模型不支持视觉输入时，再在此单独填写。</p>
                   <div class="preset-strip" id="visionPresetStrip" role="group" aria-label="识图模型快捷预设">
                     <button type="button" class="preset-pill is-active" data-vision-preset="reuse">同剧本模型</button>
-                    <button type="button" class="preset-pill" data-vision-preset="kimi">Kimi K2.5</button>
+                    <button type="button" class="preset-pill" data-vision-preset="kimi">Kimi API</button>
+                    <button type="button" class="preset-pill" data-vision-preset="kimi_coding">Kimi Code Plan</button>
                     <button type="button" class="preset-pill" data-vision-preset="doubao">豆包视觉</button>
                     <button type="button" class="preset-pill" data-vision-preset="qwen">通义千问 VL</button>
                   </div>
                   <div class="form-field">
-                    <label for="settingVisionApiKey" class="form-label">识图 API Key（留空则复用上方或 .env）</label>
+                    <label for="settingVisionApiKey" class="form-label">识图 API Key（填独立地址时须填写）</label>
                     <div class="password-wrap">
-                      <input type="password" id="settingVisionApiKey" class="field-input" placeholder="留空默认复用上方 API Key" autocomplete="off" spellcheck="false">
+                      <input type="password" id="settingVisionApiKey" class="field-input" placeholder="留空默认复用上方主配置" autocomplete="off" spellcheck="false">
                       <button type="button" id="btnToggleVisionKey" class="btn-reveal" aria-label="显示或隐藏识图 API Key">显示</button>
                     </div>
                   </div>
-                  <div class="field-row-2">
-                    <div class="form-field">
-                      <label for="settingVisionBaseUrl" class="form-label">识图 Base URL</label>
-                      <input type="url" id="settingVisionBaseUrl" class="field-input" placeholder="留空复用上方地址" spellcheck="false">
-                    </div>
-                    <div class="form-field">
+                  <div class="form-field">
+                    <label for="settingVisionBaseUrl" class="form-label">识图 Base URL</label>
+                    <input type="url" id="settingVisionBaseUrl" class="field-input" placeholder="留空复用上方地址" spellcheck="false">
+                  </div>
+                  <div class="form-field">
+                    <div class="label-with-toggle">
                       <label for="settingVisionModel" class="form-label">识图模型名称</label>
-                      <input type="text" id="settingVisionModel" class="field-input" placeholder="如 kimi-k2.5 / qwen-vl-plus" spellcheck="false">
+                      <button type="button" id="btnFetchVisionModels" class="btn btn-subtle btn-sm">获取识图模型</button>
                     </div>
+                    <span id="visionModelsStatus" class="test-status" aria-live="polite"></span>
+                    <select id="settingVisionModelSelect" class="field-select hidden" aria-label="从识图模型列表选择"></select>
+                    <input type="text" id="settingVisionModel" class="field-input" placeholder="拉取后点选，或手动输入视觉模型名" spellcheck="false">
                   </div>
                 </div>
               </details>

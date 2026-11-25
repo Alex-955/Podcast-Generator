@@ -23,58 +23,58 @@
       id: 'deepseek',
       label: 'DeepSeek',
       baseURL: 'https://api.deepseek.com',
-      model: 'deepseek-chat',
-      hint: '性价比与中文播客口语感兼顾（推荐）。前往 DeepSeek 开放平台（platform.deepseek.com）创建 API Key；如需用长图识字，请在下方折叠项单独配一个识图模型。',
+      hint: '支持剧本生成与长图识字（如 DeepSeek Flash）。前往 platform.deepseek.com 创建 API Key 后，点下方「获取模型列表」勾选最新模型。',
     },
     {
       id: 'kimi',
-      label: 'Kimi',
+      label: 'Kimi API',
       baseURL: 'https://api.moonshot.cn/v1',
-      model: 'kimi-k2.5',
-      hint: '原生多模态 + 长文消化极佳，一套 Key 同时支持剧本生成与长截图识字。前往 platform.moonshot.cn 获取 API Key。',
+      hint: 'Kimi 开放平台按量计费标准地址（platform.moonshot.cn），支持全部最新 Kimi 通用与多模态模型。填 Key 后点「获取模型列表」选择。',
+    },
+    {
+      id: 'kimi_coding',
+      label: 'Kimi Code Plan',
+      baseURL: 'https://api.kimi.com/coding/v1',
+      hint: 'Kimi 编程会员（Code Plan）专属地址；部分会员 Key 仅授权编程代理调用，若拉取或测试遇 403 限制请切回「Kimi API」。',
     },
     {
       id: 'doubao',
       label: '豆包',
       baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
-      model: 'doubao-seed-1-6-250615',
-      hint: '中文网感强、支持图片识别。前往火山方舟（console.volcengine.com/ark）获取 API Key 或填写推理接入点 ID。',
+      hint: '火山方舟大模型平台（console.volcengine.com/ark）。若账号已开通模型可直接拉取勾选；若使用推理接入点 ID（ep-xxx）可手动填入模型名。',
     },
     {
       id: 'qwen',
       label: '通义千问',
       baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      model: 'qwen-plus',
-      hint: '长上下文稳定、结构化剧本输出可靠。前往阿里云百炼（bailian.console.aliyun.com）获取 API Key。',
+      hint: '阿里云百炼兼容模式（bailian.console.aliyun.com）。填入 API Key 后点「获取模型列表」挑选所需模型。',
     },
     {
       id: 'mimo',
       label: '小米 MiMo',
       baseURL: 'https://api.xiaomimimo.com/v1',
-      model: 'mimo-v2-flash',
-      hint: '轻量高速、适合快速试听剧本生成。前往小米 MiMo 开放平台（platform.xiaomimimo.com）获取 API Key。',
+      hint: '小米 MiMo 开放平台（platform.xiaomimimo.com）。填入 API Key 后点「获取模型列表」即可查看最新模型。',
     },
     {
       id: 'siliconflow',
       label: '硅基流动',
       baseURL: 'https://api.siliconflow.cn/v1',
-      model: 'deepseek-ai/DeepSeek-V3',
-      hint: '聚合多款主流开源模型（DeepSeek / Qwen / GLM 等）。前往 cloud.siliconflow.cn 获取 API Key。',
+      hint: '聚合主流开源大模型（cloud.siliconflow.cn）。模型数量较多，拉取后可用搜索框快速筛选勾选。',
     },
     {
       id: 'custom',
       label: '自定义',
       baseURL: '',
-      model: '',
-      hint: '支持任意 OpenAI 兼容接口（OpenRouter、One-API、本地 Ollama 等），手动填写 Base URL 与模型名即可。',
+      hint: '支持任意 OpenAI 兼容接口（OpenRouter、One-API、本地 Ollama 等）；填写 Base URL 与 Key 后点「获取模型列表」或手填模型名。',
     },
   ];
 
   const VISION_PRESETS = [
-    { id: 'reuse', baseURL: '', model: '' },
-    { id: 'kimi', baseURL: 'https://api.moonshot.cn/v1', model: 'kimi-k2.5' },
-    { id: 'doubao', baseURL: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seed-1-6-250615' },
-    { id: 'qwen', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-vl-plus' },
+    { id: 'reuse', baseURL: '' },
+    { id: 'kimi', baseURL: 'https://api.moonshot.cn/v1' },
+    { id: 'kimi_coding', baseURL: 'https://api.kimi.com/coding/v1' },
+    { id: 'doubao', baseURL: 'https://ark.cn-beijing.volces.com/api/v3' },
+    { id: 'qwen', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
   ];
 
   const FALLBACK_TTS_CATALOG = {
@@ -220,12 +220,14 @@
 
   const state = {
     apiKey: readStorage(STORAGE_KEYS.apiKey),
-    baseURL: readStorage(STORAGE_KEYS.baseURL) || DEFAULT_BASE_URL,
-    model: readStorage(STORAGE_KEYS.model) || DEFAULT_MODEL,
+    baseURL: readStorage(STORAGE_KEYS.baseURL),
+    model: readStorage(STORAGE_KEYS.model),
     visionConfig: loadVisionConfig(),
     ttsConfig: loadTtsConfig(),
     ttsCatalog: FALLBACK_TTS_CATALOG,
     settingsTab: 'llm',
+    modalLlmKeyEndpoint: '',
+    modalVisionKeyEndpoint: '',
     modalTtsProvider: 'edge',
     modalVolcAuthMode: 'apiKey',
     uiInputTab: 'url',
@@ -233,7 +235,9 @@
     imageSlices: [],
     extractingImages: false,
     confirmedDraft: null,
+    polishingDraft: false,
     fullPreviewExpanded: false,
+    llmModelsCache: new Map(),
     activeTask: null,
     pollTimer: null,
     pollInFlight: false,
@@ -263,6 +267,11 @@
     llmPresetHint: document.getElementById('llmPresetHint'),
     settingApiKey: document.getElementById('settingApiKey'),
     settingBaseUrl: document.getElementById('settingBaseUrl'),
+    btnFetchLlmModels: document.getElementById('btnFetchLlmModels'),
+    llmModelsStatus: document.getElementById('llmModelsStatus'),
+    llmModelPickerWrap: document.getElementById('llmModelPickerWrap'),
+    settingModelFilter: document.getElementById('settingModelFilter'),
+    settingModelSelect: document.getElementById('settingModelSelect'),
     settingModel: document.getElementById('settingModel'),
     btnToggleKeyVisible: document.getElementById('btnToggleKeyVisible'),
     btnTestLlm: document.getElementById('btnTestLlm'),
@@ -272,6 +281,9 @@
     settingVisionApiKey: document.getElementById('settingVisionApiKey'),
     btnToggleVisionKey: document.getElementById('btnToggleVisionKey'),
     settingVisionBaseUrl: document.getElementById('settingVisionBaseUrl'),
+    btnFetchVisionModels: document.getElementById('btnFetchVisionModels'),
+    visionModelsStatus: document.getElementById('visionModelsStatus'),
+    settingVisionModelSelect: document.getElementById('settingVisionModelSelect'),
     settingVisionModel: document.getElementById('settingVisionModel'),
 
     ttsProviderButtons: document.querySelectorAll('[data-tts-provider]'),
@@ -341,6 +353,10 @@
     confirmTitle: document.getElementById('confirmTitle'),
     confirmExcerpt: document.getElementById('confirmExcerpt'),
     btnToggleFullPreview: document.getElementById('btnToggleFullPreview'),
+    btnPolishDraft: document.getElementById('btnPolishDraft'),
+    polishBanner: document.getElementById('polishBanner'),
+    polishBannerText: document.getElementById('polishBannerText'),
+    polishBannerActions: document.getElementById('polishBannerActions'),
     btnEditInput: document.getElementById('btnEditInput'),
     btnStartGenerate: document.getElementById('btnStartGenerate'),
 
@@ -619,6 +635,115 @@
     dom.textCharCount.classList.toggle('is-over', len > MAX_CONTENT_LENGTH);
   }
 
+  function renderPolishBanner() {
+    const draft = state.confirmedDraft;
+    if (!dom.polishBanner || !draft) return;
+
+    dom.polishBannerActions.textContent = '';
+    dom.polishBanner.classList.remove('is-done');
+
+    if (draft.polishedFrom) {
+      dom.polishBanner.classList.remove('hidden');
+      dom.polishBanner.classList.add('is-done');
+      dom.polishBannerText.textContent = draft.changeSummary || '已完成上下文纠错与语句顺滑处理';
+      const undoBtn = createActionBtn('恢复润色前原文', 'btn btn-subtle btn-sm', restoreDraftBeforePolish);
+      dom.polishBannerActions.appendChild(undoBtn);
+      return;
+    }
+
+    if (draft.hasIssues) {
+      dom.polishBanner.classList.remove('hidden');
+      dom.polishBannerText.textContent = draft.issueHint
+        ? `智能体检：${draft.issueHint}，是否根据上下文纠错润色？`
+        : '智能体检：识别出部分内容可能存在错别字或断句问题，建议点击「AI 纠错润色」优化后再生成播客。';
+      const polishBtn = createActionBtn('立即纠错润色', 'btn btn-primary btn-sm', handlePolishDraft);
+      dom.polishBannerActions.appendChild(polishBtn);
+      return;
+    }
+
+    dom.polishBanner.classList.add('hidden');
+    dom.polishBannerText.textContent = '';
+  }
+
+  function restoreDraftBeforePolish() {
+    const draft = state.confirmedDraft;
+    if (!draft?.polishedFrom) return;
+    const prev = draft.polishedFrom;
+    renderConfirmationCard({
+      ...draft,
+      title: prev.title,
+      content: prev.content,
+      length: prev.content.length,
+      truncated: prev.truncated,
+      hasIssues: prev.hasIssues,
+      issueHint: prev.issueHint,
+      polishedFrom: null,
+      changeSummary: '',
+    });
+    if (state.uiInputTab === 'text') {
+      dom.inputTitle.value = prev.title || '';
+      dom.inputText.value = prev.content || '';
+      updateTextCounter();
+    }
+    showToast('已恢复润色前原文');
+  }
+
+  async function handlePolishDraft() {
+    const draft = state.confirmedDraft;
+    if (!draft || state.polishingDraft) return;
+    state.polishingDraft = true;
+    const polishBtnSpan = dom.btnPolishDraft?.querySelector('span');
+    if (dom.btnPolishDraft) dom.btnPolishDraft.disabled = true;
+    if (polishBtnSpan) polishBtnSpan.textContent = '正在纠错润色…';
+    const bannerBtn = dom.polishBannerActions?.querySelector('button');
+    if (bannerBtn) bannerBtn.disabled = true;
+
+    try {
+      const data = await apiJson('/api/polish-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: draft.title,
+          content: draft.content,
+          ...buildCredsPayload(),
+        }),
+      });
+
+      const originalSnapshot = draft.polishedFrom || {
+        title: draft.title,
+        content: draft.content,
+        truncated: Boolean(draft.truncated),
+        hasIssues: Boolean(draft.hasIssues),
+        issueHint: draft.issueHint || '',
+      };
+
+      renderConfirmationCard({
+        ...draft,
+        title: data.title || draft.title,
+        content: data.content,
+        length: data.length,
+        truncated: Boolean(data.truncated),
+        hasIssues: false,
+        issueHint: '',
+        polishedFrom: originalSnapshot,
+        changeSummary: data.changeSummary || '已完成上下文纠错与语句顺滑处理',
+      });
+
+      if (state.uiInputTab === 'text') {
+        dom.inputTitle.value = data.title || '';
+        dom.inputText.value = data.content || '';
+        updateTextCounter();
+      }
+      showToast('已完成 AI 纠错润色，可核对或一键还原');
+    } catch (err) {
+      handleCredentialOrTaskError(err);
+    } finally {
+      state.polishingDraft = false;
+      if (dom.btnPolishDraft) dom.btnPolishDraft.disabled = false;
+      if (polishBtnSpan) polishBtnSpan.textContent = 'AI 纠错润色';
+    }
+  }
+
   function renderConfirmationCard(draft) {
     state.confirmedDraft = draft;
     state.fullPreviewExpanded = false;
@@ -631,6 +756,7 @@
     dom.confirmTitle.textContent = draft.title || '未命名文章（生成时将自动提炼标题）';
 
     updateExcerptView();
+    renderPolishBanner();
     dom.confirmCard.classList.remove('hidden');
     if (dom.studioRail) dom.studioRail.classList.add('has-confirm');
     if (draft.mode === 'text') {
@@ -975,11 +1101,15 @@
         content: data.content,
         length: data.length,
         truncated: Boolean(data.truncated),
+        hasIssues: Boolean(data.hasIssues),
+        issueHint: data.issueHint || '',
       });
-      showToast(`已从截图识别 ${data.length.toLocaleString('zh-CN')} 字，请核对后生成播客`);
+      showToast(data.hasIssues
+        ? `已识别 ${data.length.toLocaleString('zh-CN')} 字（检测到疑似错字，可点「AI 纠错润色」）`
+        : `已从截图识别 ${data.length.toLocaleString('zh-CN')} 字，请核对后生成播客`);
     } catch (err) {
       const msg = err.message || '图片文字识别失败，建议换清晰截图或直接贴正文';
-      const needsVisionConfig = err.status === 400 && /识图|图片识别|视觉|API Key/i.test(msg);
+      const needsVisionConfig = err.status === 400 && /识图|图片|视觉|多模态|API Key/i.test(msg);
       showParseError(msg, null, { source: 'image', showVisionConfig: needsVisionConfig });
     } finally {
       state.extractingImages = false;
@@ -1798,9 +1928,13 @@
     return String(url || '').trim().replace(/\/+$/, '').toLowerCase();
   }
 
+  function normalizeEndpointForBinding(url) {
+    return normalizeBaseUrlForMatch(url).replace(/\/v1$/i, '');
+  }
+
   function detectLlmPresetId(baseURL) {
     const normalized = normalizeBaseUrlForMatch(baseURL);
-    if (!normalized) return 'deepseek';
+    if (!normalized) return 'custom';
     for (const preset of LLM_PRESETS) {
       if (!preset.baseURL) continue;
       const target = normalizeBaseUrlForMatch(preset.baseURL);
@@ -1824,14 +1958,218 @@
   function applyLlmPreset(presetId) {
     const preset = LLM_PRESETS.find((item) => item.id === presetId);
     if (!preset) return;
+    const prevBase = normalizeEndpointForBinding(dom.settingBaseUrl.value);
+    const nextBase = preset.id === 'custom' ? '' : normalizeEndpointForBinding(preset.baseURL);
+    const hadKey = Boolean(dom.settingApiKey.value.trim());
+    const endpointChanged = Boolean(
+      (prevBase && prevBase !== nextBase) ||
+      (state.modalLlmKeyEndpoint && state.modalLlmKeyEndpoint !== nextBase)
+    );
     if (preset.id !== 'custom') {
       dom.settingBaseUrl.value = preset.baseURL;
-      dom.settingModel.value = preset.model;
-    } else {
-      dom.settingBaseUrl.focus();
+    } else if (endpointChanged) {
+      dom.settingBaseUrl.value = '';
+    }
+    if (hadKey && endpointChanged) {
+      dom.settingApiKey.value = '';
+      dom.settingModel.value = '';
+      state.modalLlmKeyEndpoint = '';
+    } else if (hadKey && !state.modalLlmKeyEndpoint && nextBase) {
+      state.modalLlmKeyEndpoint = nextBase;
     }
     updateLlmPresetSelection(preset.id);
     setTestStatus(dom.llmTestStatus, '', '');
+    syncModelPickerForBase('llm');
+    if (hadKey && endpointChanged) {
+      setTestStatus(dom.llmModelsStatus, '', `已切换为「${preset.label}」，为防密钥串发已清空旧 Key，请填写对应 API Key`);
+      (preset.id === 'custom' ? dom.settingBaseUrl : dom.settingApiKey).focus();
+    } else if (preset.id === 'custom') {
+      dom.settingBaseUrl.focus();
+    }
+  }
+
+  function modelCacheKey(scope, baseURL) {
+    return `${scope}:${normalizeBaseUrlForMatch(baseURL)}`;
+  }
+
+  function renderLlmModelOptions() {
+    const cacheKey = modelCacheKey('llm', dom.settingBaseUrl.value.trim());
+    const models = state.llmModelsCache.get(cacheKey);
+    if (!Array.isArray(models) || !models.length) {
+      dom.llmModelPickerWrap?.classList.add('hidden');
+      return;
+    }
+
+    dom.llmModelPickerWrap?.classList.remove('hidden');
+    if (dom.settingModelFilter) {
+      dom.settingModelFilter.classList.toggle('hidden', models.length <= 8);
+    }
+
+    const query = (dom.settingModelFilter?.value || '').trim().toLowerCase();
+    const filtered = query ? models.filter((m) => m.id.toLowerCase().includes(query)) : models;
+    const currentVal = dom.settingModel.value.trim();
+
+    dom.settingModelSelect.textContent = '';
+    if (!filtered.length) {
+      const emptyOpt = document.createElement('option');
+      emptyOpt.value = '';
+      emptyOpt.textContent = '未匹配到模型，请清空搜索词或下方手填';
+      dom.settingModelSelect.appendChild(emptyOpt);
+      return;
+    }
+
+    const placeholderOpt = document.createElement('option');
+    placeholderOpt.value = '';
+    placeholderOpt.textContent = `请选择模型（共 ${filtered.length} 个可用）`;
+    dom.settingModelSelect.appendChild(placeholderOpt);
+
+    filtered.forEach((m) => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.ownedBy ? `${m.id}（${m.ownedBy}）` : m.id;
+      dom.settingModelSelect.appendChild(opt);
+    });
+
+    if (filtered.some((m) => m.id === currentVal)) {
+      dom.settingModelSelect.value = currentVal;
+    } else {
+      dom.settingModelSelect.value = '';
+    }
+  }
+
+  function renderVisionModelOptions() {
+    const base = dom.settingVisionBaseUrl?.value.trim() || dom.settingBaseUrl.value.trim();
+    const models = state.llmModelsCache.get(modelCacheKey('vision', base)) || state.llmModelsCache.get(modelCacheKey('llm', base));
+    if (!dom.settingVisionModelSelect) return;
+    if (!Array.isArray(models) || !models.length) {
+      dom.settingVisionModelSelect.classList.add('hidden');
+      return;
+    }
+    dom.settingVisionModelSelect.classList.remove('hidden');
+    dom.settingVisionModelSelect.textContent = '';
+    const head = document.createElement('option');
+    head.value = '';
+    head.textContent = `请选择识图模型（共 ${models.length} 个）`;
+    dom.settingVisionModelSelect.appendChild(head);
+    models.forEach((m) => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.id;
+      dom.settingVisionModelSelect.appendChild(opt);
+    });
+    const cur = dom.settingVisionModel?.value.trim() || '';
+    dom.settingVisionModelSelect.value = models.some((m) => m.id === cur) ? cur : '';
+  }
+
+  function syncModelPickerForBase(scope) {
+    if (scope === 'vision') {
+      setTestStatus(dom.visionModelsStatus, '', '');
+      renderVisionModelOptions();
+      return;
+    }
+    setTestStatus(dom.llmModelsStatus, '', '');
+    if (dom.settingModelFilter) dom.settingModelFilter.value = '';
+    renderLlmModelOptions();
+  }
+
+  function hasUnreboundKey(apiKey, baseURL, boundEndpoint) {
+    return Boolean(apiKey && boundEndpoint && normalizeEndpointForBinding(baseURL) !== boundEndpoint);
+  }
+
+  async function handleFetchModels(scope = 'llm') {
+    const isVision = scope === 'vision';
+    const btn = isVision ? dom.btnFetchVisionModels : dom.btnFetchLlmModels;
+    const statusEl = isVision ? dom.visionModelsStatus : dom.llmModelsStatus;
+    if (!btn) return;
+
+    const llmSnap = readLlmFormSnapshot();
+    const visionSnap = {
+      apiKey: dom.settingVisionApiKey?.value.trim() || '',
+      baseURL: dom.settingVisionBaseUrl?.value.trim() || '',
+      model: dom.settingVisionModel?.value.trim() || '',
+    };
+    if (!isVision && llmSnap.apiKey && !llmSnap.baseURL) {
+      setTestStatus(statusEl, 'error', '填写 API Key 时，请先选择上方厂商预设或填写对应的 Base URL');
+      dom.settingBaseUrl.focus();
+      return;
+    }
+    if (!isVision && hasUnreboundKey(llmSnap.apiKey, llmSnap.baseURL, state.modalLlmKeyEndpoint)) {
+      setTestStatus(statusEl, 'error', '接口地址已变更，请重新填写该地址对应的 API Key（或先清空旧 Key）');
+      dom.settingApiKey.focus();
+      return;
+    }
+    if (isVision && visionSnap.apiKey && !visionSnap.baseURL) {
+      setTestStatus(statusEl, 'error', '填写独立识图 API Key 时，请先选择上方识图厂商预设或填写对应的识图 Base URL');
+      dom.settingVisionBaseUrl?.focus();
+      return;
+    }
+    if (isVision && hasUnreboundKey(visionSnap.apiKey, visionSnap.baseURL, state.modalVisionKeyEndpoint)) {
+      setTestStatus(statusEl, 'error', '识图接口地址已变更，请重新填写该地址对应的识图 API Key（或先清空旧 Key）');
+      dom.settingVisionApiKey?.focus();
+      return;
+    }
+    if (isVision && !visionSnap.apiKey && !visionSnap.baseURL && llmSnap.apiKey && !llmSnap.baseURL) {
+      setTestStatus(statusEl, 'error', '主模型填写了 API Key 但未填写 Base URL，请先在上方补全接口地址');
+      dom.settingBaseUrl.focus();
+      return;
+    }
+    if (isVision && !visionSnap.apiKey && !visionSnap.baseURL && hasUnreboundKey(llmSnap.apiKey, llmSnap.baseURL, state.modalLlmKeyEndpoint)) {
+      setTestStatus(statusEl, 'error', '主模型接口地址已变更，请先在上方重新确认对应的 API Key');
+      dom.settingApiKey.focus();
+      return;
+    }
+
+    btn.disabled = true;
+    setTestStatus(statusEl, 'loading', '正在连接接口并拉取最新模型列表…');
+
+    try {
+      const body = isVision
+        ? {
+            scope: 'vision',
+            ...buildCredsPayload(llmSnap),
+            ...buildVisionPayload(visionSnap),
+          }
+        : { scope: 'llm', ...buildCredsPayload(llmSnap) };
+
+      const data = await apiJson('/api/llm/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!data.supported) {
+        setTestStatus(statusEl, 'error', data.message || '该接口未开放模型列表，请手动输入模型名称');
+        return;
+      }
+
+      const targetBase = isVision
+        ? (dom.settingVisionBaseUrl?.value.trim() || llmSnap.baseURL)
+        : llmSnap.baseURL;
+      state.llmModelsCache.set(modelCacheKey(scope, targetBase), data.models || []);
+
+      if (isVision) {
+        renderVisionModelOptions();
+        if (!dom.settingVisionModel.value.trim() && data.models?.length === 1) {
+          dom.settingVisionModel.value = data.models[0].id;
+          dom.settingVisionModelSelect.value = data.models[0].id;
+        }
+        setTestStatus(statusEl, 'ok', `已拉取 ${data.count} 个模型（${data.latencyMs}ms），请从下拉列表选择`);
+      } else {
+        if (dom.settingModelFilter) dom.settingModelFilter.value = '';
+        renderLlmModelOptions();
+        if (data.models?.length && !data.models.some((m) => m.id === dom.settingModel.value.trim())) {
+          if (data.models.length === 1) {
+            dom.settingModel.value = data.models[0].id;
+            dom.settingModelSelect.value = data.models[0].id;
+          }
+        }
+        setTestStatus(statusEl, 'ok', `接口鉴权通过 · 已拉取 ${data.count} 个模型（${data.latencyMs}ms），请在下方勾选`);
+      }
+    } catch (err) {
+      setTestStatus(statusEl, 'error', err.message || '获取模型列表失败');
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   function populateSelect(selectEl, options, selectedValue, fallbackValue) {
@@ -2011,8 +2349,8 @@
   function readLlmFormSnapshot() {
     return {
       apiKey: dom.settingApiKey.value.trim(),
-      baseURL: dom.settingBaseUrl.value.trim() || DEFAULT_BASE_URL,
-      model: dom.settingModel.value.trim() || DEFAULT_MODEL,
+      baseURL: dom.settingBaseUrl.value.trim(),
+      model: dom.settingModel.value.trim(),
     };
   }
 
@@ -2048,16 +2386,26 @@
   }
 
   async function handleTestLlmConnection() {
+    const snapshot = readLlmFormSnapshot();
+    if (snapshot.apiKey && !snapshot.baseURL) {
+      setTestStatus(dom.llmTestStatus, 'error', '填写 API Key 时，请先选择上方厂商预设或填写对应的 Base URL');
+      dom.settingBaseUrl.focus();
+      return;
+    }
+    if (hasUnreboundKey(snapshot.apiKey, snapshot.baseURL, state.modalLlmKeyEndpoint)) {
+      setTestStatus(dom.llmTestStatus, 'error', '接口地址已变更，请重新填写该地址对应的 API Key（或先清空旧 Key）');
+      dom.settingApiKey.focus();
+      return;
+    }
     dom.btnTestLlm.disabled = true;
-    setTestStatus(dom.llmTestStatus, 'loading', '正在探测模型接口…');
+    setTestStatus(dom.llmTestStatus, 'loading', '正在向所选模型发起对话测试…');
     try {
-      const snapshot = readLlmFormSnapshot();
       const data = await apiJson('/api/llm/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildCredsPayload(snapshot)),
+        body: JSON.stringify({ ...buildCredsPayload(snapshot), verifyChat: true }),
       });
-      setTestStatus(dom.llmTestStatus, 'ok', `连接成功 · ${data.model} · ${data.latencyMs}ms`);
+      setTestStatus(dom.llmTestStatus, 'ok', `所选模型可用 · ${data.model} · ${data.latencyMs}ms`);
     } catch (err) {
       setTestStatus(dom.llmTestStatus, 'error', err.message || '模型连接测试失败');
     } finally {
@@ -2098,7 +2446,7 @@
     const configured = Boolean(state.apiKey && state.apiKey.trim());
     const ttsId = resolveEffectiveTtsProviderId();
     dom.apiKeyStatusDot.classList.toggle('is-configured', configured);
-    dom.btnSettings.title = `模型：${state.model || DEFAULT_MODEL}（${configured ? '本地 Key 已配置' : '留空将尝试服务端 .env'}）｜ 语音：${TTS_SHORT_LABELS[ttsId] || ttsId}`;
+    dom.btnSettings.title = `模型：${state.model || '服务端默认'}（${configured ? '本地 Key 已配置' : '留空将尝试服务端 .env'}）｜ 语音：${TTS_SHORT_LABELS[ttsId] || ttsId}`;
     updateConfirmTtsBadge();
   }
 
@@ -2129,32 +2477,59 @@
   function applyVisionPreset(presetId) {
     const preset = VISION_PRESETS.find((item) => item.id === presetId);
     if (!preset) return;
+    const prevBase = normalizeEndpointForBinding(dom.settingVisionBaseUrl?.value);
+    const nextBase = preset.id === 'reuse' ? '' : normalizeEndpointForBinding(preset.baseURL);
+    const hadKey = Boolean(dom.settingVisionApiKey?.value.trim());
+    const endpointChanged = Boolean(
+      (prevBase && prevBase !== nextBase) ||
+      (state.modalVisionKeyEndpoint && state.modalVisionKeyEndpoint !== nextBase)
+    );
     if (preset.id === 'reuse') {
       dom.settingVisionApiKey.value = '';
       dom.settingVisionBaseUrl.value = '';
       dom.settingVisionModel.value = '';
+      state.modalVisionKeyEndpoint = '';
     } else {
       dom.settingVisionBaseUrl.value = preset.baseURL;
-      dom.settingVisionModel.value = preset.model;
+      if (hadKey && endpointChanged) {
+        dom.settingVisionApiKey.value = '';
+        dom.settingVisionModel.value = '';
+        state.modalVisionKeyEndpoint = '';
+      } else if (hadKey && !state.modalVisionKeyEndpoint && nextBase) {
+        state.modalVisionKeyEndpoint = nextBase;
+      }
     }
     updateVisionPresetSelection(preset.id);
+    syncModelPickerForBase('vision');
+    if (preset.id !== 'reuse' && hadKey && endpointChanged) {
+      setTestStatus(dom.visionModelsStatus, '', '已切换识图厂商，为防密钥串发已清空旧识图 Key，请重新填写');
+      dom.settingVisionApiKey?.focus();
+    }
   }
 
   function openSettingsModal(initialTab = 'llm', { expandVision = false } = {}) {
     dom.settingApiKey.value = state.apiKey;
-    dom.settingBaseUrl.value = state.baseURL || DEFAULT_BASE_URL;
-    dom.settingModel.value = state.model || DEFAULT_MODEL;
+    dom.settingBaseUrl.value = state.baseURL || '';
+    dom.settingModel.value = state.model || '';
+    state.modalLlmKeyEndpoint = dom.settingApiKey.value.trim()
+      ? normalizeEndpointForBinding(dom.settingBaseUrl.value)
+      : '';
     updateLlmPresetSelection(detectLlmPresetId(dom.settingBaseUrl.value));
     resetSecretFieldVisibility(dom.settingApiKey, dom.btnToggleKeyVisible);
     setTestStatus(dom.llmTestStatus, '', '');
+    syncModelPickerForBase('llm');
 
     if (dom.settingVisionApiKey) {
       dom.settingVisionApiKey.value = state.visionConfig.apiKey || '';
       dom.settingVisionBaseUrl.value = state.visionConfig.baseURL || '';
       dom.settingVisionModel.value = state.visionConfig.model || '';
+      state.modalVisionKeyEndpoint = dom.settingVisionApiKey.value.trim()
+        ? normalizeEndpointForBinding(dom.settingVisionBaseUrl.value)
+        : '';
       resetSecretFieldVisibility(dom.settingVisionApiKey, dom.btnToggleVisionKey);
       const hasCustomVision = Boolean(state.visionConfig.apiKey || state.visionConfig.baseURL || state.visionConfig.model);
       updateVisionPresetSelection(detectVisionPresetId(dom.settingVisionBaseUrl.value, dom.settingVisionModel.value));
+      syncModelPickerForBase('vision');
       if (dom.visionSettingsDisclosure) {
         dom.visionSettingsDisclosure.open = Boolean(expandVision || hasCustomVision);
       }
@@ -2200,16 +2575,47 @@
   function saveSettings(e) {
     e.preventDefault();
     const llm = readLlmFormSnapshot();
+    const visionApiKey = dom.settingVisionApiKey?.value.trim() || '';
+    const visionBaseURL = dom.settingVisionBaseUrl?.value.trim() || '';
+    const visionModel = dom.settingVisionModel?.value.trim() || '';
+    if (llm.apiKey && !llm.baseURL) {
+      switchSettingsTab('llm');
+      setTestStatus(dom.llmTestStatus, 'error', '填写 API Key 时，请先选择上方厂商预设或填写对应的 Base URL');
+      dom.settingBaseUrl.focus();
+      return;
+    }
+    if (hasUnreboundKey(llm.apiKey, llm.baseURL, state.modalLlmKeyEndpoint)) {
+      switchSettingsTab('llm');
+      setTestStatus(dom.llmTestStatus, 'error', '接口地址已变更，请重新填写该地址对应的 API Key（或先清空旧 Key）');
+      dom.settingApiKey.focus();
+      return;
+    }
+    if (visionApiKey && !visionBaseURL) {
+      switchSettingsTab('llm');
+      if (dom.visionSettingsDisclosure) dom.visionSettingsDisclosure.open = true;
+      setTestStatus(dom.visionModelsStatus, 'error', '填写独立识图 API Key 时，请同时填写对应的识图 Base URL');
+      dom.settingVisionBaseUrl?.focus();
+      return;
+    }
+    if (hasUnreboundKey(visionApiKey, visionBaseURL, state.modalVisionKeyEndpoint)) {
+      switchSettingsTab('llm');
+      if (dom.visionSettingsDisclosure) dom.visionSettingsDisclosure.open = true;
+      setTestStatus(dom.visionModelsStatus, 'error', '识图接口地址已变更，请重新填写该地址对应的识图 API Key（或先清空旧 Key）');
+      dom.settingVisionApiKey?.focus();
+      return;
+    }
     const tts = readTtsFormSnapshot();
 
     state.apiKey = llm.apiKey;
     state.baseURL = llm.baseURL;
     state.model = llm.model;
+    state.modalLlmKeyEndpoint = llm.apiKey ? normalizeEndpointForBinding(llm.baseURL) : '';
     state.visionConfig = {
-      apiKey: dom.settingVisionApiKey?.value.trim() || '',
-      baseURL: dom.settingVisionBaseUrl?.value.trim() || '',
-      model: dom.settingVisionModel?.value.trim() || '',
+      apiKey: visionApiKey,
+      baseURL: visionBaseURL,
+      model: visionModel,
     };
+    state.modalVisionKeyEndpoint = visionApiKey ? normalizeEndpointForBinding(visionBaseURL) : '';
     state.ttsConfig = tts;
 
     writeStorage(STORAGE_KEYS.apiKey, state.apiKey);
@@ -2337,6 +2743,9 @@
       state.fullPreviewExpanded = !state.fullPreviewExpanded;
       updateExcerptView();
     });
+    if (dom.btnPolishDraft) {
+      dom.btnPolishDraft.addEventListener('click', handlePolishDraft);
+    }
 
     dom.btnEditInput.addEventListener('click', () => {
       const targetMode = state.confirmedDraft?.mode || state.input.mode;
@@ -2472,13 +2881,60 @@
     if (dom.settingVisionBaseUrl) {
       dom.settingVisionBaseUrl.addEventListener('input', () => {
         updateVisionPresetSelection(detectVisionPresetId(dom.settingVisionBaseUrl.value, dom.settingVisionModel?.value));
+        syncModelPickerForBase('vision');
+      });
+    }
+    if (dom.btnFetchVisionModels) {
+      dom.btnFetchVisionModels.addEventListener('click', () => handleFetchModels('vision'));
+    }
+    if (dom.settingVisionModelSelect) {
+      dom.settingVisionModelSelect.addEventListener('change', () => {
+        if (dom.settingVisionModelSelect.value && dom.settingVisionModel) {
+          dom.settingVisionModel.value = dom.settingVisionModelSelect.value;
+        }
+      });
+    }
+    dom.settingApiKey.addEventListener('input', () => {
+      state.modalLlmKeyEndpoint = dom.settingApiKey.value.trim()
+        ? normalizeEndpointForBinding(dom.settingBaseUrl.value)
+        : '';
+      setTestStatus(dom.llmTestStatus, '', '');
+    });
+    if (dom.settingVisionApiKey) {
+      dom.settingVisionApiKey.addEventListener('input', () => {
+        state.modalVisionKeyEndpoint = dom.settingVisionApiKey.value.trim()
+          ? normalizeEndpointForBinding(dom.settingVisionBaseUrl?.value)
+          : '';
+        setTestStatus(dom.visionModelsStatus, '', '');
       });
     }
     dom.settingBaseUrl.addEventListener('input', () => {
       updateLlmPresetSelection(detectLlmPresetId(dom.settingBaseUrl.value));
       setTestStatus(dom.llmTestStatus, '', '');
+      syncModelPickerForBase('llm');
     });
-    dom.settingModel.addEventListener('input', () => setTestStatus(dom.llmTestStatus, '', ''));
+    if (dom.btnFetchLlmModels) {
+      dom.btnFetchLlmModels.addEventListener('click', () => handleFetchModels('llm'));
+    }
+    if (dom.settingModelFilter) {
+      dom.settingModelFilter.addEventListener('input', renderLlmModelOptions);
+    }
+    if (dom.settingModelSelect) {
+      dom.settingModelSelect.addEventListener('change', () => {
+        if (dom.settingModelSelect.value) {
+          dom.settingModel.value = dom.settingModelSelect.value;
+          setTestStatus(dom.llmTestStatus, '', '');
+        }
+      });
+    }
+    dom.settingModel.addEventListener('input', () => {
+      setTestStatus(dom.llmTestStatus, '', '');
+      if (dom.settingModelSelect) {
+        const val = dom.settingModel.value.trim();
+        const hasMatch = Array.from(dom.settingModelSelect.options).some((opt) => opt.value === val);
+        dom.settingModelSelect.value = hasMatch ? val : '';
+      }
+    });
     dom.btnTestLlm.addEventListener('click', handleTestLlmConnection);
 
     dom.ttsProviderButtons.forEach((btn) => {
