@@ -207,21 +207,39 @@ test('前端只公开指定的 GET/HEAD 文件，运行目录只通过音频路�
 });
 
 test('创建、单活冲突、取消、续跑、轮询成品、历史与外置静态音频', async () => {
+  const invalidStyle = '节目风格仅支持深度主讲（deep_dive）或轻松对谈（dialogue）';
+  const tasksDir = path.join(publicDir, 'custom-data', 'tasks');
+  const taskFiles = () => fs.existsSync(tasksDir) ? fs.readdirSync(tasksDir) : [];
+  const before = taskFiles();
+  for (const podcastStyle of [null, 123, 'unknown']) {
+    assert.equal((await request('tasks', 400, { ...payload, podcastStyle })).error, invalidStyle);
+  }
+  assert.deepEqual(taskFiles(), before);
   generate = ({ signal }) => new Promise((resolve, reject) => {
     signal.addEventListener('abort', () => reject(new Error('迟到的上游失败')), { once: true });
   });
-  const { data: task } = await request('tasks', 202, payload);
+  const { data: task } = await request('tasks', 202, { ...payload, podcastStyle: ' DIALOGUE ' });
   const route = 'tasks/' + task.id;
   assert.equal(task.status, 'queued');
+  assert.equal(task.podcastStyle, 'dialogue');
   assert.equal((await request('tasks', 409, payload)).code, 'TASK_ALREADY_RUNNING');
   await request(route + '/resume', 409, {});
   assert.equal((await request(route + '/cancel', 200, {})).data.status, 'cancelled');
   await request(route + '/cancel', 409, {});
   assert.equal((await request(route, 200)).data.error, null);
   await request(route + '/resume', 400, {});
+  const record = path.join(tasksDir, task.id + '.json');
+  const checkpoint = fs.readFileSync(record, 'utf8');
+  for (const podcastStyle of [null, 123, 'unknown']) {
+    assert.equal((await request(route + '/resume', 400, { apiKey, baseURL, podcastStyle })).error, invalidStyle);
+  }
+  assert.equal(fs.readFileSync(record, 'utf8'), checkpoint);
 
-  generate = async () => ({ podcastTitle: '路由测试', summary: '测试', dialogue: [{ speaker: '阿泽', text: '开场' }] });
-  await request(route + '/resume', 202, { apiKey, baseURL });
+  generate = async ({ podcastStyle }) => {
+    assert.equal(podcastStyle, 'dialogue');
+    return { podcastTitle: '路由测试', summary: '测试', dialogue: [{ speaker: '阿泽', text: '开场' }] };
+  };
+  assert.equal((await request(route + '/resume', 202, { apiKey, baseURL })).data.podcastStyle, 'dialogue');
   let completed;
   for (let i = 0; i < 100; i++) {
     completed = (await request(route, 200)).data;
@@ -231,13 +249,14 @@ test('创建、单活冲突、取消、续跑、轮询成品、历史与外置�
   assert.equal(completed.status, 'completed');
   const detail = (await request('podcasts/' + task.id, 200)).data;
   assert.deepEqual(completed.podcast, detail);
+  assert.equal(detail.podcastStyle, 'dialogue');
   assert.equal((await request('podcasts', 200)).data.items[0].id, task.id);
   for (const url of [detail.fullAudioUrl, detail.sentences[0].audioUrl]) {
     const res = await fetch(base + url);
     assert.equal(res.status, 200);
     assert.deepEqual(Buffer.from(await res.arrayBuffer()), makeMp3(10));
   }
-  assert.ok(fs.existsSync(path.join(publicDir, 'custom-data', 'tasks', task.id + '.json')));
+  assert.ok(fs.existsSync(record));
   assert.ok(fs.existsSync(path.join(publicDir, 'external-audio', task.id, 'meta.json')));
   await request(route + '/resume', 409, { apiKey, baseURL });
   await request(route + '/cancel', 409, {});
@@ -463,12 +482,13 @@ test('正文润色路由返回脱敏结果，并在无正文时不调用上游',
     assert.equal(url, baseURL + '/v1/chat/completions');
     assert.equal(options.method, 'POST');
     assert.equal(options.headers.Authorization, 'Bearer ' + apiKey);
-    return response(completion(JSON.stringify({ content: '正文。', changeSummary: '修正标点 ' + baseURL })));
+    return response(completion(JSON.stringify({ edits: [{ find: '这里是路由测试用的正文', replace: '这里是路由测试用的正文。' }],
+      changeSummary: '修正标点 ' + baseURL })));
   });
-  const body = { apiKey, baseURL, title: '原始标题', content: '正文' };
+  const body = { apiKey, baseURL, title: '原始标题', content: '这里是路由测试用的正文' };
   const polished = await request('polish-text', 200, body);
   assert.deepEqual(polished, { success: true, data: {
-    title: '原始标题', content: '正文。', length: 3, truncated: false, changeSummary: '修正标点 ***',
+    title: '原始标题', content: '这里是路由测试用的正文。', length: 12, truncated: false, changeSummary: '修正标点 ***', mode: 'patch', editCount: 1,
   } });
   await request('polish-text', 400, { ...body, content: '' });
   assert.equal(llmRequest.mock.callCount(), 1);
