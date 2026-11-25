@@ -3,7 +3,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { atomicWrite } = require('./atomicWrite');
 const { extractArticle, assertValidUrl, assertSafeFetchTarget } = require('./extractor');
-const { generatePodcastScript } = require('./scriptEngine');
+const { generatePodcastScript, normalizePodcastStyle, PODCAST_STYLES } = require('./scriptEngine');
 const { synthesizeDialogueScript, DEFAULT_VOICES } = require('./ttsService');
 const { getCredentials, llmSecrets, validateLlmSettings } = require('./llmCredentials');
 const { redactProviderDetail } = require('./providerHttp');
@@ -91,10 +91,37 @@ function clearAudio(dir) {
   }
 }
 
-// Only persist public dialogue fields, including when reading older metadata.
-function publicSentences(id, sentences) {
+function redactScriptField(value, sensitive) {
+  return typeof value === 'string' ? redactProviderDetail(value, sensitive) : undefined;
+}
+
+function sanitizeScript({ podcastTitle, summary, dialogue }, sensitive) {
+  return {
+    podcastTitle: redactScriptField(podcastTitle, sensitive),
+    summary: redactScriptField(summary, sensitive),
+    dialogue: dialogue.map(({ speaker, text, emotion, rate, pitch }) => {
+      const safeText = redactScriptField(text, sensitive);
+      if (!safeText?.trim()) throw new Error('模型返回内容包含敏感路径或凭据，已拦截并中止保存');
+      return { speaker, text: safeText, emotion: redactScriptField(emotion, sensitive), rate, pitch };
+    }),
+  };
+}
+
+function sanitizeTaskScript(task, sensitive) {
+  if (!task.script) return false;
+  const original = task.script.dialogue;
+  const sanitized = sanitizeScript(task.script, sensitive);
+  const changed = sanitized.dialogue.some(({ text, emotion }, index) =>
+    text !== original[index].text || emotion !== original[index].emotion);
+  task.script = sanitized;
+  return changed;
+}
+
+// Only expose public dialogue fields, including when reading older metadata.
+function publicSentences(id, sentences, sensitive) {
   return sentences.map(({ index, speaker, text, emotion, startTime, endTime, duration, fileName }) => ({
-    index, speaker, text, emotion, startTime, endTime, duration, ...(fileName && {
+    index, speaker, text: redactScriptField(text, sensitive), emotion: redactScriptField(emotion, sensitive),
+    startTime, endTime, duration, ...(fileName && {
       fileName: path.basename(fileName), audioUrl: `/podcasts/${id}/${encodeURIComponent(path.basename(fileName))}`,
     }),
   }));
@@ -106,6 +133,7 @@ function createTaskManager({
   ttsProvider, getTtsProviderById = getTtsProvider,
 }) {
   const cache = createTtsCache(cacheDir);
+  const storedSecrets = [...llmSecrets({}, {}, { includeDefaultBase: false }), podcastsDir, cacheDir, tasksDir];
   let active = null;
 
   function resolveSpeech(payload, creds, task) {
@@ -153,6 +181,8 @@ function createTaskManager({
     if (!fs.existsSync(file)) throw httpError(404, '任务不存在');
     const task = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (!validTaskRecord(task, id)) throw new Error('任务记录无效');
+    const legacyStyle = task.script ? 'dialogue' : 'deep_dive';
+    task.podcastStyle = normalizePodcastStyle(task.podcastStyle === undefined ? legacyStyle : task.podcastStyle);
     if (['queued', 'running'].includes(task.status) && active?.task.id !== id) {
       task.status = 'failed';
       task.error = {
@@ -161,6 +191,8 @@ function createTaskManager({
           : '上次生成已中断，可点击「从断点继续生成」恢复',
       };
       try {
+        // Keep the invalidation flag with the sanitized checkpoint across restarts.
+        if (sanitizeTaskScript(task, storedSecrets)) task.clearPending = true;
         save(task);
       } catch {
         // The checkpoint stays readable on a read-only volume. A later read or resume retries the write.
@@ -192,10 +224,12 @@ function createTaskManager({
       if (!meta || typeof meta !== 'object' || Array.isArray(meta)) throw missing();
       if (meta.sentences !== undefined && !Array.isArray(meta.sentences)) throw missing();
       const { podcastTitle, summary = '', sourceTruncated = false, createAt, totalDuration, sentenceGap, measurement } = meta;
+      const podcastStyle = PODCAST_STYLES.includes(meta.podcastStyle) ? meta.podcastStyle : 'dialogue';
       return {
-        id, podcastTitle, summary, sourceTruncated, createAt, totalDuration, sentenceGap, measurement,
+        id, podcastTitle: redactScriptField(podcastTitle, storedSecrets), summary: redactScriptField(summary, storedSecrets),
+        podcastStyle, sourceTruncated, createAt, totalDuration, sentenceGap, measurement,
         ...(meta.ttsProvider && { ttsProvider: meta.ttsProvider, ttsModel: meta.ttsModel, voiceMapping: meta.voiceMapping }),
-        fullAudioUrl: `/podcasts/${id}/full_podcast.mp3`, sentences: publicSentences(id, meta.sentences || []),
+        fullAudioUrl: `/podcasts/${id}/full_podcast.mp3`, sentences: publicSentences(id, meta.sentences || [], storedSecrets),
       };
     } catch (error) {
       if (['ENOENT', 'ENOTDIR'].includes(error.code) || error instanceof SyntaxError || error instanceof TypeError) throw missing();
@@ -208,8 +242,8 @@ function createTaskManager({
     for (const entry of readDirectory(podcastsDir)) {
       if (!entry.isDirectory() || !SAFE_ID.test(entry.name)) continue;
       try {
-        const { id, podcastTitle, summary, createAt, totalDuration, sentences, fullAudioUrl } = getPodcast(entry.name);
-        items.push({ id, podcastTitle, summary, createAt, totalDuration, sentenceCount: sentences.length, fullAudioUrl });
+        const { id, podcastTitle, summary, podcastStyle, createAt, totalDuration, sentences, fullAudioUrl } = getPodcast(entry.name);
+        items.push({ id, podcastTitle, summary, podcastStyle, createAt, totalDuration, sentenceCount: sentences.length, fullAudioUrl });
       } catch (error) {
         if (error.statusCode !== 404) throw error;
       }
@@ -220,9 +254,10 @@ function createTaskManager({
   function toDTO(task) {
     const { id, status, stage, input, progress, script, podcastId, error, createdAt, updatedAt } = task;
     return {
-      id, status, stage, ttsProvider: task.ttsProvider, ttsModel: task.ttsModel, voiceMapping: task.voiceMapping,
+      id, status, stage, podcastStyle: task.podcastStyle, ttsProvider: task.ttsProvider, ttsModel: task.ttsModel, voiceMapping: task.voiceMapping,
       input: { ...input }, progress: { ...progress }, hasScript: Boolean(script),
-      podcastTitle: script?.podcastTitle || '', summary: script?.summary || '', podcastId,
+      podcastTitle: redactScriptField(script?.podcastTitle, storedSecrets) || '',
+      summary: redactScriptField(script?.summary, storedSecrets) || '', podcastId,
       podcast: status === 'completed' ? getPodcast(podcastId) : null, error, createdAt, updatedAt,
     };
   }
@@ -233,6 +268,7 @@ function createTaskManager({
 
   async function runPipeline(task, creds, speech, signal) {
     const workDir = path.join(podcastsDir, task.id);
+    const scriptSecrets = [...speech.secrets, creds.baseURL, workDir, cacheDir, tasksDir];
     function enter(stage) {
       signal.throwIfAborted();
       task.stage = stage;
@@ -262,15 +298,11 @@ function createTaskManager({
       if (!task.script) {
         enter('script');
         const script = await scriptGenerator({
-          title: task.input.title, content: task.sourceContent, ...creds, signal, llmRequest, lookup,
+          title: task.input.title, content: task.sourceContent, podcastStyle: task.podcastStyle, ...creds, signal, llmRequest, lookup,
         });
         signal.throwIfAborted();
         if (containsSecrets(speech.secrets, script)) throw new Error('模型返回内容包含敏感凭据，已拦截并中止保存');
-        const { podcastTitle, summary, dialogue } = script;
-        task.script = {
-          podcastTitle, summary,
-          dialogue: dialogue.map(({ speaker, text, emotion, rate, pitch }) => ({ speaker, text, emotion, rate, pitch })),
-        };
+        task.script = sanitizeScript(script, scriptSecrets);
       }
 
       Object.assign(task.progress, { completedSegments: 0, totalSegments: task.script.dialogue.length, cachedSegments: 0 });
@@ -308,9 +340,9 @@ function createTaskManager({
       }
       const meta = {
         ...speech.settings, id: task.id, podcastTitle: task.script.podcastTitle, summary: task.script.summary,
-        sourceTruncated: task.input.sourceTruncated, createAt: now(), totalDuration: result.totalDuration,
+        podcastStyle: task.podcastStyle, sourceTruncated: task.input.sourceTruncated, createAt: now(), totalDuration: result.totalDuration,
         measurement: result.measurement, sentenceGap: result.sentenceGap,
-        fullAudioUrl: `/podcasts/${task.id}/full_podcast.mp3`, sentences: publicSentences(task.id, result.dialogue),
+        fullAudioUrl: `/podcasts/${task.id}/full_podcast.mp3`, sentences: publicSentences(task.id, result.dialogue, scriptSecrets),
       };
       atomicWrite(path.join(workDir, 'meta.json'), JSON.stringify(meta));
       task.status = 'completed';
@@ -325,8 +357,7 @@ function createTaskManager({
       } else {
         task.status = 'failed';
         task.error = {
-          stage: task.stage, message: redactProviderDetail(error.path ? '本地文件读写失败' : error.message,
-            [...speech.secrets, creds.baseURL, workDir, cacheDir, tasksDir]),
+          stage: task.stage, message: redactProviderDetail(error.path ? '本地文件读写失败' : error.message, scriptSecrets),
           retryable: error.retryable !== false, failedSegmentIndex: error.segmentIndex ?? null,
         };
       }
@@ -348,6 +379,7 @@ function createTaskManager({
   }
 
   function createTask(payload = {}) {
+    const podcastStyle = normalizePodcastStyle(payload.podcastStyle);
     assertIdle();
     const creds = getCredentials(payload);
     if (!creds.apiKey) throw new InputError('缺少 API Key，请先配置后再生成');
@@ -355,7 +387,8 @@ function createTaskManager({
     const speech = resolveSpeech(payload, creds);
     const source = getInput(payload);
     const task = {
-      id: randomUUID(), status: 'queued', stage: 'extract', ...source, ...speech.settings, ttsScopeHash: speech.scopeHash, script: null,
+      id: randomUUID(), status: 'queued', stage: 'extract', podcastStyle, ...source, ...speech.settings,
+      ttsScopeHash: speech.scopeHash, script: null,
       progress: { ...stageProgress('extract'), message: '等待生成', completedSegments: 0, totalSegments: 0, cachedSegments: 0 },
       createdAt: now(), podcastId: null, error: null,
     };
@@ -373,23 +406,33 @@ function createTaskManager({
   }
 
   function resumeTask(id, payload = {}) {
+    const requestedStyle = payload.podcastStyle === undefined ? undefined : normalizePodcastStyle(payload.podcastStyle);
     const task = readTask(id);
     const drainingSameTask = active?.task.id === id && active.controller.signal.aborted;
     if (!drainingSameTask) assertIdle();
     if (!['failed', 'cancelled'].includes(task.status)) throw httpError(409, '当前任务状态无法续跑');
+    const podcastStyle = requestedStyle ?? task.podcastStyle;
+    const styleChanged = podcastStyle !== task.podcastStyle;
+    const needsScript = !task.script || styleChanged;
+    if (styleChanged && !validTaskRecord({ ...task, script: null }, id)) {
+      throw new InputError('任务缺少可重新生成的原文，无法切换节目风格');
+    }
     const creds = getCredentials(payload);
-    if (!task.script && !creds.apiKey) throw new InputError('尚未生成剧本，请先配置 API Key 后再继续');
-    if (!task.script || [payload.apiKey, payload.baseURL, payload.model, payload.visionModel].some(value => value != null)) {
+    if (needsScript && !creds.apiKey) throw new InputError('尚未生成剧本，请先配置 API Key 后再继续');
+    if (needsScript || [payload.apiKey, payload.baseURL, payload.model, payload.visionModel].some(value => value != null)) {
       validateLlmSettings(payload, creds);
     }
     const speech = resolveSpeech(payload, creds, task);
-    if (speech.changed || task.clearPending) {
-      clearAudio(path.join(podcastsDir, id));
+    const workDir = path.join(podcastsDir, id);
+    if (styleChanged) task.script = null;
+    const scriptChanged = !styleChanged && sanitizeTaskScript(task, [...speech.secrets, creds.baseURL, workDir, cacheDir, tasksDir]);
+    if (styleChanged || scriptChanged || speech.changed || task.clearPending) {
+      clearAudio(workDir);
       // A cancelled adapter may still publish its last write before it drains.
       // Persist the second cleanup across a process restart as well.
       task.clearPending = Boolean(drainingSameTask);
     }
-    Object.assign(task, speech.settings, { ttsScopeHash: speech.scopeHash });
+    Object.assign(task, speech.settings, { ttsScopeHash: speech.scopeHash, podcastStyle });
     task.status = 'running';
     task.error = null;
     return start(task, creds, speech);
