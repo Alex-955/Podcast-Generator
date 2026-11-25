@@ -49,7 +49,7 @@ npm start
 本项目提供同源的 Windows 与 macOS 双端便携启动器，无需数据库、Redis 或 `ffmpeg`：
 
 - **Windows**：解压便携包后直接双击根目录 **`启动 AI 妙听.bat`**（若从源码仓库直接运行，也可运行 `scripts\launchers\start-windows.bat`；会自动检测 Node.js、按需补装依赖、端口占用自动顺延并弹出浏览器）；双击 **`停止 AI 妙听.bat`** 安全停止后台服务。
-- **macOS**：解压便携包后直接双击根目录 **`启动 AI 妙听.command`**（源码仓库位于 `scripts/launchers/start-macos.command`，会自动搜索常见 PATH / Homebrew / nvm / Volta / fnm 路径下的 Node.js 并启动打开网页）；双击 **`停止 AI 妙听.command`** 停止服务。也可运行 `bash scripts/build-mac-launcher.sh` 生成 **`启动 AI 妙听.app`** 拖入程序坞使用。
+- **macOS**：解压便携包后直接双击根目录 **`启动 AI 妙听.command`**（源码仓库位于 `scripts/launchers/start-macos.command`，会自动搜索常见 PATH / Homebrew / nvm / Volta / fnm 路径下的 Node.js 并启动打开网页）；双击 **`停止 AI 妙听.command`** 停止服务。也可运行 `bash scripts/build-mac-launcher.sh` 生成 **`AI 妙听.app`** 拖入程序坞使用（未启动时弹窗一键「启动服务」，运行中弹窗提供「打开网页 / 重启服务 / 停止服务」，进程异常时也可直接选择停止或重启；生成后会自动清理同级旧版 `启动 AI 妙听.app`。如加 `--portable` 参数构建分发版 `.app`，需与便携包根目录同级放置）。
 - **命令行常用命令**：
   ```bash
   # 启动后台服务并自动打开浏览器（端口被占用时自动顺延空闲端口）

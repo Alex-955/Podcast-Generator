@@ -206,7 +206,7 @@ function forbiddenPath(relative) {
   const lower = relative.toLowerCase();
   const name = path.posix.basename(lower);
   return (name.startsWith('.env') && relative !== '.env.example') ||
-    ['.git', '.ds_store', '启动 ai 妙听.app'].includes(name) || /\.(?:log|pid)$/.test(name) ||
+    ['.git', '.ds_store', '启动 ai 妙听.app', 'ai 妙听.app'].includes(name) || /\.(?:log|pid)$/.test(name) ||
     lower === 'test' || (lower.startsWith('data/') && relative !== 'data/.gitkeep') ||
     (lower.startsWith('public/podcasts/') && relative !== 'public/podcasts/.gitkeep');
 }
@@ -487,6 +487,22 @@ function writeChecksums(outDir, scratch, sumsName, archiveNames) {
   return filename;
 }
 
+function cleanupScratch(scratch, { budgetMs = 3000, delayMs = 100 } = {}) {
+  const deadline = performance.now() + budgetMs;
+  const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    try {
+      fs.rmSync(scratch, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const remaining = deadline - performance.now();
+      if (remaining <= 0 || !['EBUSY', 'EPERM', 'ENOTEMPTY', 'EMFILE'].includes(error.code)) throw error;
+      Atomics.wait(waitBuffer, 0, 0, Math.min(delayMs, remaining));
+      if (performance.now() >= deadline) throw error;
+    }
+  }
+}
+
 function buildRelease({
   sourceDir = SOURCE_DIR, outDir = 'dist', name, format = 'zip', withDeps = false,
 } = {}) {
@@ -511,6 +527,7 @@ function buildRelease({
   const stage = path.join(scratch, name);
   const sumsName = 'SHA256SUMS.txt';
   let checksumFile = null;
+  let published = false;
   try {
     stageFiles(sourceDir, stage, withDeps);
     runReleaseSecurityGate(stage);
@@ -523,9 +540,15 @@ function buildRelease({
     fs.renameSync(stage, stageDir);
     for (let i = 0; i < archives.length; i++) fs.renameSync(path.join(scratch, archiveNames[i]), archives[i]);
     if (checksumFile) fs.renameSync(path.join(scratch, sumsName), checksumFile);
+    published = true;
     return { stageDir, archives, checksumFile };
   } finally {
-    fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    try {
+      cleanupScratch(scratch);
+    } catch (error) {
+      // Preserve the original build or security gate error if publishing failed.
+      if (published) throw error;
+    }
   }
 }
 

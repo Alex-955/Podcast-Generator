@@ -3,11 +3,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const fsPromises = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const { once } = require('node:events');
-const { execFile, spawn, spawnSync } = require('node:child_process');
+const { ChildProcess, execFile, spawn, spawnSync } = require('node:child_process');
+const { setTimeout: delay } = require('node:timers/promises');
 const { promisify } = require('node:util');
 const {
   supportsBundledCa, probeHealth, findAvailablePort, resolveBrowserCommand, getLanAddresses,
@@ -18,6 +20,21 @@ const { version } = require('../package.json');
 const PROJECT = path.resolve(__dirname, '..');
 const LAUNCHER = path.join(PROJECT, 'scripts/start-portable.js');
 const exec = promisify(execFile);
+
+async function removeDirWithBudget(target, { budgetMs = 8000, delayMs = 150 } = {}) {
+  const deadline = performance.now() + budgetMs;
+  for (;;) {
+    try {
+      await fsPromises.rm(target, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const remaining = deadline - performance.now();
+      if (remaining <= 0 || !['EBUSY', 'EPERM', 'ENOTEMPTY', 'EMFILE'].includes(error.code)) throw error;
+      await delay(Math.min(delayMs, remaining));
+      if (performance.now() >= deadline) throw error;
+    }
+  }
+}
 
 function fixture(t) {
   const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'podcast launcher '));
@@ -33,7 +50,7 @@ function fixture(t) {
     try {
       await stopPortable(options);
     } finally {
-      fs.rmSync(projectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      await removeDirWithBudget(projectDir);
     }
   });
   return { options, messages, pidFile: path.join(dataDir, 'server.pid') };
@@ -128,6 +145,113 @@ test('独立 CLI 子进程退出后，后台服务仍可查询和停止', async 
   assert.match((await run('--status')).stdout, /正在运行/);
   assert.match((await run('--stop')).stdout, /已停止/);
   await assert.rejects(run('--status'), { code: 1 });
+});
+
+test('受管服务返回 HTTP 503 时状态退出码为 2，仍可停止', async t => {
+  const { options, pidFile } = fixture(t);
+  const healthFlag = path.join(options.dataDir, 'health-unavailable');
+  fs.writeFileSync(path.join(options.projectDir, 'server.js'), [
+    'const { createServer } = require("node:http");',
+    'const { existsSync } = require("node:fs");',
+    'const { join } = require("node:path");',
+    'const server = createServer((_request, response) => {',
+    '  response.statusCode = existsSync(join(process.env.DATA_DIR, "health-unavailable")) ? 503 : 200;',
+    '  response.end(JSON.stringify({ app: "ai-podcast-generator", status: "ok" }));',
+    '});',
+    'server.listen(Number(process.env.PORT), process.env.HOST, () => process.send({ port: server.address().port }));',
+  ].join('\n'));
+  const { host, port, pid } = await startPortable({ ...options, port: 0 });
+  fs.writeFileSync(healthFlag, '');
+  const response = await fetch(`http://${host}:${port}/api/health`);
+  assert.equal(response.status, 503);
+  await response.text();
+
+  const args = [LAUNCHER, '--project-dir', options.projectDir, '--data-dir', options.dataDir];
+  const run = action => exec(process.execPath, [...args, action], { env: options.env, timeout: 20000 });
+  assert.deepEqual(await statusPortable(options), { running: false, unhealthy: true, host, port, pid });
+  await assert.rejects(run('--status'), {
+    code: 2,
+    stdout: `AI 妙听进程仍在运行但健康检查未通过（PID ${pid}，端口 ${port}）\n`,
+  });
+  assert.equal((await run('--stop')).stdout.trim(), 'AI 妙听已停止');
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+  assert.equal(fs.existsSync(pidFile), false);
+});
+
+test('停止时即使命令行已不可查询，也等待受管 PID 退出', async t => {
+  const { options, pidFile } = fixture(t);
+  await startPortable({ ...options, port: 0 });
+  const { pid, instance } = await readPidRecord(pidFile);
+  const commandLine = `"${process.execPath}" "${path.join(options.projectDir, 'server.js')}" --portable-instance=${instance}`;
+  let termination;
+  try {
+    const result = await stopPortable({
+      ...options,
+      processQuery: () => termination ? null : commandLine,
+      kill: (pid, signal) => {
+        termination = delay(200).then(() => process.kill(pid, signal));
+      },
+    });
+    assert.equal(result.stopped, true);
+    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+    assert.equal(await readPidRecord(pidFile), null);
+  } finally {
+    await termination;
+  }
+});
+
+test('启动失败返回前等待刚启动的子进程退出', async t => {
+  const { options } = fixture(t);
+  const childPidFile = path.join(options.dataDir, 'failed-child.pid');
+  fs.writeFileSync(path.join(options.projectDir, 'server.js'), [
+    'const { writeFileSync } = require("node:fs");',
+    'const { join } = require("node:path");',
+    'writeFileSync(join(process.env.DATA_DIR, "failed-child.pid"), String(process.pid));',
+    'process.send({ port: 0 });',
+    'setTimeout(() => {}, 5000);',
+  ].join('\n'));
+  await assert.rejects(startPortable({ ...options, port: 0 }), /AI 妙听启动失败或超时/);
+  const pid = Number(fs.readFileSync(childPidFile, 'utf8'));
+  assert.ok(pid > 0);
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+});
+
+test('启动超时后强制清理忽略 SIGTERM 的子进程', async t => {
+  const { options, pidFile } = fixture(t);
+  const childPidFile = path.join(options.dataDir, 'unresponsive-child.pid');
+  fs.writeFileSync(path.join(options.projectDir, 'server.js'), [
+    'const { writeFileSync } = require("node:fs");',
+    'const { join } = require("node:path");',
+    'process.on("SIGTERM", () => {});',
+    'writeFileSync(join(process.env.DATA_DIR, "unresponsive-child.pid"), String(process.pid));',
+    'setTimeout(() => {}, 15000);',
+  ].join('\n'));
+  const kill = t.mock.method(ChildProcess.prototype, 'kill');
+  await assert.rejects(startPortable({ ...options, port: 0 }), /AI 妙听启动失败或超时/);
+  const pid = Number(fs.readFileSync(childPidFile, 'utf8'));
+  assert.ok(pid > 0);
+  const signals = kill.mock.calls.filter(call => call.this.pid === pid).map(call => call.arguments[0]);
+  assert.equal(signals[0], 'SIGTERM');
+  // On Windows the first signal already terminates the process.
+  if (process.platform !== 'win32') assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+  assert.equal(fs.existsSync(pidFile), false);
+});
+
+test('两次信号均未结束启动失败的进程时保留可停止的 PID 记录', async t => {
+  const { options, pidFile } = fixture(t);
+  fs.writeFileSync(path.join(options.projectDir, 'server.js'), [
+    'process.send({ port: 0 });',
+    'setTimeout(() => {}, 8000);',
+  ].join('\n'));
+  t.mock.method(ChildProcess.prototype, 'kill', () => true);
+  await assert.rejects(startPortable({ ...options, port: 0 }), /启动失败且子进程未能正常退出/);
+  const record = await readPidRecord(pidFile);
+  assert.equal(record.port, 0);
+  assert.equal(await isExpectedServerProcess(record, options), true);
+  assert.equal((await stopPortable(options)).stopped, true);
+  assert.throws(() => process.kill(record.pid, 0), { code: 'ESRCH' });
+  assert.equal(fs.existsSync(pidFile), false);
 });
 
 test('默认端口被其他服务占用时自动顺延', async t => {
@@ -246,7 +370,7 @@ test('启动前置校验失败时保留过期的 PID 文件', async t => {
 test('停止拒绝误杀无关 PID，并兼容核验旧数字记录', async t => {
   const { options, pidFile } = fixture(t);
   const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'server.js'], { stdio: 'ignore' });
-  const gone = once(other, 'exit');
+  const gone = once(other, 'close');
   t.after(async () => {
     other.kill();
     await gone;
