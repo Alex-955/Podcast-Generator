@@ -1,129 +1,135 @@
-# AI 妙听 · 双人对话播客生成器（V1）
+# AI 妙听 · 双人对话播客生成器
 
-将网页长文、微信公众号文章或任意文本，重构为自然生动的双人对话播客（主持人**阿泽** × 常驻嘉宾**小晓**），并生成纯人声完整 MP3 与同步高亮对话字幕。
+把网页长文、微信公众号文章，或者手机里截下的长图笔记，一键变成**主持人阿泽 × 嘉宾小晓**像朋友聊天一样的双人对话播客——带完整纯人声 MP3、同步高亮字幕，还有温暖克制的播音质感。
 
-应用基于 **Node.js + Express 5 + 原生 HTML/CSS/JS** 构建，无需数据库、Redis 或外部 `ffmpeg` 依赖。
+不需要安装数据库、Redis 或 `ffmpeg`，也不强制绑定任何一家服务商：你的所有密钥只留在本地浏览器，音频和文稿也只存在自己的电脑里。
 
----
-
-## 核心能力
-
-- **双通道防串线输入与预览确认**
-  - 支持「文章链接解析」与「直接贴正文」，内置 3 组快速试听示例；
-  - 超过 12,000 字自动截取前段并给出明确提示，支持「展开全文预览」；
-  - 修改链接、正文或切换输入模式时立即作废旧确认草稿，并丢弃过期异步解析结果。
-- **异步 4 阶段实时进度与可取消**
-  - 提交任务后立刻返回任务 ID，前端按阶段推进展示：`1. 抓取正文` → `2. 剧本重构` → `3. 语音合成` → `4. 音频拼接`；
-  - 配音阶段实时展示已完成句数、缓存命中数与当前说话人，不伪造百分比；
-  - 运行中可随时取消，真正中断底层 HTTP 请求与 TTS WebSocket 连接。
-- **多厂商剧本模型与多语音合成服务商**
-  - 右上角 **「模型与语音」** 弹窗提供两页配置，全部凭据仅存在浏览器 `localStorage`，绝不写入任务记录或成品 JSON：
-    - **剧本模型**：内置 DeepSeek（推荐）、Kimi、豆包（火山方舟）、通义千问、小米 MiMo、硅基流动与自定义 OpenAI 兼容快捷预设，自动填充 Base URL 与推荐模型并附获取指引，支持 **「测试模型连接」** 实时探活；
-    - **语音合成**：支持 **MiniMax Speech**、**火山引擎（豆包语音 V3）**（单 API Key 或 AppID + Access Key，自动筛选 1.0/2.0 兼容音色）与免费 **Microsoft Edge** 一键切换，支持 **「测试语音合成」** 在线合成试听校验；
-  - 切换服务商或音色后从断点续跑时，自动清理旧片段但保留已生成剧本。
-- **单句 MP3 缓存与断点续跑**
-  - 按服务端点、鉴权指纹、model、voiceMapping、语速与文本摘要隔离缓存单句有效 MP3（`data/tts-cache/`）；
-  - 合成中断或服务重启导致任务中断时，点击「从断点继续生成」可跳过已落盘剧本与已合成有效单句音频。
-- **纯音质放音台与本地历史找回**
-  - 双主播活跃声纹指示、兼容 `0.36s` 句间静音的同步高亮字幕、点击或 `Enter` / `Space` 跳转对应句；
-  - 支持 `0.8x ~ 2.0x` 倍速切换、快进/快退 10 秒、进度拖拽、下载完整 MP3 与一键复制 Markdown 剧本；
-  - 刷新页面后自动恢复未完成/待续跑任务，并从本地加载历史播客列表。
+![AI 妙听双人播客工作台](docs/images/studio-desktop.png)
 
 ---
 
-## 快速启动与测试
+## 为什么好用？
 
-### 1. 安装依赖与启动
+- **三种方式轻松导入**：贴入网页 / 公众号文章链接、直接粘贴文字，或上传多张长截图自动识字；生成前支持预览文稿和 **「一键润色」**，顺手整理错别字与口语断句。
+- **两种节目节奏，听着不吵不尬**：
+  - **深度主讲（7:3，默认）**：阿泽负责把干货讲深讲透，小晓自然插话追问与总结；
+  - **轻松对谈（5:5）**：两人你一言我一语轻快聊完，适合通勤与随笔随聊；
+  - 语音合成前会自动把 `1972 年`、`80 年代` 这类年份转成顺口读法，界面字幕则继续保留原文。
+- **模型和音色随你挑**：右上角点开 **「模型与语音」**，即可直接接入 DeepSeek、Kimi、豆包、通义千问、小米 MiMo 等主流大模型；配音支持高拟真的 **MiniMax Speech**、**火山引擎豆包语音 V3**，也内置免费的 **Microsoft Edge** 开箱尝鲜。
+- **断点可续、手机也能同 Wi-Fi 听**：中途断网或换了新音色都能从断点继续生成，不白烧前面几句的额度；同一 Wi-Fi 下手机浏览器直接就能听节目，还带暖调微醺背景音乐与 `0.8x ~ 2.0x` 倍速播放。
+
+<details>
+<summary>点击展开更多界面预览：模型配置弹窗 & 手机随身听视图</summary>
+
+<table>
+  <tr>
+    <td width="64%">
+      <img src="docs/images/settings-modal.png" alt="模型与语音设置弹窗" />
+      <p align="center"><sub>「模型与语音」快捷预设（密钥仅存在本地浏览器）</sub></p>
+    </td>
+    <td width="36%">
+      <img src="docs/images/studio-mobile.png" alt="手机浏览器单栏试听界面" />
+      <p align="center"><sub>手机窄屏自动切换为单栏触控放音台</sub></p>
+    </td>
+  </tr>
+</table>
+
+</details>
+
+---
+
+## 给下载试用朋友的快速上手指南
+
+> 只要电脑上提前装过一次 **[Node.js 22 或更新版本](https://nodejs.org/)**（官网下载安装包一路点「下一步」即可），**不用敲一行命令行** 就能直接双击使用。GitHub **Releases** 里的便携压缩包已内置全部运行依赖，解压即用。
+
+### 1. 下载与启动（Windows / Mac 区别一览）
+
+| 系统 | 下载解压后做什么？ | 用完怎么安全关闭？ | 第一次遇到系统弹窗怎么办？ |
+|---|---|---|---|
+| **Windows** | 直接双击根目录 **`启动 AI 妙听.bat`** | 双击 **`停止 AI 妙听.bat`** | 若出现「Windows 已保护你的电脑」，点 **更多信息 → 仍要运行**（仅第一次需要） |
+| **macOS** | 双击根目录 **`启动 AI 妙听.command`** | 双击 **`停止 AI 妙听.command`** | 若提示“来自身份不明开发者”，**右键点击文件 → 打开**（或去「系统设置 → 隐私与安全性」点「仍要打开」一次即可） |
+
+- 启动后服务会在后台运行（默认 `3000` 端口若被占会自动顺延寻找空闲端口），并自动帮你弹出浏览器页面。
+- **Mac 桌面党小技巧**：打开仓库目录下的终端运行一行 `bash scripts/build-mac-launcher.sh`，就会生成专属图标的 **`AI 妙听.app`**（可拖进程序坞）：未运行时双击弹窗点 **「启动服务」**，运行中双击弹窗直接选 **「打开网页 / 重启服务 / 停止服务」**（如用 `--portable` 参数编译分发版 `.app`，需放在便携包根目录使用；重新编译会自动清理同级旧版 `启动 AI 妙听.app`）。
+
+### 2. 三步生成你的第一期播客
+
+1. 点击页面右上角 **「模型与语音」**，选一家顺手的大模型厂商（例如 **DeepSeek**），填入你的 **API Key**，点 **「获取模型列表」** 勾选模型并顺手点一下 **「测试所选模型」**；
+2. 切到 **「语音合成」** 标签页（可直接用免费的 Edge 快速试听，想体验真人大白话聊天感建议选 **MiniMax** 或 **火山引擎豆包语音** 并挑一对音色）；
+3. 回到主页选 **「链接 / 正文 / 识图」**（或者直接点下方内置示例体验），点 **「开始生成双人播客」**，几十秒到两分钟后就能一边看字幕一边听了。
+
+### 3. 手机在同一 Wi-Fi 下一起听
+
+桌面和手机连着同一个路由器时，用下面任意一条命令启动，手机浏览器打开终端里打印出的局域网地址（`http://192.168.x.x:...`）即可收听：
 
 ```bash
-npm install
-npm start
-```
+# 方式一：通过便携启动器开启局域网访问
+node scripts/start-portable.js --lan --open
 
-服务默认监听 `http://127.0.0.1:3000`。打开浏览器后，可在右上角 **「模型与语音」** 中选择大模型快捷预设与语音服务商并填入 API Key（仅存在当前浏览器 `localStorage`，不会写入服务端任务或成品 JSON），或复制 `.env.example` 为 `.env` 提供默认 Key。
-
-> `npm start` 与 `npm run dev` 默认启用了 `--use-bundled-ca`，避免部分 macOS Homebrew Node 环境因缺少 OpenSSL `cert.pem` 导致 HTTPS 证书校验失败，同时保留完整证书校验并兼容 `NODE_EXTRA_CA_CERTS`。
-
-### 2. 便携版下载与一键双击启动（Windows + macOS）
-
-本项目提供同源的 Windows 与 macOS 双端便携启动器，无需数据库、Redis 或 `ffmpeg`：
-
-- **Windows**：解压便携包后直接双击根目录 **`启动 AI 妙听.bat`**（若从源码仓库直接运行，也可运行 `scripts\launchers\start-windows.bat`；会自动检测 Node.js、按需补装依赖、端口占用自动顺延并弹出浏览器）；双击 **`停止 AI 妙听.bat`** 安全停止后台服务。
-- **macOS**：解压便携包后直接双击根目录 **`启动 AI 妙听.command`**（源码仓库位于 `scripts/launchers/start-macos.command`，会自动搜索常见 PATH / Homebrew / nvm / Volta / fnm 路径下的 Node.js 并启动打开网页）；双击 **`停止 AI 妙听.command`** 停止服务。也可运行 `bash scripts/build-mac-launcher.sh` 生成 **`AI 妙听.app`** 拖入程序坞使用（未启动时弹窗一键「启动服务」，运行中弹窗提供「打开网页 / 重启服务 / 停止服务」，进程异常时也可直接选择停止或重启；生成后会自动清理同级旧版 `启动 AI 妙听.app`。如加 `--portable` 参数构建分发版 `.app`，需与便携包根目录同级放置）。
-- **命令行常用命令**：
-  ```bash
-  # 启动后台服务并自动打开浏览器（端口被占用时自动顺延空闲端口）
-  npm run launcher
-  npm run launcher:stop
-
-  # 开放局域网手机试听（同一 Wi-Fi 下可直接扫码/输 IP 打开）
-  node scripts/start-portable.js --lan --open
-
-  # 构建带依赖与 SHA256 校验文件的双端干净便携包（内置发布前隐私与安全门禁）
-  npm run release:build -- --with-deps --format both
-  ```
-  推送 `v*` 标签到 GitHub 时，GitHub Actions 会自动运行全量离线测试、安全门禁并生成 `.zip` / `.tar.gz` 便携包及 `SHA256SUMS.txt` 发布到 GitHub Releases。
-
-### 3. 开发热重载与离线回归测试
-
-```bash
-# 开发模式（监听 server.js 改动自动重启）
-npm run dev
-
-# 运行全量离线单元测试（不联网、不消耗 LLM 额度）
-npm test
-```
-
-### 4. 局域网手机浏览器试听
-
-在桌面与手机处于同一局域网（Wi-Fi）时，指定 `HOST=0.0.0.0` 启动即可用手机浏览器访问：
-
-```bash
+# 方式二：直接用环境变量启动
 HOST=0.0.0.0 npm start
 ```
 
-界面在视口宽度 `≤ 900px` 时会自动切换为单栏触控布局。
-
-> 为保护本机历史播客，在通过 `HOST=0.0.0.0` 开放局域网试听时，非本机（非 loopback）客户端仅被限制删除本地历史播客（`DELETE /api/podcasts/:id` 会返回 `403`，浏览列表、播放试听与任务生成等接口不受影响）。如需允许局域网设备执行删除，请在服务端配置 `ADMIN_TOKEN`，并在请求头中传入 `Authorization: Bearer <token>` 或 `X-Admin-Token`。
+> 为防止手机端误删电脑里攒好的播客，局域网设备默认**禁止删除本地历史**（删除请求会返回 `403`，浏览、播放和新建生成不受影响）。确实需要从手机端删节目时，可在服务端配置环境变量 `ADMIN_TOKEN`。
 
 ---
 
-## 环境变量说明
+## 技术选型与开发者文档
 
-所有环境变量均为可选，可通过 `.env` 或启动命令传入：
+项目刻意保持极简可审计：**Node.js 22+ · Express 5 · 原生 HTML/CSS/JS**，零第三方数据库/Redis，零外部 `ffmpeg` 二进制依赖（基于纯 JS 帧头解析计算精准时间轴并按帧量化拼接 `0.36s` 句间静音，支持单句音频缓存与 4 阶段断点续跑）。
+
+### 常用开发与构建命令
+
+```bash
+# 源码运行
+npm install
+npm start                 # 后台直接运行（http://127.0.0.1:3000）
+npm run dev               # 开发热重载（监听 server.js）
+
+# 便携启动控制
+npm run launcher          # 启动并自动打开浏览器（支持端口顺延）
+npm run launcher:stop     # 校验进程归属后安全停止
+
+# 质量门禁与打包
+npm test                  # 运行全量 262 项离线单元测试（不联网、不耗 API 额度）
+npm run release:build -- --with-deps --format both
+                          # 生成跨平台 UTF-8 .zip / .tar.gz 与 SHA256SUMS.txt，
+                          # 并自动运行隐私与凭据安全门禁检查
+```
+
+<details>
+<summary>完整环境变量参考（均可选）与安全/架构细节</summary>
+
+#### 1. 环境变量参考（可复制 `.env.example` 为 `.env` 使用）
 
 | 变量名 | 默认值 | 说明 |
 |---|---|---|
-| `PORT` | `3000` | 服务监听端口（`0` 表示由系统分配随机空闲端口） |
-| `HOST` | `127.0.0.1` | 服务绑定地址；局域网手机访问可设为 `0.0.0.0` |
-| `ADMIN_TOKEN` | 空 | 局域网删除管理令牌；未配置时仅允许本机（loopback）删除播客，配置后局域网客户端需带 `Authorization: Bearer <token>` 或 `X-Admin-Token` 方可执行 `DELETE /api/podcasts/:id` |
-| `DATA_DIR` | `./data` | 运行时任务状态（`tasks/*.json`）与单句缓存（`tts-cache/*.mp3`）目录 |
-| `PODCASTS_DIR` | `./public/podcasts` | 成品播客音频与 `meta.json` 存放目录 |
-| `DEEPSEEK_API_KEY` | 空 | 服务端默认兜底 API Key（仅当浏览器设置留空且未改接口地址时生效） |
+| `PORT` | `3000`（留空） | 服务端口；未显式指定且 `3000` 被占时便携启动器自动顺延，`0` 表示系统随机空闲端口 |
+| `HOST` | `127.0.0.1` | 绑定地址；局域网手机收听请设 `0.0.0.0` |
+| `ADMIN_TOKEN` | 空 | 局域网删除令牌；未设置时仅本机（loopback）可删播客，设置后非本机删播客须带 `Authorization: Bearer <token>` 或 `X-Admin-Token` |
+| `DATA_DIR` | `./data` | 任务状态（`tasks/*.json`）与单句缓存（`tts-cache/*.mp3`）目录 |
+| `PODCASTS_DIR` | `./public/podcasts` | 生成的成品音频与字幕元数据存放目录 |
+| `DEEPSEEK_API_KEY` | 空 | 服务端默认兜底大模型 Key（仅当浏览器设置留空且未改地址时生效） |
 | `LLM_BASE_URL` | `https://api.deepseek.com` | 剧本模型 OpenAI 兼容接口地址 |
-| `LLM_MODEL` | `deepseek-flash` | 默认剧本生成模型名称 |
-| `TTS_PROVIDER` | `edge` | 默认语音合成服务商，可选 `minimax`、`volcengine`、`edge` |
-| `MINIMAX_API_KEY` | 空 | 服务端默认 MiniMax Speech API Key |
-| `MINIMAX_TTS_MODEL` | `speech-02-hd` | 默认 MiniMax 语音合成模型 |
-| `MINIMAX_TTS_ENDPOINT` | `https://api.minimaxi.com/v1/t2a_v2` | MiniMax Speech 合成接口地址 |
-| `VOLCENGINE_TTS_API_KEY` | 空 | 服务端默认火山引擎豆包语音单 API Key（`X-Api-Key`） |
-| `VOLCENGINE_TTS_APP_ID` | 空 | 火山引擎旧版双字段鉴权 AppID（未配 `VOLCENGINE_TTS_API_KEY` 时生效） |
-| `VOLCENGINE_TTS_ACCESS_KEY` | 空 | 火山引擎旧版双字段鉴权 Access Key |
-| `VOLCENGINE_TTS_RESOURCE_ID` | `seed-tts-2.0` | 默认火山引擎语音资源版本（`seed-tts-2.0` 或 `seed-tts-1.0`） |
-| `VOLCENGINE_TTS_ENDPOINT` | `https://openspeech.bytedance.com/api/v3/tts/unidirectional` | 火山引擎豆包 V3 单向流式接口地址 |
-| `ALLOW_PRIVATE_TTS_ENDPOINT` | 未开启 | 默认拒绝连接内网/本机语音接口；设为 `1` 可放开局域网 TTS 调试端点 |
-| `ALLOW_INSECURE_TLS` | 未开启 | 仅限本地代理调试；设为 `1` 时跳过 TLS 证书校验（默认 `--use-bundled-ca` 已兼顾完整性，常规企业代理 CA 请优先用 `NODE_EXTRA_CA_CERTS`） |
-| `NODE_EXTRA_CA_CERTS` | 未设置 | Node 标准选项：指定额外受信 CA 根证书文件路径 |
-| `ALLOW_PRIVATE_FETCH` | 未开启 | 默认拒绝抓取本机及内网地址；设为 `1` 可放开本地源抓取（不影响 TTS 私网策略） |
-| `CORS_ORIGIN` | 未开启 | 默认同源访问；需跨域调用时可填逗号分隔的来源白名单 |
+| `LLM_MODEL` | `deepseek-flash` | 默认剧本生成模型名 |
+| `VISION_API_KEY` / `VISION_BASE_URL` / `VISION_MODEL` | 空 | 长图识字独立视觉模型服务端兜底配置 |
+| `TTS_PROVIDER` | `edge` | 默认语音合成服务商：`edge` / `minimax` / `volcengine` |
+| `MINIMAX_API_KEY` / `MINIMAX_TTS_MODEL` / `MINIMAX_TTS_ENDPOINT` | 模型 `speech-02-hd` | MiniMax Speech 服务端默认配置 |
+| `VOLCENGINE_TTS_API_KEY` / `VOLCENGINE_TTS_APP_ID` / `VOLCENGINE_TTS_ACCESS_KEY` / `VOLCENGINE_TTS_RESOURCE_ID` / `VOLCENGINE_TTS_ENDPOINT` | 资源 `seed-tts-2.0` | 火山引擎豆包语音 V3 服务端默认配置 |
+| `ALLOW_PRIVATE_TTS_ENDPOINT` / `ALLOW_PRIVATE_FETCH` | 未开启 | 默认开启 DNS 解析后私网拦截与重定向防穿越；设为 `1` 仅作局域网自建调试 |
+| `ALLOW_INSECURE_TLS` / `NODE_EXTRA_CA_CERTS` | 未开启 | 代理调试或自定义根证书选项；默认已启用 `--use-bundled-ca` 兼容主流环境 |
+| `CORS_ORIGIN` | 未开启 | 默认仅同源；按需填逗号分隔白名单 |
+
+#### 2. 已知边界与安全基线
+
+1. **凭据零落盘**：前端填写的 API Key、AppID、Access Key 及自定义端点**绝不写入**任务 JSON、成品 `meta.json` 或接口返回值，报错消息经过统一脱敏且剥离本机路径。
+2. **网络安全基线**：网页抓取器和 TTS 连接探测均执行 DNS 解析 IP 校验及跳转拦截，默认阻断回环与内网地址。
+3. **正文上限与反爬回退**：单次文章上限 `12,000` 字（确定性前段截取），标题上限 `200` 字；若公众号反爬提示「环境异常」，可直接点击一键切到正文粘贴继续。
+4. **打包发布红线**：`npm run release:build` 与 GitHub Actions（[.github/workflows/release.yml](.github/workflows/release.yml)）在压缩前强制拦截 `.env`、`data/`、`public/podcasts/*`、`.app`、私有路径与密钥痕迹，仅打包纯净程序文件，随带 `SHA256SUMS.txt` 校验。
+5. **后续客户端规划**：详见 [ROADMAP.md](ROADMAP.md)。
+
+</details>
 
 ---
 
-## 已知限制与扩展说明
-
-1. **配音服务定位**：默认内置 **MiniMax Speech**（拟真度高）、**火山引擎（豆包语音 V3，OPPO AI 妙听同款体系）** 与免费 **Microsoft Edge-TTS**（`edge` 属免费非官方接口，偶发 403 限流，建议仅作快速试用）。
-2. **正文截断上限**：为控制生成稳定性与成本，单次导入正文上限为 `12,000` 字（超出部分按确定性截取前 1.2 万字，标题上限 `200` 字）。
-3. **字幕同步时间轴**：字幕高亮基于纯 Node 解析的 MP3 帧计数与固定 `0.36s` 句间静音间隔计算，非逐字级 ASR 对齐。
-4. **公众号反爬验证**：微信公众号链接偶发返回「环境异常」或「操作频繁」提示时，可点击提示条中的 **「切换到直接贴正文」** 直接粘贴原文继续生成。
-5. **网络安全基线**：TTS 端点与连接探测均执行 DNS 解析后 IP 校验与重定向拦截（仅当服务端显式开启 `ALLOW_PRIVATE_TTS_ENDPOINT=1` 才放开内网地址）；文章抓取器默认阻断本机/内网地址。
-6. **后续客户端规划**：详见 [ROADMAP.md](ROADMAP.md)。
+基于 [MIT License](LICENSE) 开源。如果这期「阿泽 × 小晓」帮到了你，欢迎点个 Star，或者在 Issues 里聊聊你最想读/听什么文章类型。
