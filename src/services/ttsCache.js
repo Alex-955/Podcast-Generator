@@ -4,8 +4,17 @@ const { createHash } = require('node:crypto');
 const { isValidMp3, getMp3DurationSeconds } = require('./mp3Utils');
 const { atomicWrite } = require('./atomicWrite');
 
-function buildCacheKey({ provider, model, voice, rate = '+0%', pitch = '+0Hz', text }) {
+function speechScopeHash(endpoint, credentials, voices, publicVoices) {
+  const scope = [new URL(endpoint).href];
+  if (voices.some(voice => !publicVoices.some(item => item.id === voice))) {
+    scope.push(credentials.apiKey || '', credentials.appId || '', credentials.accessKey || '');
+  }
+  return createHash('sha256').update(JSON.stringify(scope)).digest('hex');
+}
+
+function buildCacheKey({ provider, model, voice, rate = '+0%', pitch = '+0Hz', text, scopeHash }) {
   const fields = [provider, model, voice, rate, pitch, text].map(value => String(value).trim().normalize('NFC'));
+  if (scopeHash) fields.push(scopeHash);
   return createHash('sha256').update(JSON.stringify(fields)).digest('hex');
 }
 
@@ -36,4 +45,4 @@ function createTtsCache(cacheDir) {
   return { get, put, getPath };
 }
 
-module.exports = { buildCacheKey, createTtsCache };
+module.exports = { buildCacheKey, createTtsCache, speechScopeHash };

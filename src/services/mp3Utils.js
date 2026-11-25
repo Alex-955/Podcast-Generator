@@ -94,6 +94,19 @@ function scanMp3Format(buffer) {
   return null;
 }
 
+function xingOffset(header, versionBits) {
+  const mono = (header[3] >> 6) === 3;
+  const sideInfo = versionBits === 3 ? (mono ? 17 : 32) : (mono ? 9 : 17);
+  return 4 + sideInfo;
+}
+
+function hasVbrHeader(body, frame) {
+  const bytes = body.subarray(frame.frameOffset, frame.frameOffset + frame.frameLength);
+  const offset = xingOffset(frame.rawHeader, frame.versionBits);
+  const isXing = pos => ['Xing', 'Info'].includes(bytes.toString('latin1', pos, pos + 4));
+  return isXing(offset) || (!(bytes[1] & 1) && isXing(offset + 2)) || bytes.toString('latin1', 36, 40) === 'VBRI';
+}
+
 function compatibleFrameFormat(frame, format) {
   return frame.versionBits === format.versionBits &&
     frame.sampleRate === format.sampleRate &&
@@ -116,10 +129,17 @@ function analyzeMp3(buffer) {
   if (!buffer || buffer.length < 4) return fail('too-short');
 
   const body = extractMp3Body(buffer);
-  const format = scanMp3Format(body);
+  let format = scanMp3Format(body);
   if (!format) return fail('no-frame');
 
   let offset = format.frameOffset;
+  if (hasVbrHeader(body, format)) {
+    offset += format.frameLength;
+    const first = parseFrameHeader(body, offset);
+    if (!first || !compatibleFrameFormat(first, format)) return fail('no-audio-frames');
+    format = { ...first, frameOffset: offset, rawHeader: Buffer.from(body.subarray(offset, offset + 4)) };
+  }
+  let variableBitrate = false;
   let totalSamples = 0;
   let frameCount = 0;
   while (offset < body.length) {
@@ -131,13 +151,14 @@ function analyzeMp3(buffer) {
     if (!compatibleFrameFormat(frame, format)) {
       return fail('mixed-format');
     }
+    if (frame.bitrateIdx !== format.bitrateIdx) variableBitrate = true;
     totalSamples += frame.samplesPerFrame;
     frameCount += 1;
     offset += frame.frameLength;
   }
   if (frameCount === 0) return fail('no-frame');
 
-  return { ok: true, reason: null, durationSeconds: totalSamples / format.sampleRate, frameCount, format };
+  return { ok: true, reason: null, variableBitrate, durationSeconds: totalSamples / format.sampleRate, frameCount, format };
 }
 
 /**
@@ -193,7 +214,7 @@ module.exports = {
   SENTENCE_GAP_SECONDS,
   stripID3,
   extractMp3Body,
-  compatibleFrameFormat,
+  xingOffset, compatibleFrameFormat,
   parseFrameHeader,
   scanMp3Format,
   analyzeMp3,

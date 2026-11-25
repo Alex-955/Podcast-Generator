@@ -5,11 +5,12 @@ const { atomicWrite } = require('./atomicWrite');
 const { extractArticle, assertValidUrl, assertSafeFetchTarget } = require('./extractor');
 const { generatePodcastScript } = require('./scriptEngine');
 const { synthesizeDialogueScript, DEFAULT_VOICES } = require('./ttsService');
-const { getTtsCredentials } = require('./ttsCredentials');
+const { getCredentials } = require('./llmCredentials');
+const { getTtsCredentials, resolveVoiceMapping } = require('./ttsCredentials');
 const { getTtsProvider, DEFAULT_PROVIDER_ID } = require('./ttsProvider');
 const { createTtsCache } = require('./ttsCache');
 const { concatenateAudioFiles } = require('./audioMerger');
-const { InputError, validateScriptRequest, validateVoiceMapping, redactSecrets, ttsSecrets } = require('./validation');
+const { InputError, validateScriptRequest, redactSecrets, ttsSecrets } = require('./validation');
 
 const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
 const STAGES = {
@@ -26,33 +27,6 @@ function checkId(id) {
 function readDirectory(dir) {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir, { withFileTypes: true });
-}
-
-function normalizeBaseURL(value) {
-  let url;
-  try {
-    url = new URL(value.trim());
-  } catch {
-    throw new InputError('使用自定义接口地址时请提供对应的 API Key');
-  }
-  url.pathname = url.pathname.replace(/\/+$/, '').replace(/\/v1$/, '');
-  return url.href;
-}
-
-function getCredentials(payload) {
-  const setting = value => typeof value === 'string' ? value.trim() : '';
-  const requestKey = setting(payload.apiKey);
-  const apiKey = requestKey || setting(process.env.DEEPSEEK_API_KEY);
-  const requestURL = setting(payload.baseURL);
-  const serverURL = setting(process.env.LLM_BASE_URL) || 'https://api.deepseek.com';
-  if (!requestKey && requestURL && normalizeBaseURL(requestURL) !== normalizeBaseURL(serverURL)) {
-    throw new InputError('使用自定义接口地址时请提供对应的 API Key');
-  }
-  return {
-    apiKey,
-    baseURL: requestKey && requestURL ? requestURL : serverURL,
-    model: setting(payload.model) || setting(process.env.LLM_MODEL) || undefined,
-  };
 }
 
 function assertNotRawUrl(content) {
@@ -145,8 +119,13 @@ function createTaskManager({
     const adapterOptions = getTtsCredentials(provider, tts, sameProvider && task.ttsModel);
     const defaults = provider.defaultVoices || DEFAULT_VOICES;
     const previousMapping = sameProvider ? task.voiceMapping : undefined;
-    const mapping = validateVoiceMapping(tts.voiceMapping ?? payload.voiceMapping ?? previousMapping, provider);
-    const voiceMapping = Object.fromEntries(Object.entries(defaults).map(([name, voice]) => [name, mapping?.[name] || voice]));
+    let inherited = previousMapping;
+    if (inherited && provider.defaultVoicesForModel && adapterOptions.model !== task.ttsModel) {
+      const oldDefaults = provider.defaultVoicesForModel(task.ttsModel);
+      inherited = Object.fromEntries(Object.entries(inherited).filter(([role, voice]) => voice !== oldDefaults[role]));
+    }
+    const voiceMapping = resolveVoiceMapping(provider, adapterOptions.model, tts.voiceMapping ?? payload.voiceMapping ?? inherited);
+    const scopeHash = provider.getScopeHash?.(Object.values(voiceMapping), adapterOptions);
     const settings = { ttsProvider: provider.id, ttsModel: adapterOptions.model, voiceMapping };
     const secrets = [creds.apiKey, creds.baseURL !== 'https://api.deepseek.com' && creds.baseURL,
       ...ttsSecrets(tts), adapterOptions.apiKey, adapterOptions.accessKey, adapterOptions.appId, adapterOptions.endpoint]
@@ -154,14 +133,14 @@ function createTaskManager({
     if (containsSecrets(secrets, settings, payload.title, payload.content, payload.url, task?.sourceContent, task?.input, task?.script)) {
       throw new InputError('输入内容包含敏感凭据，已拦截并中止保存');
     }
-    const changed = task && (!sameProvider || (task.ttsModel || provider.model) !== settings.ttsModel ||
+    const changed = task && (!sameProvider || task.ttsScopeHash !== scopeHash || (task.ttsModel || provider.model) !== settings.ttsModel ||
       Object.keys(voiceMapping).some(name => (previousMapping?.[name] || defaults[name]) !== voiceMapping[name]));
-    return { provider, adapterOptions, secrets, settings, changed };
+    return { provider, adapterOptions, secrets, settings, changed, scopeHash };
   }
 
   function save(task) {
     task.updatedAt = now();
-    const record = { ...toDTO(task), sourceContent: task.sourceContent, script: task.script, ...(task.clearPending && { clearPending: true }) };
+    const record = { ...toDTO(task), ttsScopeHash: task.ttsScopeHash, sourceContent: task.sourceContent, script: task.script, ...(task.clearPending && { clearPending: true }) };
     atomicWrite(path.join(tasksDir, task.id + '.json'), JSON.stringify(record));
   }
 
@@ -364,7 +343,7 @@ function createTaskManager({
     const source = getInput(payload);
     if (!creds.apiKey) throw new InputError('缺少 API Key，请先配置后再生成');
     const task = {
-      id: randomUUID(), status: 'queued', stage: 'extract', ...source, ...speech.settings, script: null,
+      id: randomUUID(), status: 'queued', stage: 'extract', ...source, ...speech.settings, ttsScopeHash: speech.scopeHash, script: null,
       progress: { ...stageProgress('extract'), message: '等待生成', completedSegments: 0, totalSegments: 0, cachedSegments: 0 },
       createdAt: now(), podcastId: null, error: null,
     };
@@ -395,7 +374,7 @@ function createTaskManager({
       // Persist the second cleanup across a process restart as well.
       task.clearPending = Boolean(drainingSameTask);
     }
-    Object.assign(task, speech.settings);
+    Object.assign(task, speech.settings, { ttsScopeHash: speech.scopeHash });
     task.status = 'running';
     task.error = null;
     return start(task, creds, speech);

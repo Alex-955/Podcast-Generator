@@ -28,10 +28,11 @@ function registerTtsProvider(provider) {
     typeof provider?.id !== 'string' || !provider.id.trim() ||
     typeof provider.model !== 'string' || !provider.model.trim() ||
     !provider.defaultVoices || typeof provider.defaultVoices !== 'object' ||
-    Array.isArray(provider.defaultVoices) || !Array.isArray(provider.availableVoices) ||
+    Array.isArray(provider.defaultVoices) || Object.keys(provider.defaultVoices).length === 0 ||
+    Object.values(provider.defaultVoices).some(voice => typeof voice !== 'string' || !voice.trim()) || !Array.isArray(provider.availableVoices) ||
     typeof provider.synthesizeToFile !== 'function'
   ) {
-    throw new TypeError('TTS Provider 必须提供 id、model、defaultVoices、availableVoices 和 synthesizeToFile');
+    throw new TypeError('TTS Provider 必须提供 id、model、至少一个有效的 defaultVoices 音色、availableVoices 和 synthesizeToFile');
   }
   providers.set(provider.id, provider);
 }
@@ -83,9 +84,9 @@ function getPublicProviderInfo(provider = getTtsProvider(resolveDefaultProviderI
     (env.VOLCENGINE_TTS_APP_ID?.trim() && env.VOLCENGINE_TTS_ACCESS_KEY?.trim()));
   const configuredModel = resolveDefaultModel(provider);
   const safeModel = /^[a-zA-Z0-9_.:-]{1,120}$/.test(configuredModel) &&
-    redactSecrets(configuredModel, [...ttsSecrets(), env.DEEPSEEK_API_KEY]) === configuredModel;
+    redactSecrets(configuredModel, [...ttsSecrets(), env.DEEPSEEK_API_KEY, env.LLM_BASE_URL]) === configuredModel;
   return { id, name, requiresAuth, authModes, availableModels, defaultModel: safeModel ? configuredModel : provider.model,
-    defaultVoices, availableVoices, serverConfigured };
+    defaultVoices: provider.defaultVoicesForModel?.(safeModel ? configuredModel : provider.model) || defaultVoices, availableVoices, serverConfigured };
 }
 
 function getPublicTtsProviders() {

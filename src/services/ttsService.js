@@ -66,7 +66,7 @@ async function synthesizeSentence({
       };
     } catch (error) {
       checkCancellation(signal);
-      if (error instanceof InputError || error.statusCode === 400) throw error;
+      if (error instanceof InputError || error.statusCode === 400 || error.retryable === false) throw error;
       if (error instanceof TtsCancelledError || error.name === 'AbortError') throw error;
       lastError = error;
       if (attempt < MAX_SYNTHESIS_ATTEMPTS) {
@@ -153,7 +153,7 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping, opt
     if (provider.id === 'volcengine') adapterOptions.resourceId = ttsModel;
   }
   const cacheModel = adapterOptions?.resourceId || adapterOptions?.model || provider.model;
-  const defaultVoices = provider.defaultVoices || DEFAULT_VOICES;
+  const defaultVoices = provider.defaultVoicesForModel?.(cacheModel) || provider.defaultVoices || DEFAULT_VOICES;
   const voices = voiceMapping || defaultVoices;
   fs.mkdirSync(workDir, { recursive: true });
   const entries = [];
@@ -162,7 +162,7 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping, opt
   let reusedSegments = 0;
   for (const [index, line] of dialogueList.entries()) {
     const { speaker, text, rate = '+0%', pitch = '+0Hz' } = line;
-    const voice = voices[speaker] || defaultVoices[speaker] || DEFAULT_VOICES[speaker] || Object.values(defaultVoices)[0];
+    const voice = voices[speaker] || defaultVoices[speaker] || Object.values(defaultVoices)[0];
     const fileName = sentenceFileName(index);
     const outputPath = path.join(workDir, fileName);
     const report = completedSegments => onProgress?.({
@@ -179,7 +179,8 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping, opt
         cachedSegments++;
         fileSize = existing.length;
       } else {
-        const key = cache && buildCacheKey({ provider: provider.id, model: cacheModel, voice, rate, pitch, text });
+        const scopeHash = cache && provider.getScopeHash?.([voice], adapterOptions);
+        const key = cache && buildCacheKey({ scopeHash, provider: provider.id, model: cacheModel, voice, rate, pitch, text });
         const cached = cache?.get(key, outputPath);
         if (cached?.hit) {
           cachedSegments++;

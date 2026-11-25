@@ -1,11 +1,26 @@
+const { speechScopeHash } = require('./ttsCache');
 const { randomUUID } = require('node:crypto');
 const { InputError } = require('./validation');
 const { TtsCancelledError } = require('./edgeTtsAdapter');
+const { boundedChunks, upstreamError } = require('./providerHttp');
 const { synthesizeHttp } = require('./httpTts');
 
 const DEFAULT_VOLCENGINE_ENDPOINT = 'https://openspeech.bytedance.com/api/v3/tts/unidirectional';
 const DEFAULT_VOLCENGINE_RESOURCE_ID = 'seed-tts-2.0';
 const DEFAULT_VOLCENGINE_VOICES = { 阿泽: 'zh_male_m191_uranus_bigtts', 小晓: 'zh_female_vv_uranus_bigtts' };
+const V1_VOICES = { 阿泽: 'zh_male_yangguangqingnian_moon_bigtts', 小晓: 'zh_female_cancan_mars_bigtts' };
+function defaultVolcengineVoices(resourceId) {
+  return resourceId === 'seed-tts-1.0' ? V1_VOICES : DEFAULT_VOLCENGINE_VOICES;
+}
+
+function validateVolcengineVoice(resourceId, voice) {
+  if (voice.startsWith('S_')) return;
+  if ((resourceId === 'seed-tts-1.0' && voice.endsWith('_uranus_bigtts')) ||
+      (resourceId === 'seed-tts-2.0' && /_(?:moon|mars)_bigtts$/.test(voice))) {
+    throw new InputError('所选音色与豆包语音资源版本不匹配');
+  }
+}
+
 const AVAILABLE_VOLCENGINE_VOICES = [
   { id: 'zh_male_m191_uranus_bigtts', name: '云舟 2.0（自然播客男声·阿泽推荐）', gender: 'male' },
   { id: 'zh_male_liufei_uranus_bigtts', name: '刘飞 2.0（对话磁性男声）', gender: 'male' },
@@ -14,65 +29,118 @@ const AVAILABLE_VOLCENGINE_VOICES = [
   { id: 'zh_female_xiaohe_uranus_bigtts', name: '小何 2.0（亲和对话女声）', gender: 'female' },
   { id: 'zh_female_cancan_uranus_bigtts', name: '知性灿灿 2.0（清亮拆解女声）', gender: 'female' },
   { id: 'zh_female_shuangkuaisisi_uranus_bigtts', name: '爽快思思 2.0（干脆活波女声）', gender: 'female' },
+  { id: V1_VOICES.阿泽, name: '阳光青年 1.0', gender: 'male' },
+  { id: V1_VOICES.小晓, name: '灿灿 1.0', gender: 'female' },
 ];
 
-async function readAudio(response) {
+async function readAudio(response, limit) {
   const chunks = [];
   function readLine(line) {
     if (!line.trim()) return;
     let obj;
     try { obj = JSON.parse(line); }
-    catch { throw new Error('响应行不是有效 JSON'); }
-    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('响应行格式无效');
+    catch { throw upstreamError('响应行不是有效 JSON'); }
+    return consumeRecord(obj);
+  }
+  function consumeRecord(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw upstreamError('响应行格式无效');
     if (obj.code !== undefined && obj.code !== 0 && obj.code !== 20000000) {
-      throw new Error(`状态码 ${obj.code}：${obj.message || '未知错误'}`);
+      const code = obj.code;
+      const permanent = [400, 401, 403, 404, 422, 45000001, 45001001].includes(code) ||
+        /unauthorized|forbidden|invalid (?:token|parameter|speaker)|鉴权失败|参数错误/i.test(String(obj.message || ''));
+      throw upstreamError(`状态码 ${Number.isSafeInteger(code) ? code : '未知'}：语音请求失败`, !permanent);
     }
     if (typeof obj.data === 'string' && obj.data.length) {
       const encoded = obj.data;
       const bytes = Buffer.from(encoded, 'base64');
       const canonical = bytes.toString('base64');
       if (encoded !== canonical && encoded !== canonical.replace(/=+$/, '')) {
-        throw new Error('响应中的音频不是有效 base64 数据');
+        throw upstreamError('响应中的音频不是有效 base64 数据');
       }
       chunks.push(bytes);
     }
+    return obj.code === 20000000;
   }
-  let tail = '';
-  for await (const text of response.body.pipeThrough(new TextDecoderStream())) {
-    const lines = (tail + text).split('\n');
-    tail = lines.pop();
-    for (const line of lines) readLine(line);
+  let pending = [], size = 0;
+  // Follow object boundaries across chunks so that an unterminated final line can
+  // finish a keep-alive response. Parse at most once speculatively per line.
+  let depth = 0, quoted = false, escaped = false, inspected = false;
+  function closesObject(bytes) {
+    if (inspected) return false;
+    for (const byte of bytes) {
+      if (escaped) escaped = false;
+      else if (quoted && byte === 92) escaped = true;
+      else if (byte === 34) quoted = !quoted;
+      else if (!quoted && byte === 123) depth++;
+      else if (!quoted && byte === 125 && --depth === 0) {
+        inspected = true;
+        return true;
+      }
+    }
+    return false;
   }
-  readLine(tail);
-  return Buffer.concat(chunks);
+  function append(bytes) {
+    size += bytes.length;
+    if (size > 4 * 1024 * 1024) throw upstreamError('语音响应行超过大小限制', false);
+    if (bytes.length) pending.push(bytes);
+  }
+  for await (const chunk of boundedChunks(response, limit)) {
+    let start = 0, end;
+    while ((end = chunk.indexOf(10, start)) !== -1) {
+      append(chunk.subarray(start, end));
+      if (readLine(Buffer.concat(pending, size).toString())) return Buffer.concat(chunks);
+      pending = [];
+      size = depth = 0;
+      inspected = quoted = escaped = false;
+      start = end + 1;
+    }
+    const tail = chunk.subarray(start);
+    append(tail);
+    // Some servers send the complete last object without a delimiter and keep HTTP open.
+    // Only a complete terminal object may terminate without a newline.
+    if (closesObject(tail)) {
+      let record;
+      try { record = JSON.parse(Buffer.concat(pending, size).toString()); }
+      catch { /* The regular line parser reports malformed records at the delimiter or EOF. */ }
+      if (record?.code === 20000000 && consumeRecord(record)) return Buffer.concat(chunks);
+    }
+  }
+  if (size && readLine(Buffer.concat(pending, size).toString())) return Buffer.concat(chunks);
+  throw upstreamError('语音响应提前结束，缺少成功结束码');
 }
 
 function createVolcengineProvider(options = {}) {
   return {
     id: 'volcengine', name: '火山引擎（豆包语音 V3）', requiresAuth: true, authModes: ['apiKey', 'appIdAccessKey'],
     model: options.resourceId || DEFAULT_VOLCENGINE_RESOURCE_ID, availableModels: ['seed-tts-2.0', 'seed-tts-1.0'],
-    defaultVoices: DEFAULT_VOLCENGINE_VOICES, availableVoices: AVAILABLE_VOLCENGINE_VOICES,
+    defaultVoices: defaultVolcengineVoices(options.resourceId), defaultVoicesForModel: defaultVolcengineVoices, availableVoices: AVAILABLE_VOLCENGINE_VOICES,
+    getScopeHash(voices, overrides) {
+      const credentials = { ...options, ...overrides };
+      return speechScopeHash(credentials.endpoint || DEFAULT_VOLCENGINE_ENDPOINT, credentials, voices, AVAILABLE_VOLCENGINE_VOICES);
+    },
     async synthesizeToFile({ text, voice, outputPath, signal, adapterOptions }) {
       if (signal?.aborted) throw new TtsCancelledError();
-      const { apiKey, appId, accessKey, resourceId, endpoint, timeoutMs } = { ...options, ...adapterOptions };
+      const { apiKey, appId, accessKey, resourceId, endpoint, timeoutMs, allowPrivateEndpoint, lookup } = { ...options, ...adapterOptions };
       if (!apiKey?.trim() && !(appId?.trim() && accessKey?.trim())) {
         throw new InputError('请先配置火山引擎语音 API Key（或 AppID + Access Key）后再生成');
       }
+      const speaker = voice || defaultVolcengineVoices(resourceId).阿泽;
+      validateVolcengineVoice(resourceId || DEFAULT_VOLCENGINE_RESOURCE_ID, speaker);
       const auth = apiKey?.trim() ? { 'X-Api-Key': apiKey } : { 'X-Api-App-Id': appId, 'X-Api-Access-Key': accessKey };
       return synthesizeHttp({
         name: '火山引擎', endpoint: endpoint || DEFAULT_VOLCENGINE_ENDPOINT,
         headers: { ...auth, 'X-Api-Resource-Id': resourceId || DEFAULT_VOLCENGINE_RESOURCE_ID, 'X-Api-Request-Id': randomUUID() },
         body: {
           user: { uid: 'ai-podcast-generator' },
-          req_params: { text, speaker: voice || DEFAULT_VOLCENGINE_VOICES.阿泽,
+          req_params: { text, speaker,
             audio_params: { format: 'mp3', sample_rate: 24000, bit_rate: 128000 } },
         },
-        signal, timeoutMs, outputPath, secrets: [apiKey, appId, accessKey], readAudio,
+        signal, timeoutMs, outputPath, allowPrivateEndpoint, lookup, readAudio,
       });
     },
   };
 }
 
 const volcengineProvider = createVolcengineProvider();
-module.exports = { DEFAULT_VOLCENGINE_ENDPOINT, DEFAULT_VOLCENGINE_RESOURCE_ID, DEFAULT_VOLCENGINE_VOICES,
+module.exports = { validateVolcengineVoice, DEFAULT_VOLCENGINE_ENDPOINT, DEFAULT_VOLCENGINE_RESOURCE_ID, DEFAULT_VOLCENGINE_VOICES,
   AVAILABLE_VOLCENGINE_VOICES, createVolcengineProvider, volcengineProvider };

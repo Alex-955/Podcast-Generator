@@ -12,6 +12,13 @@ async function httpTtsFixture(t, reply) {
     for await (const bytes of req) pieces.push(bytes);
     const request = { headers: req.headers, body: JSON.parse(Buffer.concat(pieces)) };
     requests.push(request);
+    const resource = req.headers['x-api-resource-id'];
+    const speaker = request.body.req_params?.speaker || '';
+    if (!speaker.startsWith('S_') && ((resource === 'seed-tts-1.0' && speaker.endsWith('_uranus_bigtts')) ||
+        (resource === 'seed-tts-2.0' && /_(?:moon|mars)_bigtts$/.test(speaker)))) {
+      res.writeHead(422).end();
+      return;
+    }
     reply(res, request);
   });
   server.listen(0, '127.0.0.1');

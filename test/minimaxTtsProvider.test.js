@@ -1,10 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { minimaxProvider } = require('../src/services/minimaxTtsProvider');
+const { createMinimaxProvider } = require('../src/services/minimaxTtsProvider');
 const { makeMp3 } = require('./helpers/mp3Fixtures');
 const { httpTtsFixture } = require('./helpers/httpTtsFixture');
 
+const minimaxProvider = createMinimaxProvider({ allowPrivateEndpoint: true });
 const apiKey = 'offline-minimax-secret';
 const audio = makeMp3(10);
 test('MiniMax 发送模型、音色、语速与认证头并原子写入 hex 音频', async t => {
@@ -47,4 +48,58 @@ test('MiniMax 缺凭据、预取消、响应体超时', async t => {
   assert.equal(requests.length, 0);
   await assert.rejects(minimaxProvider.synthesizeToFile({ outputPath, adapterOptions: { endpoint, apiKey, timeoutMs: 50 } }), /超时/);
   assert.equal(fs.existsSync(outputPath), false);
+});
+
+test('私网 TTS 开关独立，套接字校验全部 DNS 结果并使用受检地址', async t => {
+  const { endpoint, outputPath, requests } = await httpTtsFixture(t, res =>
+    res.end(JSON.stringify({ base_resp: { status_code: 0 }, data: { audio: audio.toString('hex') } })));
+  const env = { ALLOW_PRIVATE_TTS_ENDPOINT: '0', ALLOW_PRIVATE_FETCH: '1' };
+  for (const [name, value] of Object.entries(env)) {
+    const old = process.env[name];
+    t.after(() => { if (old === undefined) delete process.env[name]; else process.env[name] = old; });
+    process.env[name] = value;
+  }
+  const named = endpoint.replace('127.0.0.1', 'speech.test');
+  const synth = (host, lookup) => createMinimaxProvider({ apiKey, endpoint: host, lookup }).synthesizeToFile({ outputPath, text: '测试' });
+  await assert.rejects(synth(endpoint), { statusCode: 400 });
+  for (const address of ['127.0.0.1', '10.0.0.9', '169.254.5.6', '100.64.1.1', '203.0.113.1', 'fd00::10', '::ffff:7f00:1', '2001:db8::1']) {
+    await assert.rejects(synth(named, async () => [{ address: '1.1.1.1', family: 4 },
+      { address, family: address.includes(':') ? 6 : 4 }]), { statusCode: 400 });
+  }
+  assert.equal(requests.length, 0);
+  process.env.ALLOW_PRIVATE_TTS_ENDPOINT = '1';
+  let resolutions = 0;
+  await synth(named, async (host, options) => {
+    assert.equal(host, 'speech.test');
+    assert.equal(options.all, true);
+    resolutions++;
+    return [{ address: '127.0.0.1', family: 4 }];
+  });
+  assert.equal(resolutions, 1);
+  assert.equal(requests[0].headers.host, new URL(named).host);
+});
+
+test('真实 HTTP 适配器只重试可恢复错误，拒绝重定向与超限响应', async t => {
+  const { synthesizeSentence } = require('../src/services/ttsService');
+  let code = 401, body;
+  const { endpoint, outputPath, requests } = await httpTtsFixture(t, res => {
+    res.statusCode = code;
+    res.setHeader('Location', '/redirected');
+    if (body === 'oversize') res.setHeader('content-length', 21 * 1024 * 1024);
+    res.end(body || '/Users/private/unknown-file');
+  });
+  for (const [status, count] of [[400, 1], [401, 1], [403, 1], [404, 1], [422, 1], [307, 1], [500, 3], [503, 3]]) {
+    code = status;
+    const before = requests.length;
+    await assert.rejects(synthesizeSentence({ text: '测试', outputPath, provider: minimaxProvider, adapterOptions: { apiKey, endpoint } }),
+      error => error.message.includes('HTTP ' + code) && !error.message.includes('/Users'));
+    assert.equal(requests.length - before, count);
+  }
+  code = 200;
+  body = JSON.stringify({ base_resp: { status_code: 1004 } });
+  const before = requests.length;
+  await assert.rejects(synthesizeSentence({ text: '测试', outputPath, provider: minimaxProvider, adapterOptions: { apiKey, endpoint } }), { retryable: false });
+  assert.equal(requests.length - before, 1);
+  body = 'oversize';
+  await assert.rejects(minimaxProvider.synthesizeToFile({ outputPath, adapterOptions: { apiKey, endpoint } }), /大小限制/);
 });

@@ -1,8 +1,8 @@
-const { InputError } = require('./validation');
-const { assertSafeFetchTarget } = require('./extractor');
+const { InputError, validateVoiceMapping } = require('./validation');
+const { checkEndpoint } = require('./providerHttp');
 const { DEFAULT_MINIMAX_ENDPOINT } = require('./minimaxTtsProvider');
-const { DEFAULT_VOLCENGINE_ENDPOINT } = require('./volcengineTtsProvider');
-const { resolveDefaultModel } = require('./ttsProvider');
+const { DEFAULT_VOLCENGINE_ENDPOINT, validateVolcengineVoice } = require('./volcengineTtsProvider');
+const { resolveDefaultModel, DEFAULT_VOICES } = require('./ttsProvider');
 
 function stringSetting(value) {
   if (value == null) return '';
@@ -30,10 +30,10 @@ function getTtsCredentials(provider, tts, previousModel) {
   const serverEndpoint = normalizedEndpoint(mini ? env.MINIMAX_TTS_ENDPOINT || DEFAULT_MINIMAX_ENDPOINT :
     env.VOLCENGINE_TTS_ENDPOINT || DEFAULT_VOLCENGINE_ENDPOINT);
   const endpoint = normalizedEndpoint(stringSetting(tts.endpoint) || serverEndpoint);
-  if (endpoint !== serverEndpoint) {
-    if (!ownKey && (mini || !ownApp || !ownAccess)) throw new InputError('使用自定义语音接口地址时请提供完整的对应凭据');
-    assertSafeFetchTarget(endpoint);
+  if (endpoint !== serverEndpoint && !ownKey && (mini || !ownApp || !ownAccess)) {
+    throw new InputError('使用自定义语音接口地址时请提供完整的对应凭据');
   }
+  checkEndpoint(endpoint, env.ALLOW_PRIVATE_TTS_ENDPOINT === '1');
   if (mini) {
     const apiKey = ownKey || env.MINIMAX_API_KEY?.trim();
     if (!apiKey) throw new InputError('请先配置 MiniMax 语音合成 API Key 后再生成');
@@ -47,4 +47,15 @@ function getTtsCredentials(provider, tts, previousModel) {
   return { appId, accessKey, endpoint, model, resourceId: model };
 }
 
-module.exports = { getTtsCredentials };
+function resolveVoiceMapping(provider, model, input) {
+  const defaults = provider.defaultVoicesForModel?.(model) || provider.defaultVoices || DEFAULT_VOICES;
+  const mapping = validateVoiceMapping(input, provider);
+  const fallback = Object.values(defaults)[0];
+  const voices = Object.fromEntries(['阿泽', '小晓'].map(name => [name, mapping?.[name] || defaults[name] || fallback]));
+  if (provider.id === 'volcengine') {
+    for (const voice of Object.values(voices)) validateVolcengineVoice(model, voice);
+  }
+  return voices;
+}
+
+module.exports = { getTtsCredentials, resolveVoiceMapping };

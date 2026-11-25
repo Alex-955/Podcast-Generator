@@ -1,10 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { volcengineProvider: provider } = require('../src/services/volcengineTtsProvider');
+const { createVolcengineProvider } = require('../src/services/volcengineTtsProvider');
 const { makeMp3 } = require('./helpers/mp3Fixtures');
 const { httpTtsFixture } = require('./helpers/httpTtsFixture');
 
+const provider = createVolcengineProvider({ allowPrivateEndpoint: true });
 const apiKey = 'offline-single', appId = 'offline-app', accessKey = 'offline-access';
 const audio = makeMp3(4);
 test('豆包按认证模式发送请求，解码跨包、多行与结尾残行', async t => {
@@ -38,7 +39,7 @@ test('豆包 NDJSON 即使已有音频也拒绝错误行、损坏数据及 HTTP 
     [200, JSON.stringify({ data: audio.toString('base64') }) + '\n' +
       JSON.stringify({ code: 91, message: [apiKey, appId, accessKey, endpoint].join(' ') }), /状态码 91/],
     [401, '鉴权失败 ' + accessKey, /HTTP 401/], [200, 'xxx', /JSON/],
-    [200, '{"data":"b29wcw=="}', /MP3/],
+    [200, '{"code":20000000,"data":"b29wcw=="}', /MP3/],
   ]) {
     status = code;
     line = body;
@@ -60,4 +61,30 @@ test('豆包缺凭据与取消，进行中的请求停止读取响应', async t 
   await assert.rejects(provider.synthesizeToFile({ signal: controller.signal, outputPath, adapterOptions: { endpoint, apiKey } }), { name: 'AbortError' });
   assert.equal(requests.length, 1);
   assert.equal(fs.existsSync(outputPath), false);
+});
+
+test('豆包提前 EOF 不替换文件，收到成功码即返回并关闭长连接', async t => {
+  let complete = false;
+  let closed;
+  const disconnected = new Promise(resolve => { closed = resolve; });
+  const line = JSON.stringify({ code: 0, data: audio.toString('base64') }) + '\n';
+  const { endpoint, outputPath } = await httpTtsFixture(t, res => {
+    if (!complete) return res.end(line);
+    res.on('close', closed);
+    res.write(line + '{"code":20000000}');
+  });
+  const args = { outputPath, adapterOptions: { apiKey, endpoint, timeoutMs: 1000 } };
+  fs.writeFileSync(outputPath, '原文件');
+  await assert.rejects(provider.synthesizeToFile(args), /缺少成功结束码/);
+  assert.equal(fs.readFileSync(outputPath, 'utf8'), '原文件');
+  complete = true;
+  await provider.synthesizeToFile(args);
+  assert.deepEqual(fs.readFileSync(outputPath), audio);
+  await disconnected;
+});
+
+test('跨包 NDJSON 单行缓存有上限', async t => {
+  const { endpoint, outputPath } = await httpTtsFixture(t, res => res.end('x'.repeat(4 * 1024 * 1024 + 1)));
+  await assert.rejects(provider.synthesizeToFile({ outputPath, adapterOptions: { apiKey, endpoint } }), /响应行超过/);
+  assert.ok(!fs.existsSync(outputPath));
 });

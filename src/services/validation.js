@@ -104,7 +104,7 @@ function validateVoiceMapping(mapping, providerOrAllowedIds) {
     if (!valid) {
       throw new InputError('不支持的音色');
     }
-    normalized[speaker] = voice;
+    normalized[speaker] = commercial ? voice.trim() : voice;
   }
   return normalized;
 }
@@ -118,7 +118,7 @@ function ttsSecrets(tts = {}) {
 /** 日志/错误消息脱敏：去掉 API Key 形态的凭据 */
 function redactSecrets(text, sensitiveValues = []) {
   let message = String(text);
-  const values = sensitiveValues.filter(value => typeof value === 'string' && value).sort((a, b) => b.length - a.length);
+  const values = sensitiveValues.filter(value => typeof value === 'string').map(value => value.trim()).filter(Boolean).sort((a, b) => b.length - a.length);
   for (const value of values) message = message.replaceAll(value, '***');
   return message
     .replace(/(?:Authorization|X-Api-(?:Access-Key|App-Id|Key)|accessKey|appId|apiKey|baseURL|endpoint|filePath)["']?\s*[:=]\s*["']?(?:Bearer\s+|Basic\s+)?[^\s,"'}]+/gi, '***')

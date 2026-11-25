@@ -11,7 +11,8 @@ const { makeMp3 } = require('./helpers/mp3Fixtures');
 const apiKey = 'offline-credential';
 const payload = { mode: 'text', content: '离线文章正文', apiKey };
 let root, publicDir, server, base, previousEnv;
-let generate;
+let generate, llmRequest, observeProbe;
+const { getTtsProvider } = require('../src/services/ttsProvider');
 
 test.before(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'podcast-routes-'));
@@ -29,6 +30,12 @@ test.before(async () => {
   const { createApp } = require('../server');
   const app = createApp({
     publicDir, dataDir: path.join(publicDir, 'custom-data'),
+    llmRequest: (...args) => llmRequest(...args),
+    getTtsProviderById(id) {
+      const provider = getTtsProvider(id);
+      if (!observeProbe) return provider;
+      return { ...provider, synthesizeToFile(args) { observeProbe(args); return provider.synthesizeToFile(args); } };
+    },
     extractor(params) {
       if (params.url === 'https://offline.example/fail') {
         throw Object.assign(new Error('抓取错误 Bearer private-value'), { statusCode: 502 });
@@ -211,4 +218,125 @@ test('语音服务目录实时报告配置状态，创建任务同步拒绝缺�
     assert.ok(!JSON.stringify(error).includes(endpoint));
   }
   await request('tasks', 400, { ...payload, tts: { provider: 'minimax', apiKey: 'own-key', endpoint: 'file:///tmp/' } });
+});
+
+function setEnv(t, values) {
+  for (const [name, value] of Object.entries(values)) {
+    const previous = process.env[name];
+    t.after(() => { if (previous === undefined) delete process.env[name]; else process.env[name] = previous; });
+    process.env[name] = value;
+  }
+}
+
+test('模型配置目录屏蔽误填为模型名称的带空白凭据', async t => {
+  const secret = 'misconfigured-credential';
+  setEnv(t, { MINIMAX_API_KEY: '  ' + secret + '  ', MINIMAX_TTS_MODEL: secret });
+  const { data } = await (await fetch(base + '/api/tts/providers')).json();
+  assert.equal(data.items.find(item => item.id === 'minimax').defaultModel, 'speech-02-hd');
+  assert.ok(!JSON.stringify(data).includes(secret));
+});
+
+test('模型连接测试校验绑定、鉴权，404/405 才尝试一个 token 的对话', async t => {
+  const { Readable } = require('node:stream');
+  const endpoint = 'https://llm-service.example/api/v1/';
+  setEnv(t, { DEEPSEEK_API_KEY: '', LLM_BASE_URL: endpoint, LLM_MODEL: 'server-model' });
+  const calls = [];
+  let status = 200;
+  llmRequest = async (url, args) => {
+    assert.ok(args.signal instanceof AbortSignal);
+    calls.push({ url, ...args });
+    const chat = url.endsWith('/chat/completions');
+    const body = chat ? { choices: [{}] } : { data: [], detail: '/Users/private/secret' };
+    const response = Readable.from([Buffer.from(JSON.stringify(body))]);
+    response.statusCode = chat ? 200 : status;
+    response.headers = {};
+    return response;
+  };
+  await request('llm/test', 400, {});
+  process.env.DEEPSEEK_API_KEY = apiKey;
+  await request('llm/test', 400, { baseURL: 'https://other-service.example' });
+  await request('llm/test', 400, { model: apiKey });
+  assert.equal(calls.length, 0);
+  const result = await request('llm/test', 200, {});
+  assert.equal(result.data.ok, true);
+  assert.equal(result.data.model, 'server-model');
+  assert.equal(result.data.message, '连接成功，模型接口可用');
+  assert.ok(result.data.latencyMs >= 0);
+  assert.equal(calls[0].url, endpoint + 'models');
+  assert.equal(calls[0].headers.Authorization, 'Bearer ' + apiKey);
+  for (status of [404, 405]) {
+    calls.length = 0;
+    await request('llm/test', 200, { apiKey: 'own-key', baseURL: 'https://own.example', model: 'choice' });
+    assert.deepEqual(calls.map(c => [c.method, c.url]), [['GET', 'https://own.example/v1/models'], ['POST', 'https://own.example/v1/chat/completions']]);
+    assert.equal(JSON.parse(calls[1].body).max_tokens, 1);
+    assert.equal(JSON.parse(calls[1].body).model, 'choice');
+  }
+  status = 401;
+  calls.length = 0;
+  const failed = await request('llm/test', 502, {});
+  assert.equal(calls.length, 1);
+  assert.match(failed.error, /401/);
+  assert.ok(!JSON.stringify(failed).includes(endpoint));
+  llmRequest = () => { throw new Error('private-value /Users/unknown/path'); };
+  assert.equal((await request('llm/test', 502, {})).error, '模型接口连接失败');
+});
+
+test('语音连接测试仅在临时目录合成，成功和错误后都清理', async t => {
+  const { httpTtsFixture } = require('./helpers/httpTtsFixture');
+  let status = 200;
+  const { endpoint, requests } = await httpTtsFixture(t, res => {
+    res.statusCode = status;
+    res.end(status === 200 ? JSON.stringify({ base_resp: { status_code: 0 }, data: { audio: makeMp3(3).toString('hex') } }) :
+      'private-value ' + endpoint + ' /Users/private/unknown');
+  });
+  setEnv(t, { MINIMAX_TTS_ENDPOINT: endpoint, MINIMAX_API_KEY: '', MINIMAX_TTS_MODEL: 'speech-02-hd', ALLOW_PRIVATE_TTS_ENDPOINT: '1' });
+  const files = fs.readdirSync(root, { recursive: true });
+  let outputPath;
+  observeProbe = args => { outputPath = args.outputPath; assert.equal(args.text, '你好'); };
+  t.after(() => { observeProbe = undefined; });
+  const tts = { provider: 'minimax', model: 'speech-02-turbo', voiceMapping: { 阿泽: 'S_probe' } };
+  await request('tts/test', 400, { tts });
+  process.env.MINIMAX_API_KEY = apiKey;
+  await request('tts/test', 400, { tts: { ...tts, endpoint: 'https://other-service.example' } });
+  assert.match((await request('tts/test', 200, { tts: { provider: 'edge' } })).data.message, /未发起/);
+  assert.equal(requests.length, 0);
+  const result = await request('tts/test', 200, { tts });
+  assert.equal(result.data.provider, 'minimax');
+  assert.equal(result.data.model, 'speech-02-turbo');
+  assert.equal(result.data.duration, 0.072);
+  assert.equal(result.data.ok, true);
+  assert.equal(requests[0].body.voice_setting.voice_id, 'S_probe');
+  assert.equal(requests[0].body.model, 'speech-02-turbo');
+  assert.equal(path.dirname(path.dirname(outputPath)), path.resolve(os.tmpdir()));
+  assert.ok(!fs.existsSync(path.dirname(outputPath)));
+  status = 403;
+  const failed = await request('tts/test', 502, { tts });
+  assert.match(failed.error, /403/);
+  assert.ok(!failed.error.includes('/Users') && !failed.error.includes(endpoint));
+  assert.ok(!fs.existsSync(path.dirname(outputPath)));
+  assert.deepEqual(fs.readdirSync(root, { recursive: true }), files);
+});
+
+test('本地模型服务经实际 HTTP 传输完成 /models 及最小对话探测', async t => {
+  const http = require('node:http');
+  const { requestProvider } = require('../src/services/providerHttp');
+  const calls = [];
+  const fixture = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    calls.push({ url: req.url, method: req.method, auth: req.headers.authorization, body: Buffer.concat(chunks).toString() });
+    if (req.method === 'GET') return res.writeHead(405).end();
+    res.end('{"choices":[{}]}');
+  });
+  fixture.listen(0, '127.0.0.1');
+  await once(fixture, 'listening');
+  t.after(() => new Promise(resolve => fixture.close(resolve)));
+  setEnv(t, { LLM_BASE_URL: 'http://127.0.0.1:' + fixture.address().port, DEEPSEEK_API_KEY: apiKey, LLM_MODEL: 'local-model' });
+  llmRequest = requestProvider;
+  await request('llm/test', 200, {});
+  assert.deepEqual(calls.map(c => [c.url, c.method, c.auth]),
+    [['/v1/models', 'GET', 'Bearer ' + apiKey], ['/v1/chat/completions', 'POST', 'Bearer ' + apiKey]]);
+  assert.equal(JSON.parse(calls[1].body).max_tokens, 1);
+  await request('llm/test', 400, { apiKey, baseURL: process.env.LLM_BASE_URL + '/untrusted' });
+  assert.equal(calls.length, 2);
 });

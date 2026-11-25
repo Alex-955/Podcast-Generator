@@ -104,3 +104,7 @@ test('商业服务允许自定义音色且限定角色与字符；服务商凭�
     assert.ok(!redactSecrets(JSON.stringify({ [field]: 'private-value' })).includes('private-value'));
   }
 });
+
+test('空串和纯空白不会破坏正文，带空格的凭据按实际值脱敏', () => {
+  assert.equal(redactSecrets('连接失败：test-credential', ['', '   ', '\t', ' test-credential ']), '连接失败：***');
+});

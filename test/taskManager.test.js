@@ -448,6 +448,9 @@ test('换语音服务后从首句重配，旧句与成品同步清理，沿用�
   const { HEADER_48K, FRAME_SIZE_48K } = require('./helpers/mp3Fixtures');
   const audio = makeMp3(4, { header: HEADER_48K, frameSize: FRAME_SIZE_48K });
   const { endpoint, requests } = await httpTtsFixture(t, res => res.end(JSON.stringify({ code: 20000000, data: audio.toString('base64') })));
+  const previousPrivate = process.env.ALLOW_PRIVATE_TTS_ENDPOINT;
+  process.env.ALLOW_PRIVATE_TTS_ENDPOINT = '1';
+  t.after(() => { if (previousPrivate === undefined) delete process.env.ALLOW_PRIVATE_TTS_ENDPOINT; else process.env.ALLOW_PRIVATE_TTS_ENDPOINT = previousPrivate; });
   const oldEndpoint = process.env.VOLCENGINE_TTS_ENDPOINT;
   process.env.VOLCENGINE_TTS_ENDPOINT = endpoint;
   t.after(() => { if (oldEndpoint === undefined) delete process.env.VOLCENGINE_TTS_ENDPOINT; else process.env.VOLCENGINE_TTS_ENDPOINT = oldEndpoint; });
@@ -474,7 +477,7 @@ test('换语音服务后从首句重配，旧句与成品同步清理，沿用�
   assert.equal(llmCalls, 1);
   assert.equal(done.progress.cachedSegments, 0);
   assert.deepEqual(requests.map(r => r.body.req_params.text), dialogue.map(l => l.text));
-  assert.deepEqual(requests.map(r => r.body.req_params.speaker), ['S_cloned', getTtsProvider('volcengine').defaultVoices.小晓, 'S_cloned']);
+  assert.deepEqual(requests.map(r => r.body.req_params.speaker), ['S_cloned', 'zh_female_cancan_mars_bigtts', 'S_cloned']);
   assert.ok(requests.every(r => r.headers['x-api-resource-id'] === tts.resourceId && r.headers['x-api-app-id'] === appId));
   const stored = JSON.parse(fs.readFileSync(path.join(config.tasksDir, id + '.json')));
   assert.deepEqual(stored.script, script);
@@ -562,4 +565,67 @@ test('同一家服务换模型或换音色时清理工作目录，补凭据续�
   const done = await status('completed');
   assert.equal(done.progress.cachedSegments, 3);
   assert.equal(calls.length, 7);
+});
+
+test('切换端点及私有音色账号均清除断点，缓存按真实音源隔离', async t => {
+  const { httpTtsFixture } = require('./helpers/httpTtsFixture');
+  const old = process.env.ALLOW_PRIVATE_TTS_ENDPOINT;
+  process.env.ALLOW_PRIVATE_TTS_ENDPOINT = '1';
+  t.after(() => { if (old === undefined) delete process.env.ALLOW_PRIVATE_TTS_ENDPOINT; else process.env.ALLOW_PRIVATE_TTS_ENDPOINT = old; });
+  const accountA = 'credential-alpha', accountB = 'credential-beta';
+  const fixture = n => httpTtsFixture(t, (res, req) => {
+    const frames = req.headers.authorization === 'Bearer ' + accountB ? n + 1 : n;
+    res.end(JSON.stringify({ base_resp: { status_code: 0 }, data: { audio: makeMp3(frames).toString('hex') } }));
+  });
+  const first = await fixture(2), second = await fixture(4);
+  let finish = false, llmCalls = 0;
+  const { manager, config } = setup(t, {
+    scriptGenerator() { llmCalls++; return { ...script, dialogue: dialogue.slice(0, 1) }; },
+    audioMerger(...args) {
+      if (!finish) throw new Error('暂停合并');
+      return require('../src/services/audioMerger').concatenateAudioFiles(...args);
+    },
+  });
+  const tts = { provider: 'minimax', endpoint: first.endpoint, apiKey: accountA, voiceMapping: { 阿泽: 'S_custom' } };
+  const { id } = manager.createTask({ ...payload, tts });
+  const work = path.join(config.podcastsDir, id), record = path.join(config.tasksDir, id + '.json');
+  const done = status => waitFor(() => manager.getTask(id), x => x.status === status);
+  await done('failed');
+  const hash = () => JSON.parse(fs.readFileSync(record)).ttsScopeHash;
+  const hashes = [hash()];
+  for (const [endpoint, key, frames] of [[second.endpoint, accountA, 4], [second.endpoint, accountB, 5]]) {
+    fs.writeFileSync(path.join(work, 'full_podcast.mp3'), makeMp3(1));
+    manager.resumeTask(id, { tts: { ...tts, endpoint, apiKey: key } });
+    assert.deepEqual(fs.readdirSync(work), []);
+    await done('failed');
+    assert.deepEqual(fs.readFileSync(path.join(work, 'sentence_000.mp3')), makeMp3(frames));
+    hashes.push(hash());
+  }
+  finish = true;
+  manager.resumeTask(id, { tts });
+  const completed = await done('completed');
+  assert.equal(completed.progress.cachedSegments, 1);
+  assert.equal(llmCalls, 1);
+  assert.deepEqual(fs.readFileSync(path.join(work, 'full_podcast.mp3')), makeMp3(2));
+  assert.equal(first.requests.length, 1);
+  assert.equal(second.requests.length, 2);
+  assert.equal(new Set(hashes).size, 3);
+  for (const value of hashes) assert.match(value, /^[a-f0-9]{64}$/);
+  const meta = fs.readFileSync(path.join(work, 'meta.json'), 'utf8');
+  assert.ok(!(JSON.stringify(completed) + meta).includes('ttsScopeHash'));
+  for (const secret of [first.endpoint, second.endpoint, accountA, accountB]) {
+    assert.ok(!(fs.readFileSync(record, 'utf8') + meta + JSON.stringify(completed)).includes(secret));
+  }
+});
+
+test('豆包已知音色版本错配在创建与续跑时同步拒绝', async t => {
+  const { manager } = setup(t, { scriptGenerator() { throw new Error('待续跑'); } });
+  const { id } = manager.createTask(payload);
+  await waitFor(() => manager.getTask(id), task => task.status === 'failed');
+  for (const [model, voice] of [['seed-tts-1.0', 'zh_female_vv_uranus_bigtts'],
+    ['seed-tts-2.0', 'zh_male_yangguangqingnian_moon_bigtts'], ['seed-tts-2.0', 'zh_female_cancan_mars_bigtts']]) {
+    const tts = { provider: 'volcengine', apiKey: 'voice-secret', model, voiceMapping: { 小晓: voice } };
+    assert.throws(() => manager.createTask({ ...payload, tts }), { statusCode: 400 });
+    assert.throws(() => manager.resumeTask(id, { ...payload, tts }), { statusCode: 400 });
+  }
 });

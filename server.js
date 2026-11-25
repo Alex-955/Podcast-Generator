@@ -13,6 +13,8 @@ const { InputError, redactSecrets, ttsSecrets } = require('./src/services/valida
 
 const { getPublicTtsProviders, resolveDefaultProviderId } = require('./src/services/ttsProvider');
 
+const { testLlmConnection, testTtsConnection } = require('./src/services/connectionTests');
+
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const FRONTEND_FILES = new Set(['/index.html', '/style.css', '/app.js', '/inputSource.js']);
 
@@ -41,6 +43,12 @@ function createApp(options = {}) {
   }
   app.use('/api', express.json({ limit: '10mb' }));
 
+  app.post('/api/llm/test', async (req, res) => {
+    res.json({ success: true, data: await testLlmConnection(req.body || {}, options) });
+  });
+  app.post('/api/tts/test', async (req, res) => {
+    res.json({ success: true, data: await testTtsConnection(req.body || {}, options) });
+  });
   app.get('/api/tts/providers', (req, res) => res.json({
     success: true, data: { items: getPublicTtsProviders(), defaultProvider: resolveDefaultProviderId() },
   }));
