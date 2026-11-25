@@ -15,7 +15,13 @@
     model: 'ai_podcast_model',
     visionConfig: 'ai_podcast_vision_config',
     ttsConfig: 'ai_podcast_tts_config',
+    podcastStyle: 'ai_podcast_script_style',
     activeTaskId: 'ai_podcast_active_task_id',
+  };
+
+  const PODCAST_STYLE_DESCS = {
+    deep_dive: '7:3 主讲拆解 + 主持追问 · 贴近 AI 妙听',
+    dialogue: '阿泽与小晓 5:5 轻快接力对谈',
   };
 
   const LLM_PRESETS = [
@@ -151,6 +157,23 @@
     edge: 'Edge 免费',
   };
 
+  const TTS_COMPACT_LABELS = {
+    minimax: 'MiniMax',
+    volcengine: '豆包',
+    edge: 'Edge 免费',
+  };
+
+  const SOURCE_TYPE_LABELS = {
+    url: '链接',
+    text: '正文',
+    image: '识图',
+  };
+
+  const PODCAST_STYLE_LABELS = {
+    deep_dive: '深度主讲',
+    dialogue: '轻松对谈',
+  };
+
   const TTS_MODEL_LABELS = {
     'speech-2.8-turbo': 'speech-2.8-turbo（新一代高性价比·推荐）',
     'speech-2.8-hd': 'speech-2.8-hd（新一代高清）',
@@ -231,11 +254,16 @@
     modalTtsProvider: 'edge',
     modalVolcAuthMode: 'apiKey',
     uiInputTab: 'url',
+    podcastStyle: readStorage(STORAGE_KEYS.podcastStyle) === 'dialogue' ? 'dialogue' : 'deep_dive',
     input: window.InputSource.createState(),
     imageSlices: [],
     extractingImages: false,
+    extractAbortController: null,
+    extractTimer: null,
     confirmedDraft: null,
     polishingDraft: false,
+    polishAbortController: null,
+    polishTimer: null,
     fullPreviewExpanded: false,
     llmModelsCache: new Map(),
     activeTask: null,
@@ -243,6 +271,10 @@
     pollInFlight: false,
     elapsedTimer: null,
     historyItems: [],
+    pendingDeleteId: null,
+    deletingPodcastId: null,
+    historySelectSeq: 0,
+    deletedPodcastIds: new Set(),
     currentPodcast: null,
     currentMetaBaseText: '尚无已选播客',
     audioEngine: null,
@@ -334,6 +366,11 @@
     imageDropZone: document.getElementById('imageDropZone'),
     inputImageFiles: document.getElementById('inputImageFiles'),
     imagePreviewStrip: document.getElementById('imagePreviewStrip'),
+    imageProgressPanel: document.getElementById('imageProgressPanel'),
+    imageProgressStage: document.getElementById('imageProgressStage'),
+    imageProgressElapsed: document.getElementById('imageProgressElapsed'),
+    imageProgressFill: document.getElementById('imageProgressFill'),
+    btnCancelExtractImages: document.getElementById('btnCancelExtractImages'),
     imageSelectionMeta: document.getElementById('imageSelectionMeta'),
     btnClearImages: document.getElementById('btnClearImages'),
     btnExtractImages: document.getElementById('btnExtractImages'),
@@ -352,9 +389,13 @@
     confirmTruncatedBadge: document.getElementById('confirmTruncatedBadge'),
     confirmTitle: document.getElementById('confirmTitle'),
     confirmExcerpt: document.getElementById('confirmExcerpt'),
+    confirmStyleButtons: document.querySelectorAll('[data-podcast-style]'),
+    confirmStyleDesc: document.getElementById('confirmStyleDesc'),
     btnToggleFullPreview: document.getElementById('btnToggleFullPreview'),
     btnPolishDraft: document.getElementById('btnPolishDraft'),
     polishBanner: document.getElementById('polishBanner'),
+    polishProgressBar: document.getElementById('polishProgressBar'),
+    polishProgressFill: document.getElementById('polishProgressFill'),
     polishBannerText: document.getElementById('polishBannerText'),
     polishBannerActions: document.getElementById('polishBannerActions'),
     btnEditInput: document.getElementById('btnEditInput'),
@@ -383,6 +424,7 @@
     playerDeck: document.getElementById('playerDeck'),
     waveVisualizer: document.getElementById('waveVisualizer'),
     currentPodcastMeta: document.getElementById('currentPodcastMeta'),
+    currentPodcastBadges: document.getElementById('currentPodcastBadges'),
     currentPodcastTitle: document.getElementById('currentPodcastTitle'),
     currentPodcastSummary: document.getElementById('currentPodcastSummary'),
     currentTime: document.getElementById('currentTime'),
@@ -571,9 +613,19 @@
   }
 
   function invalidateConfirmedDraft() {
+    if (state.polishAbortController) {
+      state.polishAbortController.abort();
+      state.polishAbortController = null;
+    }
+    if (state.polishTimer) {
+      window.clearInterval(state.polishTimer);
+      state.polishTimer = null;
+    }
     state.confirmedDraft = null;
     state.fullPreviewExpanded = false;
     dom.confirmCard.classList.add('hidden');
+    if (dom.polishBanner) dom.polishBanner.classList.remove('is-loading');
+    if (dom.polishProgressBar) dom.polishProgressBar.classList.add('hidden');
     if (dom.studioRail) dom.studioRail.classList.remove('has-confirm');
     const previewSpan = dom.btnPreviewText.querySelector('span');
     if (previewSpan) previewSpan.textContent = '预览并确认';
@@ -635,12 +687,26 @@
     dom.textCharCount.classList.toggle('is-over', len > MAX_CONTENT_LENGTH);
   }
 
+  function updatePodcastStyleUI() {
+    const style = state.podcastStyle === 'dialogue' ? 'dialogue' : 'deep_dive';
+    dom.confirmStyleButtons?.forEach((btn) => {
+      const active = btn.dataset.podcastStyle === style;
+      btn.classList.toggle('is-active', active);
+      btn.setAttribute('aria-checked', String(active));
+    });
+    if (dom.confirmStyleDesc) {
+      dom.confirmStyleDesc.textContent = PODCAST_STYLE_DESCS[style] || PODCAST_STYLE_DESCS.deep_dive;
+    }
+  }
+
   function renderPolishBanner() {
     const draft = state.confirmedDraft;
     if (!dom.polishBanner || !draft) return;
 
     dom.polishBannerActions.textContent = '';
-    dom.polishBanner.classList.remove('is-done');
+    dom.polishBanner.classList.remove('is-done', 'is-loading');
+    if (dom.polishProgressBar) dom.polishProgressBar.classList.add('hidden');
+    if (dom.polishProgressFill) dom.polishProgressFill.style.width = '0%';
 
     if (draft.polishedFrom) {
       dom.polishBanner.classList.remove('hidden');
@@ -648,6 +714,13 @@
       dom.polishBannerText.textContent = draft.changeSummary || '已完成上下文纠错与语句顺滑处理';
       const undoBtn = createActionBtn('恢复润色前原文', 'btn btn-subtle btn-sm', restoreDraftBeforePolish);
       dom.polishBannerActions.appendChild(undoBtn);
+      return;
+    }
+
+    if (draft.changeSummary) {
+      dom.polishBanner.classList.remove('hidden');
+      dom.polishBanner.classList.add('is-done');
+      dom.polishBannerText.textContent = draft.changeSummary;
       return;
     }
 
@@ -663,6 +736,27 @@
 
     dom.polishBanner.classList.add('hidden');
     dom.polishBannerText.textContent = '';
+  }
+
+  function renderPolishLoading(elapsedSeconds) {
+    if (!dom.polishBanner) return;
+    dom.polishBanner.classList.remove('hidden', 'is-done');
+    dom.polishBanner.classList.add('is-loading');
+    if (dom.polishProgressBar) dom.polishProgressBar.classList.remove('hidden');
+    const pct = Math.min(88, Math.round(16 + 72 * (1 - Math.exp(-elapsedSeconds / 6))));
+    if (dom.polishProgressFill) dom.polishProgressFill.style.width = `${pct}%`;
+    let stage = '正在扫描错别字与同音误识（局部极速校对）…';
+    if (elapsedSeconds >= 10) stage = '正文较长，模型仍在细校修订项，请稍候…';
+    else if (elapsedSeconds >= 4) stage = '正在结合上下文精准定位修改片段…';
+    dom.polishBannerText.textContent = `${stage} · 已耗时 ${Math.floor(elapsedSeconds)}s`;
+    if (!dom.polishBannerActions.querySelector('[data-polish-cancel]')) {
+      dom.polishBannerActions.textContent = '';
+      const cancelBtn = createActionBtn('取消', 'btn btn-ghost btn-sm', () => {
+        state.polishAbortController?.abort();
+      });
+      cancelBtn.dataset.polishCancel = '1';
+      dom.polishBannerActions.appendChild(cancelBtn);
+    }
   }
 
   function restoreDraftBeforePolish() {
@@ -692,22 +786,46 @@
     const draft = state.confirmedDraft;
     if (!draft || state.polishingDraft) return;
     state.polishingDraft = true;
+    const controller = new AbortController();
+    state.polishAbortController = controller;
+    const startedAt = Date.now();
     const polishBtnSpan = dom.btnPolishDraft?.querySelector('span');
     if (dom.btnPolishDraft) dom.btnPolishDraft.disabled = true;
-    if (polishBtnSpan) polishBtnSpan.textContent = '正在纠错润色…';
-    const bannerBtn = dom.polishBannerActions?.querySelector('button');
-    if (bannerBtn) bannerBtn.disabled = true;
+    if (polishBtnSpan) polishBtnSpan.textContent = '润色校对中…';
+
+    renderPolishLoading(0);
+    state.polishTimer = window.setInterval(() => {
+      renderPolishLoading((Date.now() - startedAt) / 1000);
+    }, 250);
 
     try {
       const data = await apiJson('/api/polish-text', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           title: draft.title,
           content: draft.content,
           ...buildCredsPayload(),
         }),
       });
+
+      const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
+      if (dom.polishProgressFill) dom.polishProgressFill.style.width = '100%';
+
+      const noChanges = data.mode === 'patch' && data.editCount === 0 && (data.title || draft.title) === draft.title;
+      if (noChanges) {
+        renderConfirmationCard({
+          ...draft,
+          truncated: Boolean(draft.truncated || data.truncated),
+          hasIssues: false,
+          issueHint: '',
+          polishedFrom: draft.polishedFrom || null,
+          changeSummary: `核对完成（用时 ${elapsedSec}s）：未发现明显错别字，原文已保持不变`,
+        });
+        showToast(`已完成全文核对（${elapsedSec}s），未发现需要修改的错别字`);
+        return;
+      }
 
       const originalSnapshot = draft.polishedFrom || {
         title: draft.title,
@@ -717,16 +835,17 @@
         issueHint: draft.issueHint || '',
       };
 
+      const editPrefix = data.editCount > 0 ? `已修正 ${data.editCount} 处 · ` : '';
       renderConfirmationCard({
         ...draft,
         title: data.title || draft.title,
         content: data.content,
         length: data.length,
-        truncated: Boolean(data.truncated),
+        truncated: Boolean(draft.truncated || data.truncated),
         hasIssues: false,
         issueHint: '',
         polishedFrom: originalSnapshot,
-        changeSummary: data.changeSummary || '已完成上下文纠错与语句顺滑处理',
+        changeSummary: `${editPrefix}用时 ${elapsedSec}s · ${data.changeSummary || '已完成上下文纠错与语句顺滑处理'}`,
       });
 
       if (state.uiInputTab === 'text') {
@@ -734,10 +853,25 @@
         dom.inputText.value = data.content || '';
         updateTextCounter();
       }
-      showToast('已完成 AI 纠错润色，可核对或一键还原');
+      showToast(`已完成 AI 纠错润色（${elapsedSec}s），可核对或一键还原`);
     } catch (err) {
+      if (err.name === 'AbortError') {
+        if (state.confirmedDraft === draft) {
+          renderPolishBanner();
+          showToast('已取消 AI 纠错润色');
+        }
+        return;
+      }
+      if (state.confirmedDraft === draft) renderPolishBanner();
       handleCredentialOrTaskError(err);
     } finally {
+      if (state.polishTimer) {
+        window.clearInterval(state.polishTimer);
+        state.polishTimer = null;
+      }
+      if (state.polishAbortController === controller) {
+        state.polishAbortController = null;
+      }
       state.polishingDraft = false;
       if (dom.btnPolishDraft) dom.btnPolishDraft.disabled = false;
       if (polishBtnSpan) polishBtnSpan.textContent = 'AI 纠错润色';
@@ -756,6 +890,7 @@
     dom.confirmTitle.textContent = draft.title || '未命名文章（生成时将自动提炼标题）';
 
     updateExcerptView();
+    updatePodcastStyleUI();
     renderPolishBanner();
     dom.confirmCard.classList.remove('hidden');
     if (dom.studioRail) dom.studioRail.classList.add('has-confirm');
@@ -933,7 +1068,7 @@
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, outW, outH);
     ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
-    return canvas.toDataURL('image/jpeg', 0.88);
+    return canvas.toDataURL('image/jpeg', 0.82);
   }
 
   async function sliceImageFile(file, remainingQuota) {
@@ -942,7 +1077,7 @@
     const natH = img.naturalHeight || img.height;
     if (!natW || !natH) throw new Error('图片尺寸无效');
 
-    const targetW = Math.min(natW, 1360);
+    const targetW = Math.min(natW, 1120);
     const scale = targetW / natW;
     const scaledH = Math.max(1, Math.round(natH * scale));
     const slices = [];
@@ -1075,20 +1210,52 @@
     hideParseError();
     invalidateConfirmedDraft();
     state.extractingImages = true;
+    const controller = new AbortController();
+    state.extractAbortController = controller;
+    const sliceCount = state.imageSlices.length;
+    const startedAt = Date.now();
     dom.btnExtractImages.disabled = true;
+    if (dom.btnClearImages) dom.btnClearImages.disabled = true;
     const btnSpan = dom.btnExtractImages.querySelector('span');
-    if (btnSpan) btnSpan.textContent = '正在识别文字…';
+    if (btnSpan) btnSpan.textContent = '识别中…';
+
+    const updateProgress = (elapsedSec) => {
+      if (dom.imageProgressElapsed) {
+        dom.imageProgressElapsed.textContent = `已耗时 ${Math.floor(elapsedSec)}s`;
+      }
+      if (dom.imageProgressStage) {
+        let stage = `正在将 ${sliceCount} 个图片片段上传至识图模型…`;
+        if (elapsedSec >= 14) stage = '正在核对专名、标点与疑似错字…';
+        else if (elapsedSec >= 2.5) stage = '模型正在逐字转录正文并去重拼接…';
+        dom.imageProgressStage.textContent = stage;
+      }
+      if (dom.imageProgressFill) {
+        const pct = Math.min(88, Math.round(14 + 74 * (1 - Math.exp(-elapsedSec / 12))));
+        dom.imageProgressFill.style.width = `${pct}%`;
+      }
+    };
+
+    if (dom.imagePreviewStrip) dom.imagePreviewStrip.classList.add('is-scanning');
+    if (dom.imageProgressPanel) dom.imageProgressPanel.classList.remove('hidden');
+    updateProgress(0);
+    state.extractTimer = window.setInterval(() => {
+      updateProgress((Date.now() - startedAt) / 1000);
+    }, 250);
 
     try {
       const data = await apiJson('/api/extract-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           images: state.imageSlices.map((s) => s.dataUrl),
           ...buildCredsPayload(),
           ...buildVisionPayload(),
         }),
       });
+
+      if (dom.imageProgressFill) dom.imageProgressFill.style.width = '100%';
+      const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
 
       switchTab('text');
       dom.inputTitle.value = data.title || '';
@@ -1105,15 +1272,30 @@
         issueHint: data.issueHint || '',
       });
       showToast(data.hasIssues
-        ? `已识别 ${data.length.toLocaleString('zh-CN')} 字（检测到疑似错字，可点「AI 纠错润色」）`
-        : `已从截图识别 ${data.length.toLocaleString('zh-CN')} 字，请核对后生成播客`);
+        ? `已识别 ${data.length.toLocaleString('zh-CN')} 字（用时 ${elapsedSec}s · 检测到疑似错字，可点「AI 纠错润色」）`
+        : `已从截图识别 ${data.length.toLocaleString('zh-CN')} 字（用时 ${elapsedSec}s），请核对后生成播客`);
     } catch (err) {
+      if (err.name === 'AbortError') {
+        showToast('已取消图片识别');
+        return;
+      }
       const msg = err.message || '图片文字识别失败，建议换清晰截图或直接贴正文';
       const needsVisionConfig = err.status === 400 && /识图|图片|视觉|多模态|API Key/i.test(msg);
       showParseError(msg, null, { source: 'image', showVisionConfig: needsVisionConfig });
     } finally {
+      if (state.extractTimer) {
+        window.clearInterval(state.extractTimer);
+        state.extractTimer = null;
+      }
+      if (state.extractAbortController === controller) {
+        state.extractAbortController = null;
+      }
       state.extractingImages = false;
+      if (dom.imagePreviewStrip) dom.imagePreviewStrip.classList.remove('is-scanning');
+      if (dom.imageProgressPanel) dom.imageProgressPanel.classList.add('hidden');
+      if (dom.imageProgressFill) dom.imageProgressFill.style.width = '0%';
       if (btnSpan) btnSpan.textContent = '识别图片文字';
+      if (dom.btnClearImages) dom.btnClearImages.disabled = false;
       dom.btnExtractImages.disabled = state.imageSlices.length === 0;
     }
   }
@@ -1204,8 +1386,10 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mode: 'text',
+          sourceType: ['url', 'text', 'image'].includes(draftSnapshot.mode) ? draftSnapshot.mode : 'text',
           title: draftSnapshot.title,
           content: draftSnapshot.content,
+          podcastStyle: state.podcastStyle,
           ...buildCredsPayload(),
           tts: buildTtsPayload(),
         }),
@@ -1538,6 +1722,148 @@
     }
   }
 
+  function resolveVoiceShortName(providerId, voiceId) {
+    if (!voiceId) return '';
+    const provider = getCatalogProvider(providerId || 'edge');
+    const found = provider?.availableVoices?.find((v) => v.id === voiceId);
+    if (found?.name) {
+      return String(found.name).replace(/[（(][^）)]*[）)]/g, '').trim() || found.name;
+    }
+    return voiceId;
+  }
+
+  function formatEpisodeVoiceSummary(podcast) {
+    const providerId = podcast?.ttsProvider || '';
+    const label = TTS_COMPACT_LABELS[providerId] || (providerId || 'Edge 免费');
+    const mapping = podcast?.voiceMapping;
+    if (!providerId && !mapping) {
+      return { pill: 'Edge 免费', detail: '语音引擎：Edge 免费' };
+    }
+    const host = resolveVoiceShortName(providerId || 'edge', mapping?.阿泽);
+    const guest = resolveVoiceShortName(providerId || 'edge', mapping?.小晓);
+    const pair = host && guest ? `${host} × ${guest}` : (host || guest || '');
+    const pill = pair ? `${label} · ${pair}` : label;
+    const modelPart = podcast?.ttsModel ? ` (${podcast.ttsModel})` : '';
+    return { pill, detail: `语音：${label}${modelPart}${pair ? ` · ${pair}` : ''}` };
+  }
+
+  function renderCurrentPodcastBadges(podcast) {
+    if (!dom.currentPodcastBadges) return;
+    dom.currentPodcastBadges.textContent = '';
+    if (!podcast) {
+      dom.currentPodcastBadges.classList.add('hidden');
+      return;
+    }
+    const pills = [];
+    const sourceLabel = SOURCE_TYPE_LABELS[podcast.sourceType];
+    if (sourceLabel) pills.push({ text: sourceLabel });
+    const styleLabel = PODCAST_STYLE_LABELS[podcast.podcastStyle];
+    if (styleLabel) pills.push({ text: styleLabel });
+    const voiceInfo = formatEpisodeVoiceSummary(podcast);
+    if (voiceInfo?.pill) pills.push({ text: voiceInfo.pill, title: voiceInfo.detail });
+
+    pills.forEach((p) => {
+      const span = document.createElement('span');
+      span.className = 'meta-pill';
+      span.textContent = p.text;
+      if (p.title) span.title = p.title;
+      dom.currentPodcastBadges.appendChild(span);
+    });
+    dom.currentPodcastBadges.classList.toggle('hidden', pills.length === 0);
+  }
+
+  function resetPlayerToEmptyState() {
+    state.currentPodcast = null;
+    window.InputSource.resetPlaybackHighlight(state.input);
+    state.audioEngine?.requestPause?.();
+    dom.mainAudio.pause();
+    dom.mainAudio.removeAttribute('src');
+    dom.mainAudio.load();
+
+    dom.currentPodcastTitle.textContent = '导入一篇文章，或从左侧选择一期播客开始收听';
+    state.currentMetaBaseText = '尚无已选播客';
+    dom.currentPodcastMeta.textContent = state.currentMetaBaseText;
+    renderCurrentPodcastBadges(null);
+    dom.currentPodcastSummary.textContent = '';
+    dom.currentPodcastSummary.classList.add('hidden');
+
+    dom.currentTime.textContent = '00:00';
+    dom.totalDuration.textContent = '00:00';
+    setSeekProgress(0);
+    dom.seekSlider.disabled = true;
+    dom.btnPlayPause.disabled = true;
+    dom.btnRewind10.disabled = true;
+    dom.btnForward10.disabled = true;
+    if (dom.btnBgmMode) dom.btnBgmMode.disabled = true;
+    dom.btnSpeed.disabled = true;
+    dom.btnCopyMarkdown.disabled = true;
+    dom.btnDownloadAudio.removeAttribute('href');
+    dom.btnDownloadAudio.classList.add('is-disabled');
+    dom.btnDownloadAudio.setAttribute('aria-disabled', 'true');
+
+    setDeckPlaying(false);
+    dom.playerDeck.dataset.speaker = 'none';
+    dom.miniTitle.textContent = 'AI 妙听双人播客';
+    dom.miniTime.textContent = '00:00 / 00:00';
+    if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.speaker = 'none';
+    updateMobileMiniVisibility();
+
+    dom.subtitlesList.textContent = '';
+    state.subtitleElements = [];
+    const empty = document.createElement('div');
+    empty.className = 'subtitles-empty';
+    const p = document.createElement('p');
+    p.textContent = '还没有已选播客，从左侧导入一篇文章即可生成双人对话播客。';
+    empty.appendChild(p);
+    dom.subtitlesList.appendChild(empty);
+  }
+
+  function createDeleteIconSvg() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '14');
+    svg.setAttribute('height', '14');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.7');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    poly.setAttribute('points', '3 6 5 6 21 6');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2');
+    svg.append(poly, path);
+    return svg;
+  }
+
+  async function handleDeletePodcast(podcastId) {
+    if (!podcastId || state.deletingPodcastId === podcastId) return;
+    state.deletingPodcastId = podcastId;
+    renderHistoryList();
+    try {
+      await apiJson(`/api/podcasts/${encodeURIComponent(podcastId)}`, { method: 'DELETE' });
+      state.deletedPodcastIds.add(podcastId);
+      state.historySelectSeq += 1;
+      const deletedActive = state.currentPodcast?.id === podcastId;
+      state.historyItems = state.historyItems.filter((item) => item.id !== podcastId);
+      state.pendingDeleteId = null;
+      state.deletingPodcastId = null;
+      if (deletedActive) resetPlayerToEmptyState();
+      renderHistoryList();
+      showToast('已删除该期本地播客');
+      if (deletedActive && state.historyItems.length > 0) {
+        await handleSelectHistory(state.historyItems[0].id);
+      }
+    } catch (err) {
+      showToast(err.message || '删除播客失败');
+      state.pendingDeleteId = null;
+      renderHistoryList();
+    } finally {
+      state.deletingPodcastId = null;
+    }
+  }
+
   function renderHistoryList() {
     const items = state.historyItems;
     dom.historyCount.textContent = `${items.length} 集`;
@@ -1552,14 +1878,15 @@
     }
 
     items.forEach((item) => {
+      const row = document.createElement('div');
+      row.className = 'history-row';
+      const isCurrent = state.currentPodcast?.id === item.id;
+      if (isCurrent) row.classList.add('is-active');
+
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'history-item';
-      const isCurrent = state.currentPodcast?.id === item.id;
-      if (isCurrent) {
-        btn.classList.add('is-active');
-        btn.setAttribute('aria-current', 'true');
-      }
+      if (isCurrent) btn.setAttribute('aria-current', 'true');
 
       const title = document.createElement('span');
       title.className = 'history-item-title';
@@ -1567,24 +1894,73 @@
 
       const meta = document.createElement('span');
       meta.className = 'history-item-meta';
+      const sourceLabel = SOURCE_TYPE_LABELS[item.sourceType];
+      if (sourceLabel) {
+        const tag = document.createElement('span');
+        tag.className = 'history-source-tag';
+        tag.textContent = sourceLabel;
+        meta.appendChild(tag);
+      }
       const parts = [
         `${item.sentenceCount || 0} 句`,
         formatTime(item.totalDuration || 0),
         formatDateLabel(item.createAt),
       ].filter(Boolean);
-      meta.textContent = parts.join(' · ');
+      const textSpan = document.createElement('span');
+      textSpan.textContent = parts.join(' · ');
+      meta.appendChild(textSpan);
 
       btn.append(title, meta);
-      btn.addEventListener('click', () => handleSelectHistory(item.id));
-      dom.historyList.appendChild(btn);
+      btn.addEventListener('click', () => {
+        state.pendingDeleteId = null;
+        handleSelectHistory(item.id);
+      });
+      row.appendChild(btn);
+
+      if (state.pendingDeleteId === item.id) {
+        const confirmGroup = document.createElement('div');
+        confirmGroup.className = 'history-delete-confirm';
+        const deletingNow = state.deletingPodcastId === item.id;
+        const confirmBtn = createActionBtn(
+          deletingNow ? '删除中…' : '删除',
+          'btn btn-danger-ghost btn-sm',
+          () => handleDeletePodcast(item.id)
+        );
+        confirmBtn.disabled = deletingNow;
+        const cancelBtn = createActionBtn('取消', 'btn btn-ghost btn-sm', () => {
+          state.pendingDeleteId = null;
+          renderHistoryList();
+        });
+        cancelBtn.disabled = deletingNow;
+        confirmGroup.append(confirmBtn, cancelBtn);
+        row.appendChild(confirmGroup);
+      } else {
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'history-delete-btn';
+        delBtn.title = `删除《${item.podcastTitle || '未命名播客'}》`;
+        delBtn.setAttribute('aria-label', `删除播客 ${item.podcastTitle || '未命名播客'}`);
+        delBtn.appendChild(createDeleteIconSvg());
+        delBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          state.pendingDeleteId = item.id;
+          renderHistoryList();
+        });
+        row.appendChild(delBtn);
+      }
+
+      dom.historyList.appendChild(row);
     });
   }
 
   async function handleSelectHistory(podcastId) {
+    const reqSeq = ++state.historySelectSeq;
     try {
       const podcast = await apiJson(`/api/podcasts/${encodeURIComponent(podcastId)}`);
+      if (reqSeq !== state.historySelectSeq || state.deletedPodcastIds.has(podcastId)) return;
       loadPodcast(podcast, { autoplay: false });
     } catch (err) {
+      if (reqSeq !== state.historySelectSeq || state.deletedPodcastIds.has(podcastId)) return;
       showToast(err.message || '读取播客详情失败');
     }
   }
@@ -1619,6 +1995,7 @@
     dom.currentPodcastTitle.textContent = podcast.podcastTitle || 'AI 妙听双人播客';
     state.currentMetaBaseText = `共 ${sentences.length} 句对话 · 全长 ${formatTime(podcast.totalDuration || 0)}`;
     dom.currentPodcastMeta.textContent = state.currentMetaBaseText;
+    renderCurrentPodcastBadges(podcast);
 
     if (podcast.summary) {
       dom.currentPodcastSummary.textContent = podcast.summary;
@@ -2711,6 +3088,19 @@
     }
     if (dom.btnClearImages) dom.btnClearImages.addEventListener('click', clearSelectedImages);
     if (dom.btnExtractImages) dom.btnExtractImages.addEventListener('click', handleExtractImages);
+    if (dom.btnCancelExtractImages) {
+      dom.btnCancelExtractImages.addEventListener('click', () => {
+        state.extractAbortController?.abort();
+      });
+    }
+    dom.confirmStyleButtons?.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const nextStyle = btn.dataset.podcastStyle === 'dialogue' ? 'dialogue' : 'deep_dive';
+        state.podcastStyle = nextStyle;
+        writeStorage(STORAGE_KEYS.podcastStyle, nextStyle);
+        updatePodcastStyleUI();
+      });
+    });
 
     document.addEventListener('paste', (e) => {
       if (!dom.settingsModal.classList.contains('hidden')) return;
@@ -3005,6 +3395,7 @@
     initWaveformBars();
     hydrateTtsControlsFromCatalog();
     updateApiKeyStatus();
+    updatePodcastStyleUI();
     updateTextCounter();
     renderImageSelection();
     bindEvents();

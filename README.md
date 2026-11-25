@@ -64,6 +64,8 @@ HOST=0.0.0.0 npm start
 
 界面在视口宽度 `≤ 900px` 时会自动切换为单栏触控布局。
 
+> 为保护本机历史播客，在通过 `HOST=0.0.0.0` 开放局域网试听时，非本机（非 loopback）客户端仅被限制删除本地历史播客（`DELETE /api/podcasts/:id` 会返回 `403`，浏览列表、播放试听与任务生成等接口不受影响）。如需允许局域网设备执行删除，请在服务端配置 `ADMIN_TOKEN`，并在请求头中传入 `Authorization: Bearer <token>` 或 `X-Admin-Token`。
+
 ---
 
 ## 环境变量说明
@@ -74,6 +76,7 @@ HOST=0.0.0.0 npm start
 |---|---|---|
 | `PORT` | `3000` | 服务监听端口（`0` 表示由系统分配随机空闲端口） |
 | `HOST` | `127.0.0.1` | 服务绑定地址；局域网手机访问可设为 `0.0.0.0` |
+| `ADMIN_TOKEN` | 空 | 局域网删除管理令牌；未配置时仅允许本机（loopback）删除播客，配置后局域网客户端需带 `Authorization: Bearer <token>` 或 `X-Admin-Token` 方可执行 `DELETE /api/podcasts/:id` |
 | `DATA_DIR` | `./data` | 运行时任务状态（`tasks/*.json`）与单句缓存（`tts-cache/*.mp3`）目录 |
 | `PODCASTS_DIR` | `./public/podcasts` | 成品播客音频与 `meta.json` 存放目录 |
 | `DEEPSEEK_API_KEY` | 空 | 服务端默认兜底 API Key（仅当浏览器设置留空且未改接口地址时生效） |

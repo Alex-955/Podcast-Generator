@@ -114,6 +114,17 @@
               </div>
             </div>
             <div id="imagePreviewStrip" class="image-preview-strip hidden" aria-live="polite"></div>
+            <div id="imageProgressPanel" class="activity-panel hidden" aria-live="polite">
+              <div class="activity-head">
+                <span class="activity-dot" aria-hidden="true"></span>
+                <span id="imageProgressStage" class="activity-stage">正在准备识别…</span>
+                <span id="imageProgressElapsed" class="activity-elapsed">0s</span>
+                <button type="button" id="btnCancelExtractImages" class="btn btn-ghost btn-sm">取消</button>
+              </div>
+              <div class="activity-bar-track">
+                <div id="imageProgressFill" class="activity-bar-fill"></div>
+              </div>
+            </div>
             <div class="text-footer image-footer">
               <span id="imageSelectionMeta" class="char-counter">尚未选择图片</span>
               <div class="image-actions-group">
@@ -160,6 +171,15 @@
 
           <p id="confirmExcerpt" class="confirm-excerpt"></p>
 
+          <div id="confirmStyleRow" class="confirm-style-row">
+            <span class="confirm-style-label">节目风格</span>
+            <div id="confirmStyleGroup" class="style-pill-group" role="radiogroup" aria-label="播客表达风格">
+              <button type="button" class="style-pill is-active" data-podcast-style="deep_dive" role="radio" aria-checked="true" title="小晓 7:3 深度主讲 + 阿泽精准追问 · 贴近 AI 妙听">深度主讲</button>
+              <button type="button" class="style-pill" data-podcast-style="dialogue" role="radio" aria-checked="false" title="阿泽与小晓 5:5 轻快接力对谈">轻松对谈</button>
+            </div>
+            <span id="confirmStyleDesc" class="confirm-style-desc">7:3 主讲拆解 + 主持追问 · 贴近 AI 妙听</span>
+          </div>
+
           <div class="confirm-tools-row">
             <button type="button" id="btnToggleFullPreview" class="link-toggle hidden" aria-expanded="false">
               <span>展开全文预览</span>
@@ -173,6 +193,9 @@
           </div>
 
           <div id="polishBanner" class="inline-callout is-polish hidden" aria-live="polite">
+            <div id="polishProgressBar" class="activity-bar-track is-compact hidden">
+              <div id="polishProgressFill" class="activity-bar-fill"></div>
+            </div>
             <p id="polishBannerText" class="callout-msg"></p>
             <div id="polishBannerActions" class="callout-actions"></div>
           </div>
@@ -315,6 +338,7 @@
           <div class="episode-info">
             <div class="episode-meta-row">
               <span id="currentPodcastMeta" class="episode-meta">尚无已选播客</span>
+              <div id="currentPodcastBadges" class="episode-meta-badges hidden" aria-label="本集播客属性"></div>
             </div>
             <h2 id="currentPodcastTitle" class="episode-title">导入一篇文章，或从左侧选择一期播客开始收听</h2>
             <p id="currentPodcastSummary" class="episode-summary hidden"></p>

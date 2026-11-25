@@ -4,7 +4,7 @@ const { createHash } = require('node:crypto');
 const { isValidMp3, getMp3DurationSeconds } = require('./mp3Utils');
 const { atomicWrite } = require('./atomicWrite');
 
-function speechScopeHash(endpoint, credentials, voices, publicVoices, officialEndpoint) {
+function speechScopeHash(endpoint, credentials, voices, publicVoices, officialEndpoint, toneVersion) {
   const normalizedEndpoint = new URL(endpoint).href;
   const scope = [normalizedEndpoint];
   if (normalizedEndpoint !== officialEndpoint || voices.some(voice => !publicVoices.some(item => item.id === voice))) {
@@ -12,13 +12,15 @@ function speechScopeHash(endpoint, credentials, voices, publicVoices, officialEn
     if (apiKey) scope.push(apiKey, '', '');
     else scope.push('', credentials.appId?.trim() || '', credentials.accessKey?.trim() || '');
   }
+  if (typeof toneVersion === 'string' && toneVersion.trim()) scope.push(toneVersion.trim());
   return createHash('sha256').update(JSON.stringify(scope)).digest('hex');
 }
 
-function buildCacheKey({ provider, model, voice, rate = '+0%', pitch = '+0Hz', emotion = '', text, scopeHash }) {
+function buildCacheKey({ provider, model, voice, rate = '+0%', pitch = '+0Hz', emotion = '', text, scopeHash, toneVersion }) {
   const fields = [provider, model, voice, rate, pitch, text].map(value => String(value).trim().normalize('NFC'));
   if (scopeHash) fields.push(scopeHash);
   if (typeof emotion === 'string' && emotion.trim()) fields.push(emotion.trim().normalize('NFC'));
+  if (typeof toneVersion === 'string' && toneVersion.trim()) fields.push(['toneVersion', toneVersion.trim()]);
   return createHash('sha256').update(JSON.stringify(fields)).digest('hex');
 }
 

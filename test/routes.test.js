@@ -70,9 +70,9 @@ test.after(async () => {
   }
 });
 
-async function request(route, status, body) {
-  const res = await fetch(base + '/api/' + route, body === undefined ? {} : {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+async function request(route, status, body, method = body === undefined ? 'GET' : 'POST') {
+  const res = await fetch(base + '/api/' + route, body === undefined ? { method } : {
+    method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
   const json = await res.json();
   assert.equal(res.status, status, JSON.stringify(json));
@@ -207,21 +207,43 @@ test('前端只公开指定的 GET/HEAD 文件，运行目录只通过音频路�
 });
 
 test('创建、单活冲突、取消、续跑、轮询成品、历史与外置静态音频', async () => {
+  const invalidStyle = '节目风格仅支持深度主讲（deep_dive）或轻松对谈（dialogue）';
+  const tasksDir = path.join(publicDir, 'custom-data', 'tasks');
+  const taskFiles = () => fs.existsSync(tasksDir) ? fs.readdirSync(tasksDir) : [];
+  const before = taskFiles();
+  for (const podcastStyle of [null, 123, 'unknown']) {
+    assert.equal((await request('tasks', 400, { ...payload, podcastStyle })).error, invalidStyle);
+  }
+  for (const sourceType of [null, 123, 'other', '', ' \n ']) {
+    assert.equal((await request('tasks', 400, { ...payload, sourceType })).error, '来源类型仅支持 url、text 或 image');
+  }
+  assert.deepEqual(taskFiles(), before);
   generate = ({ signal }) => new Promise((resolve, reject) => {
     signal.addEventListener('abort', () => reject(new Error('迟到的上游失败')), { once: true });
   });
-  const { data: task } = await request('tasks', 202, payload);
+  const { data: task } = await request('tasks', 202, { ...payload, podcastStyle: ' DIALOGUE ', sourceType: 'image' });
   const route = 'tasks/' + task.id;
   assert.equal(task.status, 'queued');
+  assert.equal(task.podcastStyle, 'dialogue');
+  assert.equal(task.sourceType, 'image');
   assert.equal((await request('tasks', 409, payload)).code, 'TASK_ALREADY_RUNNING');
   await request(route + '/resume', 409, {});
   assert.equal((await request(route + '/cancel', 200, {})).data.status, 'cancelled');
   await request(route + '/cancel', 409, {});
   assert.equal((await request(route, 200)).data.error, null);
   await request(route + '/resume', 400, {});
+  const record = path.join(tasksDir, task.id + '.json');
+  const checkpoint = fs.readFileSync(record, 'utf8');
+  for (const podcastStyle of [null, 123, 'unknown']) {
+    assert.equal((await request(route + '/resume', 400, { apiKey, baseURL, podcastStyle })).error, invalidStyle);
+  }
+  assert.equal(fs.readFileSync(record, 'utf8'), checkpoint);
 
-  generate = async () => ({ podcastTitle: '路由测试', summary: '测试', dialogue: [{ speaker: '阿泽', text: '开场' }] });
-  await request(route + '/resume', 202, { apiKey, baseURL });
+  generate = async ({ podcastStyle }) => {
+    assert.equal(podcastStyle, 'dialogue');
+    return { podcastTitle: '路由测试', summary: '测试', dialogue: [{ speaker: '阿泽', text: '开场' }] };
+  };
+  assert.equal((await request(route + '/resume', 202, { apiKey, baseURL })).data.podcastStyle, 'dialogue');
   let completed;
   for (let i = 0; i < 100; i++) {
     completed = (await request(route, 200)).data;
@@ -231,16 +253,178 @@ test('创建、单活冲突、取消、续跑、轮询成品、历史与外置�
   assert.equal(completed.status, 'completed');
   const detail = (await request('podcasts/' + task.id, 200)).data;
   assert.deepEqual(completed.podcast, detail);
-  assert.equal((await request('podcasts', 200)).data.items[0].id, task.id);
+  assert.equal(detail.podcastStyle, 'dialogue');
+  assert.equal(detail.sourceType, 'image');
+  const { id, sourceType, ttsProvider, ttsModel, voiceMapping } = (await request('podcasts', 200)).data.items[0];
+  assert.deepEqual({ id, sourceType, ttsProvider, ttsModel, voiceMapping }, {
+    id: task.id, sourceType: 'image', ttsProvider: 'offline', ttsModel: 'test', voiceMapping: detail.voiceMapping,
+  });
   for (const url of [detail.fullAudioUrl, detail.sentences[0].audioUrl]) {
     const res = await fetch(base + url);
     assert.equal(res.status, 200);
     assert.deepEqual(Buffer.from(await res.arrayBuffer()), makeMp3(10));
   }
-  assert.ok(fs.existsSync(path.join(publicDir, 'custom-data', 'tasks', task.id + '.json')));
+  assert.ok(fs.existsSync(record));
   assert.ok(fs.existsSync(path.join(publicDir, 'external-audio', task.id, 'meta.json')));
   await request(route + '/resume', 409, { apiKey, baseURL });
   await request(route + '/cancel', 409, {});
+});
+
+test('删除接口只清除指定播客与任务，保留其他播客和语音缓存', async () => {
+  const podcastsDir = path.join(publicDir, 'external-audio');
+  const tasksDir = path.join(publicDir, 'custom-data', 'tasks');
+  const cacheDir = path.join(publicDir, 'custom-data', 'tts-cache');
+  const target = path.join(podcastsDir, 'delete-target');
+  const sibling = path.join(podcastsDir, 'delete-sibling');
+  const taskFile = path.join(tasksDir, 'delete-target.json');
+  const siblingFile = path.join(tasksDir, 'delete-sibling.json');
+  const cacheFile = path.join(cacheDir, 'delete-retained.mp3');
+  const backup = path.join(podcastsDir, 'import-backup');
+  const strayTask = path.join(tasksDir, 'import-backup.json');
+  const audio = makeMp3(2);
+  for (const dir of [target, sibling, tasksDir, cacheDir, backup]) fs.mkdirSync(dir, { recursive: true });
+  for (const dir of [target, sibling]) {
+    fs.writeFileSync(path.join(dir, 'full_podcast.mp3'), audio);
+    fs.writeFileSync(path.join(dir, 'meta.json'), '{}');
+  }
+  fs.symlinkSync(sibling, path.join(target, 'sibling-link'), 'dir');
+  fs.writeFileSync(taskFile, JSON.stringify({ id: 'delete-target', status: 'completed', stage: 'done',
+    input: { mode: 'text' }, progress: {}, sourceContent: '离线正文' }));
+  fs.writeFileSync(siblingFile, '{}');
+  fs.writeFileSync(cacheFile, audio);
+  fs.writeFileSync(path.join(backup, 'original.txt'), '备份');
+  fs.writeFileSync(strayTask, '{}');
+
+  const remove = (id, status) => request('podcasts/' + id, status, undefined, 'DELETE');
+  assert.equal((await remove('..%2Fdelete-target', 400)).error, '无效的资源 ID');
+  assert.equal((await remove('delete-missing', 404)).error, '播客不存在');
+  assert.equal((await remove('import-backup', 404)).error, '播客不存在');
+  assert.equal(fs.readFileSync(path.join(backup, 'original.txt'), 'utf8'), '备份');
+  assert.equal(fs.readFileSync(strayTask, 'utf8'), '{}');
+  assert.deepEqual(await remove('delete-target', 200), { success: true, data: { id: 'delete-target', deleted: true } });
+  assert.equal(fs.existsSync(target), false);
+  assert.equal(fs.existsSync(taskFile), false);
+  assert.deepEqual(fs.readFileSync(path.join(sibling, 'full_podcast.mp3')), audio);
+  assert.equal(fs.readFileSync(siblingFile, 'utf8'), '{}');
+  assert.deepEqual(fs.readFileSync(cacheFile), audio);
+  await remove('delete-target', 404);
+  await request('podcasts/delete-target', 404);
+  await request('podcasts/delete-sibling', 200);
+});
+
+test('生成中的任务拒绝删除，取消后可删除仅有任务记录的播客', async () => {
+  generate = ({ signal }) => new Promise((_, reject) => {
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+  });
+  const { data: task } = await request('tasks', 202, payload);
+  const route = 'podcasts/' + task.id;
+  try {
+    assert.equal((await request(route, 409, undefined, 'DELETE')).error, '当前播客正在生成中，请先取消后再删除');
+    const tasksDir = path.join(publicDir, 'custom-data', 'tasks');
+    const uppercase = task.id.toUpperCase();
+    const aliasExists = fs.existsSync(path.join(tasksDir, uppercase + '.json'));
+    await request('podcasts/' + uppercase, aliasExists ? 409 : 404, undefined, 'DELETE');
+    assert.ok(fs.existsSync(path.join(tasksDir, task.id + '.json')));
+  } finally {
+    await request('tasks/' + task.id + '/cancel', 200, {});
+  }
+  assert.deepEqual((await request(route, 200, undefined, 'DELETE')).data, { id: task.id, deleted: true });
+  await request('tasks/' + task.id, 404);
+});
+
+test('续跑时锁住原来以大写保存的任务文件和播客目录', { timeout: 5000 }, async () => {
+  const id = 'restore-lower-id';
+  const alias = id.toUpperCase();
+  const tasksDir = path.join(publicDir, 'custom-data', 'tasks');
+  const podcastsDir = path.join(publicDir, 'external-audio');
+  const upperFile = path.join(tasksDir, alias + '.json');
+  const lowerFile = path.join(tasksDir, id + '.json');
+  const upperDir = path.join(podcastsDir, alias);
+  fs.mkdirSync(upperDir, { recursive: true });
+  const marker = path.join(upperDir, 'original.mp3');
+  fs.writeFileSync(marker, makeMp3(2));
+  const record = { id, status: 'failed', stage: 'script', input: { mode: 'text' }, progress: {}, sourceContent: '离线正文' };
+  fs.writeFileSync(upperFile, JSON.stringify(record));
+  const isAlias = fs.existsSync(lowerFile);
+  if (!isAlias) fs.copyFileSync(upperFile, lowerFile);
+  let started;
+  const enteredScript = new Promise(resolve => { started = resolve; });
+  generate = ({ signal }) => new Promise((_, reject) => {
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    started();
+  });
+
+  await request('tasks/' + id + '/resume', 202, { apiKey, baseURL });
+  try {
+    await enteredScript;
+    if (isAlias) {
+      // Atomic checkpoint writes can adopt the lowercase spelling during resume.
+      const intermediate = path.join(tasksDir, id + '.tmp');
+      fs.renameSync(lowerFile, intermediate);
+      fs.renameSync(intermediate, upperFile);
+    }
+    assert.ok(fs.readdirSync(tasksDir).includes(alias + '.json'));
+    const checkpoint = fs.readFileSync(upperFile, 'utf8');
+    assert.equal(JSON.parse(fs.readFileSync(lowerFile)).status, 'running');
+    assert.equal(JSON.parse(checkpoint).id, id);
+    await request('podcasts/' + alias, isAlias ? 409 : 404, undefined, 'DELETE');
+    assert.equal(fs.readFileSync(upperFile, 'utf8'), checkpoint);
+    assert.deepEqual(fs.readFileSync(marker), makeMp3(2));
+  } finally {
+    await request('tasks/' + id + '/cancel', 200, {});
+  }
+});
+
+test('删除鉴权使用套接字回环地址或配置的管理令牌', async t => {
+  const { createApp, isLoopbackAddress } = require('../server');
+  for (const address of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) assert.equal(isLoopbackAddress(address), true);
+  for (const address of ['127.0.0.2', '192.168.0.10', '::ffff:192.168.0.10', undefined]) assert.equal(isLoopbackAddress(address), false);
+  const configuredToken = 'fixture-admin-secret';
+  const wrongToken = 'fixture-incorrect-secret';
+  const xHeader = 'fixture-x-secret';
+  const authHeader = 'fixture-auth-secret';
+  const calls = [];
+  async function listen(options) {
+    const app = createApp({ ...options, taskManager: {
+      deletePodcast(id) {
+        calls.push(id);
+        if (id === 'redaction') throw Object.assign(new Error([configuredToken, xHeader, authHeader].join(' ')), { statusCode: 409 });
+        return { id, deleted: true };
+      },
+    } });
+    const local = app.listen(0, '127.0.0.1');
+    await once(local, 'listening');
+    t.after(() => new Promise(resolve => local.close(resolve)));
+    return async (id, status, headers = {}) => {
+      const res = await fetch('http://127.0.0.1:' + local.address().port + '/api/podcasts/' + id, { method: 'DELETE', headers });
+      const json = await res.json();
+      assert.equal(res.status, status);
+      for (const token of [configuredToken, wrongToken, xHeader, authHeader]) assert.ok(!JSON.stringify(json).includes(token));
+      return json;
+    };
+  }
+  const local = await listen({ adminToken: configuredToken });
+  assert.equal((await local('loopback', 200)).data.deleted, true);
+  assert.deepEqual(await local('redaction', 409, { 'X-Admin-Token': xHeader, Authorization: 'Bearer ' + authHeader }),
+    { success: false, error: '*** *** ***' });
+  const nonLoopback = { isLoopbackRequest: () => false };
+  const defaultRemote = await listen({ ...nonLoopback, adminToken: '' });
+  const spoofed = { 'X-Forwarded-For': '127.0.0.1', Host: 'localhost' };
+  for (const headers of [{}, spoofed]) {
+    assert.deepEqual(await defaultRemote('remote', 403, headers), { success: false,
+      error: '为保护本地播客，局域网设备默认禁止删除历史播客，请在启动服务的电脑本机删除' });
+  }
+  setEnv(t, { ADMIN_TOKEN: ` ${configuredToken} ` });
+  const managedRemote = await listen(nonLoopback);
+  for (const headers of [{}, { 'X-Admin-Token': wrongToken }, { Authorization: 'Bearer ' + wrongToken }, spoofed]) {
+    assert.deepEqual(await managedRemote('remote', 403, headers), { success: false,
+      error: '局域网客户端无权删除本地播客，请在本机操作或提供有效管理令牌' });
+  }
+  for (const [id, headers] of [['bearer', { Authorization: 'Bearer ' + configuredToken }],
+    ['admin-header', { 'X-Admin-Token': configuredToken }]]) {
+    assert.deepEqual(await managedRemote(id, 200, headers), { success: true, data: { id, deleted: true } });
+  }
+  assert.deepEqual(calls, ['loopback', 'redaction', 'bearer', 'admin-header']);
 });
 
 test('语音服务目录实时报告配置状态，创建任务同步拒绝缺失凭据与端点错配', async t => {
@@ -463,12 +647,13 @@ test('正文润色路由返回脱敏结果，并在无正文时不调用上游',
     assert.equal(url, baseURL + '/v1/chat/completions');
     assert.equal(options.method, 'POST');
     assert.equal(options.headers.Authorization, 'Bearer ' + apiKey);
-    return response(completion(JSON.stringify({ content: '正文。', changeSummary: '修正标点 ' + baseURL })));
+    return response(completion(JSON.stringify({ edits: [{ find: '这里是路由测试用的正文', replace: '这里是路由测试用的正文。' }],
+      changeSummary: '修正标点 ' + baseURL })));
   });
-  const body = { apiKey, baseURL, title: '原始标题', content: '正文' };
+  const body = { apiKey, baseURL, title: '原始标题', content: '这里是路由测试用的正文' };
   const polished = await request('polish-text', 200, body);
   assert.deepEqual(polished, { success: true, data: {
-    title: '原始标题', content: '正文。', length: 3, truncated: false, changeSummary: '修正标点 ***',
+    title: '原始标题', content: '这里是路由测试用的正文。', length: 12, truncated: false, changeSummary: '修正标点 ***', mode: 'patch', editCount: 1,
   } });
   await request('polish-text', 400, { ...body, content: '' });
   assert.equal(llmRequest.mock.callCount(), 1);

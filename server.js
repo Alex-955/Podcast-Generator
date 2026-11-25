@@ -7,6 +7,7 @@ if (process.env.ALLOW_INSECURE_TLS === '1') {
 const express = require('express');
 const cors = require('cors');
 const path = require('node:path');
+const { createHash, timingSafeEqual } = require('node:crypto');
 const { extractArticle } = require('./src/services/extractor');
 const { extractTextFromImages } = require('./src/services/imageExtractor');
 const { fetchLlmModels } = require('./src/services/llmModels');
@@ -29,8 +30,23 @@ function parsePort(value) {
   return port;
 }
 
+function isLoopbackAddress(address) {
+  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
+}
+
+function bearerToken(req) {
+  return req.get?.('authorization')?.match(/^Bearer\s+(\S+)\s*$/i)?.[1];
+}
+
+function tokenDigest(token) {
+  return createHash('sha256').update(token, 'utf8').digest();
+}
+
 function createApp(options = {}) {
   const app = express();
+  const { adminToken = process.env.ADMIN_TOKEN?.trim() || '',
+    isLoopbackRequest = req => isLoopbackAddress(req.socket?.remoteAddress) } = options;
+  const adminDigest = adminToken && tokenDigest(adminToken);
   const publicDir = path.resolve(options.publicDir || PUBLIC_DIR);
   const dataDir = path.resolve(options.dataDir || process.env.DATA_DIR || path.join(__dirname, 'data'));
   const podcastsDir = path.resolve(options.podcastsDir || process.env.PODCASTS_DIR || path.join(publicDir, 'podcasts'));
@@ -38,6 +54,16 @@ function createApp(options = {}) {
   const manager = options.taskManager || createTaskManager({
     ...options, extractor, podcastsDir, tasksDir: path.join(dataDir, 'tasks'), cacheDir: path.join(dataDir, 'tts-cache'),
   });
+
+  function authorizeDeletion(req, res, next) {
+    if (isLoopbackRequest(req)) return next();
+    if (!adminDigest) {
+      return res.status(403).json({ success: false, error: '为保护本地播客，局域网设备默认禁止删除历史播客，请在启动服务的电脑本机删除' });
+    }
+    const candidates = [req.get('x-admin-token'), bearerToken(req)];
+    if (candidates.some(token => token && timingSafeEqual(adminDigest, tokenDigest(token)))) return next();
+    return res.status(403).json({ success: false, error: '局域网客户端无权删除本地播客，请在本机操作或提供有效管理令牌' });
+  }
 
   const origins = process.env.CORS_ORIGIN?.split(',').map(origin => origin.trim()).filter(Boolean);
   if (origins?.length) {
@@ -89,6 +115,8 @@ function createApp(options = {}) {
   }));
   app.get('/api/podcasts', (req, res) => res.json({ success: true, data: manager.listPodcasts() }));
   app.get('/api/podcasts/:id', (req, res) => res.json({ success: true, data: manager.getPodcast(req.params.id) }));
+  app.delete('/api/podcasts/:id', authorizeDeletion,
+    (req, res) => res.json({ success: true, data: manager.deletePodcast(req.params.id) }));
 
   // Only audio is public here. Historical raw meta.json files can contain local paths.
   app.use('/podcasts', (req, res, next) => {
@@ -109,7 +137,7 @@ function createApp(options = {}) {
     if (err.type === 'entity.parse.failed') detail = '请求体必须是有效 JSON';
     const sensitive = [req.body?.apiKey, req.body?.baseURL, process.env.DEEPSEEK_API_KEY, process.env.LLM_BASE_URL,
       req.body?.visionApiKey, req.body?.visionBaseURL, process.env.VISION_API_KEY, process.env.VISION_BASE_URL,
-      ...ttsSecrets(req.body?.tts ?? {}), dataDir, podcastsDir];
+      ...ttsSecrets(req.body?.tts ?? {}), adminToken, req.get?.('x-admin-token'), bearerToken(req), dataDir, podcastsDir];
     const error = redactSecrets(detail, sensitive);
     const code = typeof err.code === 'string' ? redactSecrets(err.code, sensitive) : undefined;
     res.status(status).json({ success: false, error, code });
@@ -120,6 +148,7 @@ function createApp(options = {}) {
 const app = createApp();
 app.createApp = createApp;
 app.parsePort = parsePort;
+app.isLoopbackAddress = isLoopbackAddress;
 module.exports = app;
 
 if (require.main === module) {

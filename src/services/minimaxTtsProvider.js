@@ -6,6 +6,7 @@ const { synthesizeHttp } = require('./httpTts');
 
 const DEFAULT_MINIMAX_ENDPOINT = 'https://api.minimaxi.com/v1/t2a_v2';
 const DEFAULT_MINIMAX_MODEL = 'speech-2.8-turbo';
+const TONE_RULE_VERSION = 'tone-v2';
 const DEFAULT_MINIMAX_VOICES = { 阿泽: 'male-qn-jingying', 小晓: 'Chinese (Mandarin)_Warm_Bestie' };
 const AVAILABLE_MINIMAX_VOICES = [
   { id: 'male-qn-jingying', name: '精英青年（沉稳自然·阿泽推荐）', gender: 'male' },
@@ -22,14 +23,13 @@ const AVAILABLE_MINIMAX_VOICES = [
 ];
 
 const EMOTIONS = new Map(Object.entries({
-  happy: '笑意 开心 兴奋 喜悦 欢乐',
-  surprised: '惊讶 震惊',
-  sad: '悲伤 伤感 难过 低落',
-  angry: '生气 愤怒 气愤',
-  fearful: '害怕 恐惧 紧张',
-  disgusted: '厌恶 嫌弃',
-  neutral: '平静 温和 认真 好奇 疑惑 追问 感慨 温暖 肯定 笃定 分析 客观 总结',
-}).flatMap(([value, aliases]) => [value, ...aliases.split(' ')].map(tag => [tag, value])));
+  happy: 'happy 笑意 开心 喜悦 欢乐',
+  sad: 'sad 悲伤 伤感 难过 低落',
+  angry: 'angry 生气 愤怒 气愤',
+  fearful: 'fearful 害怕 恐惧 紧张',
+  disgusted: 'disgusted 厌恶 嫌弃',
+  neutral: 'neutral 平静 温和 认真 好奇 疑惑 追问 感慨 温暖 肯定 笃定 分析 客观 总结 兴奋 惊讶 震惊 surprised',
+}).flatMap(([value, aliases]) => aliases.split(' ').map(tag => [tag, value])));
 
 async function readAudio(response, limit) {
   const body = await readJson(response, limit);
@@ -53,6 +53,7 @@ async function readAudio(response, limit) {
 function createMinimaxProvider(options = {}) {
   return {
     id: 'minimax', name: 'MiniMax Speech', requiresAuth: true, authModes: ['apiKey'],
+    toneVersion: TONE_RULE_VERSION,
     model: options.model || DEFAULT_MINIMAX_MODEL,
     availableModels: ['speech-02-hd', 'speech-02-turbo', 'speech-2.8-hd', 'speech-2.8-turbo'],
     defaultVoices: DEFAULT_MINIMAX_VOICES, availableVoices: AVAILABLE_MINIMAX_VOICES,
@@ -64,7 +65,7 @@ function createMinimaxProvider(options = {}) {
     getScopeHash(voices, overrides) {
       const credentials = { ...options, ...overrides };
       const endpoint = credentials.endpoint || DEFAULT_MINIMAX_ENDPOINT;
-      return speechScopeHash(endpoint, credentials, voices, AVAILABLE_MINIMAX_VOICES, DEFAULT_MINIMAX_ENDPOINT);
+      return speechScopeHash(endpoint, credentials, voices, AVAILABLE_MINIMAX_VOICES, DEFAULT_MINIMAX_ENDPOINT, TONE_RULE_VERSION);
     },
     async synthesizeToFile({ text, voice, rate, emotion, outputPath, signal, adapterOptions }) {
       if (signal?.aborted) throw new TtsCancelledError();

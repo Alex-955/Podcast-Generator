@@ -28,16 +28,17 @@ function writeEntry(dir, index, frames, { header = HEADER_24K, frameSize = FRAME
   return { filePath, fileName, speaker: index % 2 === 0 ? '阿泽' : '小晓', text: `第${index}句台词` };
 }
 
-function setupEntries(frameCounts, options) {
+function setupEntries(t, frameCounts, options) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'timeline-test-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return {
     dir,
     entries: frameCounts.map((frames, i) => writeEntry(dir, i, frames, options)),
   };
 }
 
-test('B0-5：0.35s gap 量化为 15 帧 / 0.36s，时间轴与合并器同口径', () => {
-  const { dir, entries } = setupEntries([50, 25, 125]); // 1.2s / 0.6s / 3.0s
+test('B0-5：0.35s gap 量化为 15 帧 / 0.36s，时间轴与合并器同口径', t => {
+  const { entries } = setupEntries(t, [50, 25, 125]); // 1.2s / 0.6s / 3.0s
   const timeline = buildSentenceTimeline(entries);
 
   assert.strictEqual(timeline.measurement, 'mp3-frame-count');
@@ -63,8 +64,8 @@ test('B0-5：0.35s gap 量化为 15 帧 / 0.36s，时间轴与合并器同口径
   assert.strictEqual(silence.length, 15 * FRAME_SIZE_24K);
 });
 
-test('B0-5：20 段时间轴单调无漂移', () => {
-  const { entries } = setupEntries(Array.from({ length: 20 }, () => 10)); // 每段 0.24s
+test('B0-5：20 段时间轴单调无漂移', t => {
+  const { entries } = setupEntries(t, Array.from({ length: 20 }, () => 10)); // 每段 0.24s
   const timeline = buildSentenceTimeline(entries);
 
   assert.strictEqual(timeline.sentences.length, 20);
@@ -86,8 +87,8 @@ test('B0-5：20 段时间轴单调无漂移', () => {
   approx(timeline.totalDuration, 20 * 0.24 + 19 * 0.36);
 });
 
-test('B0-5：100 段时间轴单调无漂移', () => {
-  const { entries } = setupEntries(Array.from({ length: 100 }, () => 10));
+test('B0-5：100 段时间轴单调无漂移', t => {
+  const { entries } = setupEntries(t, Array.from({ length: 100 }, () => 10));
   const timeline = buildSentenceTimeline(entries);
 
   assert.strictEqual(timeline.sentences.length, 100);
@@ -101,15 +102,15 @@ test('B0-5：100 段时间轴单调无漂移', () => {
   approx(timeline.totalDuration, sumDurations + 99 * timeline.sentenceGap);
 });
 
-test('音频片段编码不一致时拒绝生成时间轴', () => {
-  const { dir, entries } = setupEntries([10, 10]);
+test('音频片段编码不一致时拒绝生成时间轴', t => {
+  const { entries } = setupEntries(t, [10, 10]);
   fs.writeFileSync(entries[1].filePath, makeMp3(10, { header: HEADER_48K, frameSize: FRAME_SIZE_48K }));
   entries[1].fileName = 'sentence_001.mp3';
   assert.throws(() => buildSentenceTimeline(entries), /编码格式与其他片段不一致/);
 });
 
-test('非 MP3 片段拒绝生成时间轴', () => {
-  const { dir, entries } = setupEntries([10]);
+test('非 MP3 片段拒绝生成时间轴', t => {
+  const { entries } = setupEntries(t, [10]);
   fs.writeFileSync(entries[0].filePath, '这不是 MP3 数据');
   assert.throws(() => buildSentenceTimeline(entries), /不是有效 MP3/);
 });
@@ -119,8 +120,7 @@ test('空列表拒绝生成时间轴', () => {
 });
 
 test('单独调用拼接器时拒绝尾帧被截断的片段，已有成品保持原样', t => {
-  const { dir, entries } = setupEntries([4, 3]);
-  t.after(() => fs.rmSync(dir, { recursive: true }));
+  const { dir, entries } = setupEntries(t, [4, 3]);
   const files = entries.map(entry => entry.filePath);
   const output = path.join(dir, 'full_podcast.mp3');
   concatenateAudioFiles(files, output);
@@ -132,8 +132,7 @@ test('单独调用拼接器时拒绝尾帧被截断的片段，已有成品保�
 
 test('多段带 ID3v2 头、ID3v1 尾的音频拼接后可逐帧解析，字幕与成品时长一致', t => {
   const counts = [10, 15, 20];
-  const { entries, dir } = setupEntries(counts);
-  t.after(() => fs.rmSync(dir, { recursive: true }));
+  const { entries, dir } = setupEntries(t, counts);
   // 4096 字节元数据体超过旧时间轴从原始文件扫描首帧的范围。
   const header = Buffer.concat([Buffer.from([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 32, 0]), Buffer.alloc(4096)]);
   const tail = Buffer.concat([Buffer.from('TAG'), Buffer.alloc(125)]);
@@ -152,8 +151,7 @@ test('多段带 ID3v2 头、ID3v1 尾的音频拼接后可逐帧解析，字幕�
 });
 
 test('同采样率的不同码率片段按实际帧数合并，与时间轴一致', t => {
-  const { dir, entries } = setupEntries([5]);
-  t.after(() => fs.rmSync(dir, { recursive: true }));
+  const { dir, entries } = setupEntries(t, [5]);
   entries.push(writeEntry(dir, 1, 7, { header: Buffer.from([0xff, 0xf3, 0x84, 0xc0]), frameSize: 192 }));
   const timeline = buildSentenceTimeline(entries);
   const file = path.join(dir, 'full_podcast.mp3');
@@ -172,8 +170,7 @@ test('同采样率的不同码率片段按实际帧数合并，与时间轴一�
 });
 
 test('Xing、Info 和 VBRI 单段统计不计入字幕与完整节目时长', t => {
-  const { dir, entries } = setupEntries([7, 9, 10]);
-  t.after(() => fs.rmSync(dir, { recursive: true }));
+  const { dir, entries } = setupEntries(t, [7, 9, 10]);
   const tags = ['Xing', 'Info', 'VBRI'];
   for (const [index, entry] of entries.entries()) {
     const tag = makeMp3(1);

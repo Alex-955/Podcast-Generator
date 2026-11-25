@@ -104,9 +104,12 @@ test('豆包 2.0 的情绪提示使用 additions JSON 字符串，旧资源和�
   const { endpoint, outputPath, requests } = await httpTtsFixture(t, res =>
     res.end(JSON.stringify({ code: 20000000, data: audio.toString('base64') })));
   assert.deepEqual(provider.defaultVoices, { 阿泽: 'zh_male_taocheng_uranus_bigtts', 小晓: 'zh_female_vv_uranus_bigtts' });
+  const restrainedCue = '用自然生动、略有兴致的播客聊天语气，克制平稳，切勿夸张惊呼或突然拔高音量';
   for (const [options, emotion, cue] of [
     [{}, ' 温暖 ', '用真诚温暖、娓娓道来的朋友聊天语气，音量清晰平稳不要压低变小'],
-    [{ resourceId: 'seed-tts-2.0-concurr' }, '兴奋', '用略带惊喜、生动自然的播客口吻，但音量保持平稳不突然拔高'],
+    [{ resourceId: 'seed-tts-2.0-concurr' }, '兴奋', restrainedCue],
+    [{}, '惊讶', restrainedCue],
+    [{}, '震惊', restrainedCue],
     [{}, '诚恳', '用自然生动的诚恳播客聊天语气，音量保持清晰平稳'],
     [{}, ' '], [{}, undefined], [{ resourceId: 'seed-tts-1.0-concurr' }, '笑意'],
     [{ resourceId: 'volc.service_type.10029' }, '好奇'],

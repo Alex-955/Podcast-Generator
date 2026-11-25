@@ -34,8 +34,10 @@ test('MiniMax 使用新版默认模型与音色，情绪只发送受支持的值
   assert.equal(minimaxProvider.getMinRequestIntervalMs({ endpoint }), 0);
   assert.equal(createMinimaxProvider({ minRequestIntervalMs: 0 }).getMinRequestIntervalMs(), 0);
   for (const [emotion, expected] of [
-    [' 笑意 ', 'happy'], ['震惊', 'surprised'], ['低落', 'sad'], ['愤怒', 'angry'], ['紧张', 'fearful'],
-    ['嫌弃', 'disgusted'], ['追问', 'neutral'], ['HAPPY', 'happy'], ['', undefined], ['未知', undefined], [undefined, undefined],
+    [' 笑意 ', 'happy'], ['开心', 'happy'], ['喜悦', 'happy'], ['欢乐', 'happy'],
+    ['震惊', 'neutral'], ['惊讶', 'neutral'], ['兴奋', 'neutral'], ['SURPRISED', 'neutral'],
+    ['低落', 'sad'], ['愤怒', 'angry'], ['紧张', 'fearful'], ['嫌弃', 'disgusted'], ['追问', 'neutral'],
+    ['HAPPY', 'happy'], ['happy', 'happy'], ['', undefined], ['未知', undefined], [undefined, undefined],
   ]) {
     await minimaxProvider.synthesizeToFile({ text: '测试', emotion, outputPath, adapterOptions: { endpoint, apiKey } });
     const { body } = requests.at(-1);
