@@ -9,6 +9,8 @@ const cors = require('cors');
 const path = require('node:path');
 const { extractArticle } = require('./src/services/extractor');
 const { extractTextFromImages } = require('./src/services/imageExtractor');
+const { fetchLlmModels } = require('./src/services/llmModels');
+const { polishArticleText } = require('./src/services/textPolisher');
 const { createTaskManager } = require('./src/services/taskManager');
 const { InputError, redactSecrets, ttsSecrets } = require('./src/services/validation');
 
@@ -42,22 +44,28 @@ function createApp(options = {}) {
     app.use(cors({ origin: origins, preflightContinue: true }));
     app.options(/^\/api\//, (req, res) => res.sendStatus(204));
   }
-  app.post('/api/extract-image', express.json({ limit: '25mb' }), async (req, res) => {
+  const cancelOnDisconnect = handler => async (req, res) => {
+    if (res.destroyed) return;
     const controller = new AbortController();
     const cancel = () => controller.abort();
     res.once('close', cancel);
     try {
-      const data = await extractTextFromImages(req.body || {}, { ...options, signal: controller.signal });
-      res.json({ success: true, data });
+      const data = await handler(req.body || {}, { ...options, signal: controller.signal });
+      if (!controller.signal.aborted) res.json({ success: true, data });
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
     } finally {
       res.removeListener('close', cancel);
     }
-  });
+  };
+  app.post('/api/extract-image', express.json({ limit: '25mb' }), cancelOnDisconnect(extractTextFromImages));
   app.use('/api', express.json({ limit: '10mb' }));
 
   app.post('/api/llm/test', async (req, res) => {
     res.json({ success: true, data: await testLlmConnection(req.body || {}, options) });
   });
+  app.post('/api/llm/models', cancelOnDisconnect(fetchLlmModels));
+  app.post('/api/polish-text', cancelOnDisconnect(polishArticleText));
   app.post('/api/tts/test', async (req, res) => {
     res.json({ success: true, data: await testTtsConnection(req.body || {}, options) });
   });

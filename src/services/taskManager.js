@@ -5,12 +5,13 @@ const { atomicWrite } = require('./atomicWrite');
 const { extractArticle, assertValidUrl, assertSafeFetchTarget } = require('./extractor');
 const { generatePodcastScript } = require('./scriptEngine');
 const { synthesizeDialogueScript, DEFAULT_VOICES } = require('./ttsService');
-const { getCredentials } = require('./llmCredentials');
+const { getCredentials, llmSecrets, validateLlmSettings } = require('./llmCredentials');
+const { redactProviderDetail } = require('./providerHttp');
 const { getTtsCredentials, resolveVoiceMapping } = require('./ttsCredentials');
 const { getTtsProvider, DEFAULT_PROVIDER_ID } = require('./ttsProvider');
 const { createTtsCache } = require('./ttsCache');
 const { concatenateAudioFiles } = require('./audioMerger');
-const { InputError, validateScriptRequest, redactSecrets, ttsSecrets } = require('./validation');
+const { InputError, validateScriptRequest, ttsSecrets } = require('./validation');
 
 const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
 const STAGES = {
@@ -101,7 +102,8 @@ function publicSentences(id, sentences) {
 
 function createTaskManager({
   tasksDir, podcastsDir, cacheDir, extractor = extractArticle, scriptGenerator = generatePodcastScript,
-  ttsSynthesizer = synthesizeDialogueScript, audioMerger = concatenateAudioFiles, ttsProvider, getTtsProviderById = getTtsProvider,
+  llmRequest, lookup, ttsSynthesizer = synthesizeDialogueScript, audioMerger = concatenateAudioFiles,
+  ttsProvider, getTtsProviderById = getTtsProvider,
 }) {
   const cache = createTtsCache(cacheDir);
   let active = null;
@@ -127,7 +129,8 @@ function createTaskManager({
     const voiceMapping = resolveVoiceMapping(provider, adapterOptions.model, tts.voiceMapping ?? payload.voiceMapping ?? inherited);
     const scopeHash = provider.getScopeHash?.(Object.values(voiceMapping), adapterOptions);
     const settings = { ttsProvider: provider.id, ttsModel: adapterOptions.model, voiceMapping };
-    const secrets = [creds.apiKey, creds.baseURL !== 'https://api.deepseek.com' && creds.baseURL,
+    const llmSensitive = llmSecrets(payload, creds, { includeDefaultBase: false });
+    const secrets = [...llmSensitive,
       ...ttsSecrets(tts), adapterOptions.apiKey, adapterOptions.accessKey, adapterOptions.appId, adapterOptions.endpoint]
       .filter(value => typeof value === 'string' && value.trim()).map(value => value.trim());
     if (containsSecrets(secrets, settings, payload.title, payload.content, payload.url, task?.sourceContent, task?.input, task?.script)) {
@@ -259,7 +262,7 @@ function createTaskManager({
       if (!task.script) {
         enter('script');
         const script = await scriptGenerator({
-          title: task.input.title, content: task.sourceContent, ...creds, signal,
+          title: task.input.title, content: task.sourceContent, ...creds, signal, llmRequest, lookup,
         });
         signal.throwIfAborted();
         if (containsSecrets(speech.secrets, script)) throw new Error('模型返回内容包含敏感凭据，已拦截并中止保存');
@@ -322,9 +325,9 @@ function createTaskManager({
       } else {
         task.status = 'failed';
         task.error = {
-          stage: task.stage, message: redactSecrets(error.path ? '本地文件读写失败' : error.message,
+          stage: task.stage, message: redactProviderDetail(error.path ? '本地文件读写失败' : error.message,
             [...speech.secrets, creds.baseURL, workDir, cacheDir, tasksDir]),
-          retryable: true, failedSegmentIndex: error.segmentIndex ?? null,
+          retryable: error.retryable !== false, failedSegmentIndex: error.segmentIndex ?? null,
         };
       }
       save(task);
@@ -347,9 +350,10 @@ function createTaskManager({
   function createTask(payload = {}) {
     assertIdle();
     const creds = getCredentials(payload);
+    if (!creds.apiKey) throw new InputError('缺少 API Key，请先配置后再生成');
+    validateLlmSettings(payload, creds);
     const speech = resolveSpeech(payload, creds);
     const source = getInput(payload);
-    if (!creds.apiKey) throw new InputError('缺少 API Key，请先配置后再生成');
     const task = {
       id: randomUUID(), status: 'queued', stage: 'extract', ...source, ...speech.settings, ttsScopeHash: speech.scopeHash, script: null,
       progress: { ...stageProgress('extract'), message: '等待生成', completedSegments: 0, totalSegments: 0, cachedSegments: 0 },
@@ -375,6 +379,9 @@ function createTaskManager({
     if (!['failed', 'cancelled'].includes(task.status)) throw httpError(409, '当前任务状态无法续跑');
     const creds = getCredentials(payload);
     if (!task.script && !creds.apiKey) throw new InputError('尚未生成剧本，请先配置 API Key 后再继续');
+    if (!task.script || [payload.apiKey, payload.baseURL, payload.model, payload.visionModel].some(value => value != null)) {
+      validateLlmSettings(payload, creds);
+    }
     const speech = resolveSpeech(payload, creds, task);
     if (speech.changed || task.clearPending) {
       clearAudio(path.join(podcastsDir, id));

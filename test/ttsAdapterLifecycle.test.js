@@ -40,18 +40,23 @@ function makeAdapter(endpoint, overrides = {}) {
 
 /** 给 Promise 套超时保险：生命周期 bug 的典型症状就是 Promise 永不 settle */
 function withTimeout(promise, ms, label) {
+  let timer;
   return Promise.race([
     promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} 超过 ${ms}ms 未 settle`)), ms)),
-  ]);
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} 超过 ${ms}ms 未 settle`)), ms); }),
+  ]).finally(() => clearTimeout(timer));
 }
 
-function runChild(mode) {
-  return spawnSync(process.execPath, [CHILD, mode], { encoding: 'utf8', timeout: 15000 });
+function runChild(t, mode) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'edge-handshake-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return spawnSync(process.execPath, [CHILD, mode], {
+    encoding: 'utf8', timeout: 15000, env: { ...process.env, TMPDIR: dir },
+  });
 }
 
-test('B-F1：握手停在 CONNECTING 时 connect 超时——进程正常退出、明确拒绝、无残留', () => {
-  const r = runChild('timeout');
+test('B-F1：握手停在 CONNECTING 时 connect 超时——进程正常退出、明确拒绝、无残留', t => {
+  const r = runChild(t, 'timeout');
   assert.strictEqual(
     r.status,
     0,
@@ -60,8 +65,8 @@ test('B-F1：握手停在 CONNECTING 时 connect 超时——进程正常退出�
   assert.match(r.stdout, /REJECTED_OK/);
 });
 
-test('B-F1：握手停在 CONNECTING 时取消——进程正常退出、明确拒绝、无残留', () => {
-  const r = runChild('cancel');
+test('B-F1：握手停在 CONNECTING 时取消——进程正常退出、明确拒绝、无残留', t => {
+  const r = runChild(t, 'cancel');
   assert.strictEqual(
     r.status,
     0,
@@ -70,10 +75,11 @@ test('B-F1：握手停在 CONNECTING 时取消——进程正常退出、明确�
   assert.match(r.stdout, /REJECTED_OK:TtsCancelledError/);
 });
 
-test('B-F1：发布（原子 rename）失败必须 settle 拒绝，不悬挂不误发布', async () => {
+test('B-F1：发布（原子 rename）失败必须 settle 拒绝，不悬挂不误发布', async t => {
   const payload = makeMp3(10);
   const fake = await startFakeEdgeTts({ mode: 'ok', payload });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bf1-publish-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const target = path.join(dir, 'sentence_000.mp3');
   fs.mkdirSync(target); // 目标位置被目录占住 → renameSync 必失败
   try {
@@ -85,10 +91,11 @@ test('B-F1：发布（原子 rename）失败必须 settle 拒绝，不悬挂不�
   }
 });
 
-test('B-F1：连接建立后取消——拒绝为 TtsCancelledError 且不留下产物', async () => {
+test('B-F1：连接建立后取消——拒绝为 TtsCancelledError 且不留下产物', async t => {
   const payload = makeMp3(10);
   const fake = await startFakeEdgeTts({ mode: 'late', payload, delayMs: 600 });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bf1-cancel-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const target = path.join(dir, 'sentence_000.mp3');
   const controller = new AbortController();
   setTimeout(() => controller.abort(), 50);
@@ -112,10 +119,11 @@ test('B-F1：连接建立后取消——拒绝为 TtsCancelledError 且不留下
   }
 });
 
-test('B-F2：fake TTS 只发截断 MP3 + turn.end——产物校验拒绝发布', async () => {
+test('B-F2：fake TTS 只发截断 MP3 + turn.end——产物校验拒绝发布', async t => {
   const payload = makeMp3(10);
   const fake = await startFakeEdgeTts({ mode: 'truncated-mp3', payload });
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bf2-trunc-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const target = path.join(dir, 'sentence_000.mp3');
   try {
     await assert.rejects(

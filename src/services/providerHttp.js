@@ -3,7 +3,7 @@ const http = require('node:http');
 const https = require('node:https');
 const dns = require('node:dns/promises');
 const { BlockList, isIP } = require('node:net');
-const { InputError } = require('./validation');
+const { InputError, redactSecrets } = require('./validation');
 
 const reserved = new BlockList();
 for (const [network, bits] of [
@@ -83,10 +83,15 @@ async function* boundedChunks(response, limit) {
   }
 }
 
-async function readJson(response, limit, { allowInvalidJson = false } = {}) {
+async function readText(response, limit) {
   const chunks = [];
   for await (const chunk of boundedChunks(response, limit)) chunks.push(chunk);
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+async function readJson(response, limit, { allowInvalidJson = false } = {}) {
+  const text = await readText(response, limit);
+  try { return JSON.parse(text); }
   catch {
     if (allowInvalidJson) return null;
     throw upstreamError('响应不是有效 JSON');
@@ -97,4 +102,65 @@ function httpStatusError(status) {
   return upstreamError(`HTTP ${status}`, status === 408 || status === 429 || status >= 500, { rateLimited: status === 429 });
 }
 
-module.exports = { ProviderError, checkEndpoint, requestProvider, boundedChunks, readJson, upstreamError, httpStatusError };
+function chatStatusError(status) {
+  if (status === 401 || status === 403) {
+    return upstreamError(`模型接口鉴权失败（HTTP ${status}），请检查 API Key、接口地址和模型访问权限`, false);
+  }
+  if (status === 404) {
+    return upstreamError('所选模型或对话接口不存在（HTTP 404），请检查模型名称和接口地址', false);
+  }
+  if (status === 405) {
+    return upstreamError('接口不支持对话请求（HTTP 405），请填写支持对话的接口地址', false);
+  }
+  return httpStatusError(status);
+}
+
+function checkChatCompletion(data, action) {
+  const reason = data?.choices?.[0]?.finish_reason;
+  if (reason === 'length') throw upstreamError(`${action}结果达到模型输出长度上限，请缩短材料或更换模型后重试`, false);
+  if (reason === 'content_filter') throw upstreamError(`${action}结果因服务商内容过滤而中断，请检查材料后重试`, false);
+}
+
+function redactProviderDetail(text, sensitive) {
+  return redactSecrets(text, sensitive).replace(
+    /(^|[\s"'=(\[：:])(?:\/[\w.~@%+-]+\/[^\s"'<>),，。]*|[a-z]:[\\/][^\s"'<>),，。]+)/gi,
+    '$1***'
+  );
+}
+
+async function withProviderResponse(endpoint, request, {
+  llmRequest, timeoutMs, signal, lookup, sensitive, timeoutMessage, connectionMessage,
+}, readResponse) {
+  const controller = new AbortController();
+  const cancel = () => controller.abort(signal.reason);
+  let response, timer;
+  try {
+    signal?.throwIfAborted();
+    signal?.addEventListener('abort', cancel, { once: true });
+    timer = setTimeout(() => controller.abort(), timeoutMs);
+    response = await llmRequest(endpoint, { ...request, signal: controller.signal, lookup });
+    controller.signal.throwIfAborted();
+    const result = await readResponse(response);
+    controller.signal.throwIfAborted();
+    return result;
+  } catch (error) {
+    if (signal?.aborted) throw new DOMException('请求已取消', 'AbortError');
+    if (controller.signal.aborted) throw upstreamError(timeoutMessage);
+    if (error instanceof InputError) throw new InputError(redactProviderDetail(error.message, sensitive));
+    if (error instanceof ProviderError) {
+      throw upstreamError(redactProviderDetail(error.message, sensitive), error.retryable, {
+        rateLimited: error.rateLimited, retryAfterMs: error.retryAfterMs,
+      });
+    }
+    throw upstreamError(connectionMessage);
+  } finally {
+    response?.destroy();
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', cancel);
+  }
+}
+
+module.exports = {
+  ProviderError, checkEndpoint, requestProvider, boundedChunks, readText, readJson, upstreamError, httpStatusError,
+  chatStatusError, checkChatCompletion, redactProviderDetail, withProviderResponse,
+};

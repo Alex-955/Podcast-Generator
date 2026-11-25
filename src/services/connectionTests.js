@@ -1,47 +1,31 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
-const { InputError, redactSecrets, ttsSecrets } = require('./validation');
-const { getCredentials } = require('./llmCredentials');
+const { InputError, ttsSecrets } = require('./validation');
+const { checkPublicModel, getCredentials, llmSecrets, validateLlmSettings } = require('./llmCredentials');
 const { getTtsCredentials, resolveVoiceMapping } = require('./ttsCredentials');
 const { getTtsProvider, resolveDefaultProviderId } = require('./ttsProvider');
-const { ProviderError, requestProvider, readJson, upstreamError, httpStatusError } = require('./providerHttp');
+const { ProviderError, chatStatusError, redactProviderDetail, requestProvider, readJson, upstreamError } = require('./providerHttp');
 const { analyzeMp3 } = require('./mp3Utils');
 
-function checkPublicModel(model, credentials, sensitiveValues = []) {
-  const secrets = [...ttsSecrets(credentials), credentials.baseURL, process.env.DEEPSEEK_API_KEY, process.env.LLM_BASE_URL, ...sensitiveValues];
-  if (!/^[\w.:-]+(?:\/[\w.:-]+)*$/.test(model) || redactSecrets(model, secrets) !== model) {
-    throw new InputError('模型名称无效或包含敏感配置');
-  }
-}
-
-async function testLlmConnection(payload, { llmRequest = requestProvider } = {}) {
+async function testLlmConnection(payload, { llmRequest = requestProvider, lookup } = {}) {
   const creds = getCredentials(payload);
   if (!creds.apiKey) throw new InputError('请先配置模型 API Key');
-  const model = creds.model || 'deepseek-flash';
-  checkPublicModel(model, creds);
-  const base = URL.parse(creds.baseURL);
-  if (!base || !['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.search || base.hash) {
-    throw new InputError('模型接口地址无效');
-  }
-  const pathBase = base.pathname.replace(/\/+$/, '');
-  base.pathname = pathBase.endsWith('/v1') ? pathBase : pathBase + '/v1';
+  const { baseURL, model, sensitive, allowPrivateEndpoint } = validateLlmSettings(payload, creds);
   const started = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10000);
-  // A private LLM server is trusted only when explicitly configured by the operator.
-  const serverBase = URL.parse(process.env.LLM_BASE_URL || '');
-  const allowPrivateEndpoint = serverBase?.href === URL.parse(creds.baseURL)?.href;
   async function probe(route, body) {
-    const response = await llmRequest(base.href + route, {
-      method: body ? 'POST' : 'GET', body: body && JSON.stringify(body), signal: controller.signal, allowPrivateEndpoint,
+    const response = await llmRequest(baseURL + route, {
+      method: body ? 'POST' : 'GET', body: body && JSON.stringify(body), signal: controller.signal, allowPrivateEndpoint, lookup,
       headers: { Authorization: 'Bearer ' + creds.apiKey, 'Content-Type': 'application/json' },
     });
     try {
+      controller.signal.throwIfAborted();
       if (!body && [404, 405].includes(response.statusCode)) return false;
-      if (body && response.statusCode === 404) throw upstreamError('所选模型或对话接口不存在（HTTP 404）', false);
-      if (response.statusCode !== 200) throw httpStatusError(response.statusCode);
+      if (response.statusCode !== 200) throw chatStatusError(response.statusCode);
       const data = await readJson(response, 2 * 1024 * 1024, { allowInvalidJson: !body });
+      controller.signal.throwIfAborted();
       if (!body) return !data?.error && Array.isArray(data?.data) && data.data.some(item => item?.id === model);
       const first = data?.choices?.[0];
       const nonEmpty = value => typeof value === 'string' && value.trim().length > 0;
@@ -53,10 +37,16 @@ async function testLlmConnection(payload, { llmRequest = requestProvider } = {})
     } finally { response.destroy(); }
   }
   try {
-    if (!await probe('/models')) await probe('/chat/completions', { model, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 });
+    if (payload?.verifyChat === true || !await probe('/models')) {
+      await probe('/chat/completions', { model, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 });
+    }
     return { ok: true, model, latencyMs: Date.now() - started, message: '连接成功，模型接口可用' };
   } catch (error) {
-    if (error instanceof InputError || error instanceof ProviderError) throw error;
+    if (error instanceof InputError) throw new InputError(redactProviderDetail(error.message, sensitive));
+    if (error instanceof ProviderError) {
+      error.message = redactProviderDetail(error.message, sensitive);
+      throw error;
+    }
     throw upstreamError(controller.signal.aborted ? '模型接口连接超时' : '模型接口连接失败');
   } finally { clearTimeout(timer); }
 }
@@ -70,7 +60,7 @@ async function testTtsConnection(payload, { getTtsProviderById = getTtsProvider 
   if (!provider) throw new InputError('未注册的 TTS Provider');
   const credentials = getTtsCredentials(provider, tts);
   const model = credentials.model;
-  checkPublicModel(model, { ...tts, ...credentials });
+  checkPublicModel(model, [...llmSecrets(tts, credentials), ...ttsSecrets({ ...tts, ...credentials })]);
   const voices = resolveVoiceMapping(provider, model, tts.voiceMapping);
   const result = { ok: true, provider: provider.id, model };
   if (provider.id === 'edge') return { ...result, latencyMs: 0, duration: 0, message: 'Edge 免密钥，未发起在线合成测试' };
@@ -94,4 +84,4 @@ async function testTtsConnection(payload, { getTtsProviderById = getTtsProvider 
   }
 }
 
-module.exports = { checkPublicModel, testLlmConnection, testTtsConnection };
+module.exports = { testLlmConnection, testTtsConnection };

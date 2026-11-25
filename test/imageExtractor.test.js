@@ -40,10 +40,15 @@ function completion(content) {
 
 test('识图请求按顺序传入多张图片，并接受带围栏的 JSON 及纯文本响应', async t => {
   configure(t);
-  for (const [reply, title, content] of [
+  for (const [reply, title, content, hasIssues = false, issueHint = ''] of [
     ['```json\n{"title":"长截图","content":"第一段\\n\\n第二段"}\n```', '长截图', '第一段\n\n第二段'],
-    ['```text\n 第一段\n\n第二段 \n```', '', '第一段\n\n第二段'],
-    [' 纯文本 ', '', '纯文本'],
+    ['{"title":"长截图","content":"第一段","hasIssues":true,"issueHint":"疑似同音错字"}', '长截图', '第一段', true, '疑似同音错字'],
+    ['{"content":"第一段","hasIssues":false,"issueHint":"忽略这条提示"}', '', '第一段'],
+    [JSON.stringify({ content: '\n 第一段\n', hasIssues: 'false', issueHint: '忽略非布尔值' }), '', '\n 第一段\n'],
+    [JSON.stringify({ content: '正文', hasIssues: 1, issueHint: '忽略非布尔值' }), '', '正文'],
+    [JSON.stringify({ content: '正文', hasIssues: true, issueHint: ' 有\n\t断句  问题\r\n' }), '', '正文', true, '有 断句 问题'],
+    ['```text\n\n 第一段\n\n第二段 \n\n```', '', '\n 第一段\n\n第二段 \n'],
+    ['\n 纯文本 \n', '', '\n 纯文本 \n'],
   ]) {
     let calls = 0;
     const result = await extractTextFromImages(payload, {
@@ -60,12 +65,14 @@ test('识图请求按顺序传入多张图片，并接受带围栏的 JSON 及�
         assert.equal(body.temperature, 0.1);
         assert.match(body.messages[0].content, /重叠的行/);
         assert.match(body.messages[0].content, /保留原标题、段落/);
+        assert.match(body.messages[0].content, /hasIssues.*issueHint/);
+        assert.match(body.messages[0].content, /正文仍逐字转录/);
         assert.deepEqual(body.messages[1].content.slice(0, -1), images.map(url => ({ type: 'image_url', image_url: { url } })));
         assert.equal(body.messages[1].content.at(-1).type, 'text');
         return response(completion(reply));
       },
     });
-    assert.deepEqual(result, { title, content, length: content.length, truncated: false, imageCount: images.length });
+    assert.deepEqual(result, { title, content, length: content.length, truncated: false, imageCount: images.length, hasIssues, issueHint });
     assert.equal(calls, 1);
   }
 });
@@ -89,7 +96,8 @@ test('视觉响应按正文上限截断并拒绝空正文、超限和无效响�
   configure(t);
   const long = '文'.repeat(12001);
   const result = await extractTextFromImages(payload, { llmRequest: async () => response(completion(long)) });
-  assert.deepEqual(result, { title: '', length: 12000, truncated: true, content: long.slice(0, 12000), imageCount: 2 });
+  assert.deepEqual(result, { title: '', length: 12000, truncated: true, content: long.slice(0, 12000), imageCount: 2,
+    hasIssues: false, issueHint: '' });
   for (const [body, status, headers, error] of [
     ['<html>重定向</html>', 302, { location: 'https://other.example' }, /HTTP 302/],
     ['{', 200, {}, /有效 JSON/],
@@ -131,9 +139,9 @@ test('服务端视觉和通用密钥各自绑定到规范化后的配置地址',
   const custom = [customBase + '/v1/chat/completions', 'Bearer ' + visionApiKey, visionModel, false];
   for (const [fields, expected] of [
     [{}, vision],
-    [{ visionApiKey }, [vision[0], 'Bearer ' + visionApiKey, vision[2], true]],
+    [{ visionApiKey, visionBaseURL: settings.VISION_BASE_URL }, [vision[0], 'Bearer ' + visionApiKey, vision[2], true]],
     [{ visionBaseURL: '  http://127.0.0.1:1111/vision/  ' }, vision],
-    [{ apiKey: 'ordinary-request-token', visionBaseURL: settings.VISION_BASE_URL }, vision],
+    [{ apiKey: 'ordinary-request-token', baseURL: settings.LLM_BASE_URL, visionBaseURL: settings.VISION_BASE_URL }, vision],
     [{ baseURL: 'http://127.0.0.1:1111/vision' }, vision],
     [{ visionBaseURL: 'http://127.0.0.1:2222/service/v1' }, llm],
     [{ baseURL: 'http://127.0.0.1:2222/service/v1' }, llm],
@@ -149,7 +157,7 @@ test('独立识图密钥缺少有效识图地址时报 400，通用地址不会�
   configure(t, { LLM_BASE_URL: 'https://llm-fixture.example' });
   const llmRequest = t.mock.fn(async () => response(completion('不应发出请求')));
   const fields = { images, visionApiKey: 'some-key', visionModel: 'kimi-k2.5' };
-  for (const visionBase of ['', 'file:///tmp/vision']) {
+  for (const visionBase of ['', 'file:///tmp/vision', 'https://configured-vision.example/v1/']) {
     process.env.VISION_BASE_URL = visionBase;
     await assert.rejects(extractTextFromImages(fields, { llmRequest }), {
       statusCode: 400,
@@ -159,22 +167,101 @@ test('独立识图密钥缺少有效识图地址时报 400，通用地址不会�
   assert.equal(llmRequest.mock.callCount(), 0);
 });
 
-test('识图拒绝缺密钥、纯文本模型、无效地址和敏感模型名称', async t => {
+test('识图允许主模型直接使用 DeepSeek 地址和模型名称', async t => {
+  configure(t, { DEEPSEEK_API_KEY: 'server-deepseek-token' });
+  const calls = [];
+  const llmRequest = async (url, args) => {
+    calls.push([url, args.headers.Authorization, JSON.parse(args.body).model]);
+    return response(completion('转录成功'));
+  };
+  await extractTextFromImages({ images }, { llmRequest });
+  await extractTextFromImages({ images, apiKey: visionApiKey, baseURL: 'https://api.deepseek.com./v1', model: 'deepseek-chat' }, { llmRequest });
+  await extractTextFromImages({ ...payload, visionModel: 'deepseek-reasoner' }, { llmRequest });
+  assert.deepEqual(calls, [
+    ['https://api.deepseek.com/v1/chat/completions', 'Bearer server-deepseek-token', 'deepseek-flash'],
+    ['https://api.deepseek.com./v1/chat/completions', 'Bearer ' + visionApiKey, 'deepseek-chat'],
+    ['https://vision-fixture.example/API/v1/chat/completions', 'Bearer ' + visionApiKey, 'deepseek-reasoner'],
+  ]);
+});
+
+test('识图按上游错误判断图片输入支持情况，并限制读取错误正文大小', async t => {
+  configure(t);
+  const secretDetail = visionApiKey + ' ' + visionBaseURL + ' /Users/private/upstream';
+  const friendly = '当前模型接口暂不支持图片输入，请在「模型与语音」切换支持视觉的模型，或单独配置识图模型';
+  for (const [status, body] of [
+    [400, JSON.stringify({ error: { message: 'unsupported image_url ' + secretDetail } })],
+    [400, JSON.stringify({ error: { code: 'multimodal_not_supported' } })],
+    [404, JSON.stringify({ code: 'unsupported_image' })],
+    [415, 'Unsupported Media Type ' + secretDetail],
+    [415, JSON.stringify({ detail: 'image/png' })],
+    [422, '当前接口不支持图片输入 ' + secretDetail],
+    [422, JSON.stringify({ detail: [{ loc: ['body', 'image_url'], msg: 'Invalid variant' }] })],
+    [400, JSON.stringify({ error: { param: 'image_url', message: 'Not allowed' } })],
+    [400, 'This model does not support image_url'],
+    [400, JSON.stringify({ detail: [{ msg: 'Only text input is supported ' + secretDetail }] })],
+    [400, 'This is a text-only model'],
+  ]) {
+    const res = response(body, status);
+    await assert.rejects(extractTextFromImages(payload, { llmRequest: async () => res }), { statusCode: 400, message: friendly });
+    assert.equal(res.destroyed, true);
+  }
+  for (const [body, headers] of [
+    [JSON.stringify({ error: { message: '无效请求', apiKey: 'vision-secret' } }), {}],
+    [JSON.stringify({ error: { param: 'image_url' } }), {}],
+    [JSON.stringify({ error: { param: 'image_url', message: 'image_url exceeds maximum size' } }), {}],
+    [JSON.stringify({ error: { param: 'image_url', message: 'Unsupported image format' } }), {}],
+    [JSON.stringify({ detail: [{ loc: ['body', 'image_url'], msg: 'Unsupported base64 encoding' }] }), {}],
+    ['unsupported image_url ' + 'A'.repeat(64 * 1024), {}],
+    ['unsupported image_url', { 'content-length': 64 * 1024 + 1 }],
+  ]) {
+    const res = response(body, 400, headers);
+    await assert.rejects(extractTextFromImages(payload, { llmRequest: async () => res }), { statusCode: 502, message: 'HTTP 400' });
+    assert.equal(res.destroyed, true);
+  }
+  for (const [status, body, guidance] of [
+    [401, { error: { code: 'multimodal_not_supported', message: 'Invalid API Key ' + secretDetail } }, /鉴权失败.*API Key/],
+    [403, { error: { type: 'image_not_supported', message: 'Permission denied for image_url ' + secretDetail } }, /鉴权失败.*模型访问权限/],
+    [404, { error: { message: 'vision-model not found ' + secretDetail } }, /模型.*404.*模型名称/],
+    [404, { error: { code: 'model_not_found', param: 'image_url' } }, /模型.*404.*模型名称/],
+    [405, { error: { message: secretDetail } }, /405.*支持对话的接口地址/],
+  ]) {
+    const res = response(JSON.stringify(body), status);
+    await assert.rejects(extractTextFromImages(payload, { llmRequest: async () => res }), error =>
+      error.statusCode === 502 && !error.retryable && guidance.test(error.message) &&
+      !error.message.includes(visionApiKey) && !error.message.includes(visionBaseURL));
+    assert.equal(res.destroyed, true);
+    if (status === 401 || status === 403) assert.equal(res.readableDidRead, false);
+  }
+});
+
+test('识图拒绝缺密钥、无效地址和敏感模型名称', async t => {
   configure(t);
   const llmRequest = t.mock.fn(async () => response(completion('不应发出请求')));
   await assert.rejects(extractTextFromImages({ images }, { llmRequest }), /请先配置支持识图的模型 API Key/);
-  for (const override of [
-    { visionBaseURL: 'https://api.deepseek.com./v1' }, { visionModel: 'DeepSeek-Chat' },
-    { visionModel: 'deepseek-reasoner' }, { visionModel: 'deepseek-flash' },
-  ]) {
-    await assert.rejects(extractTextFromImages({ ...payload, ...override }, { llmRequest }), /暂不支持图片识别/);
-  }
   for (const url of ['ftp://vision.example', 'https://user:password@vision.example', 'https://vision.example?secret=yes',
     'https://vision.example?', 'https://vision.example#', 'invalid']) {
     await assert.rejects(extractTextFromImages({ ...payload, visionBaseURL: url }, { llmRequest }), /接口地址无效/);
   }
-  await assert.rejects(extractTextFromImages({ ...payload, visionModel: visionApiKey }, { llmRequest }), /模型名称无效/);
+  for (const visionModel of [visionApiKey, null, 123, false, {}, 'C:/private/model', 'a/../b']) {
+    await assert.rejects(extractTextFromImages({ ...payload, visionModel }, { llmRequest }), /模型名称无效/);
+  }
   assert.equal(llmRequest.mock.callCount(), 0);
+});
+
+test('识图拒绝上游未完成的正文，并按脱敏前长度标记超限', async t => {
+  configure(t);
+  for (const [finish_reason, message] of [['length', /长度上限/], ['content_filter', /内容过滤/]]) {
+    const serialized = JSON.stringify({ choices: [{ finish_reason, message: { content: '上一段，后面还没输出' } }] });
+    await assert.rejects(extractTextFromImages(payload, { llmRequest: async () => response(serialized) }),
+      { statusCode: 502, retryable: false, message });
+  }
+  const content = '文'.repeat(11995) + visionApiKey;
+  const result = await extractTextFromImages(payload, {
+    llmRequest: async () => response(completion(JSON.stringify({ content }))),
+  });
+  assert.equal(result.truncated, true);
+  assert.equal(result.length, 11998);
+  assert.ok(result.content.endsWith('***'));
 });
 
 test('默认识图传输拒绝非授权私网地址与解析结果', async t => {
@@ -239,11 +326,19 @@ test('视觉请求错误和转录响应不泄露密钥与实际接口路径', as
   await assert.rejects(extractTextFromImages(payload, { llmRequest: async () => {
     throw new Error(details + ' /Users/private/unknown-path');
   } }), { statusCode: 502, message: '识图模型接口连接失败' });
-  const { title, content } = await extractTextFromImages(payload, {
-    llmRequest: async () => response(completion(JSON.stringify({ title: details, content: '正文 ' + details }))),
+  const { title, content, hasIssues, issueHint } = await extractTextFromImages(payload, {
+    llmRequest: async () => response(completion(JSON.stringify({ title: details, content: '正文 ' + details,
+      hasIssues: true, issueHint: '疑似错字 ' + details + ' /Users/private/unknown-path' }))),
   });
   assert.equal(title, '*** *** *** ***');
   assert.equal(content, '正文 *** *** *** ***');
+  assert.equal(hasIssues, true);
+  assert.equal(issueHint, '疑似错字 *** *** *** *** ***');
+  const longHint = '错'.repeat(115) + visionApiKey + '字'.repeat(120);
+  const bounded = await extractTextFromImages(payload, {
+    llmRequest: async () => response(completion(JSON.stringify({ content: '正文', hasIssues: true, issueHint: longHint }))),
+  });
+  assert.equal(bounded.issueHint, '错'.repeat(115) + '***字字');
 });
 
 test('远程合成按间隔执行，工作目录复用与缓存命中不触发请求', async t => {

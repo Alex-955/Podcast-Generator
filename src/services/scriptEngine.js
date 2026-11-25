@@ -1,16 +1,10 @@
-const axios = require('axios');
+const { setting, validateLlmSettings } = require('./llmCredentials');
+const { ProviderError, checkChatCompletion, chatStatusError, readJson, requestProvider, upstreamError,
+  withProviderResponse } = require('./providerHttp');
 const { InputError, MAX_DIALOGUE_LINES, MAX_LINE_TEXT_LENGTH } = require('./validation');
 
-/** LLM 请求超时（毫秒）；请求实现自带 AbortSignal，避免 axios timeout 的定时器泄漏（见 B-F4） */
 const LLM_TIMEOUT_MS = 180000;
-
-/** 上游/模型输出错误（502）：区别于用户输入错误（400，InputError） */
-function upstreamError(message) {
-  const error = new Error(message);
-  error.name = 'UpstreamError';
-  error.statusCode = 502;
-  return error;
-}
+const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
 /**
  * 播客系统 Prompt：模仿 OPPO "AI 妙听" 体验
@@ -102,26 +96,16 @@ function normalizeDialogue(rawDialogue) {
 /**
  * 调用 LLM 生成双人播客剧本
  */
-async function generatePodcastScript({
-  title,
-  content,
-  apiKey,
-  baseURL = 'https://api.deepseek.com',
-  model = 'deepseek-flash',
-  timeoutMs = LLM_TIMEOUT_MS,
-  signal,
-}) {
+async function generatePodcastScript(input = {}) {
+  const { title, content, timeoutMs = LLM_TIMEOUT_MS, signal, llmRequest = requestProvider, lookup } = input;
   if (signal?.aborted) throw new DOMException('剧本生成已取消', 'AbortError');
+  const apiKey = setting(input.apiKey);
   if (!apiKey) {
-    // B-D1：配置缺失属用户输入问题（400），不冒充上游错误
     throw new InputError('缺少 API Key，请在设置中配置 DeepSeek 或百炼 API Key');
   }
-
-  // 保证 baseURL 结尾有 /v1
-  let normalizedBaseURL = baseURL.trim().replace(/\/+$/, '');
-  if (!normalizedBaseURL.endsWith('/v1')) {
-    normalizedBaseURL += '/v1';
-  }
+  const { baseURL, model, sensitive, allowPrivateEndpoint } = validateLlmSettings(input, {
+    apiKey, baseURL: input.baseURL, model: input.model,
+  });
 
   const userPrompt = `
 请将以下文章重构为阿泽和小晓的双人对话播客剧本。
@@ -132,90 +116,77 @@ ${content}
 请直接输出 JSON 格式（不要在前面或后面添加任何非 JSON 字符）：
 `;
 
-  // B-F4：不使用 axios 的 timeout 选项——实测其内部 connectPhaseTimer 在连接阶段失败
-  // （如拒绝连接）时不会被清理，会挟持事件循环最长 timeout 毫秒。改用自管 AbortController：
-  // finally 清理定时器和外部取消监听。
-  const controller = new AbortController();
-  const onAbort = () => controller.abort(new DOMException('剧本生成已取消', 'AbortError'));
-  signal?.addEventListener('abort', onAbort, { once: true });
   const timeoutSeconds = Math.round(timeoutMs / 1000);
   const timeoutMessage = `剧本生成超时（${timeoutSeconds} 秒）：文章较长时模型需要更多时间，请重试一次；若反复超时可换更快的模型或先缩短正文`;
-  const deadlineTimer = setTimeout(() => {
-    controller.abort(upstreamError(timeoutMessage));
-  }, timeoutMs);
 
   try {
-    const response = await axios.post(
-      `${normalizedBaseURL}/chat/completions`,
-      {
-        model: model || 'deepseek-flash',
+    return await withProviderResponse(baseURL + '/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json', Accept: 'application/json' },
+      allowPrivateEndpoint,
+      body: JSON.stringify({
+        model,
         messages: [
           { role: 'system', content: PODCAST_SYSTEM_PROMPT.trim() },
           { role: 'user', content: userPrompt.trim() },
         ],
         temperature: 0.7,
         response_format: { type: 'json_object' },
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${apiKey.trim()}`,
-          'Content-Type': 'application/json',
-        },
-        signal: controller.signal,
-      }
+      }),
+    }, {
+      llmRequest, lookup, timeoutMs, signal, sensitive, timeoutMessage, connectionMessage: '剧本模型接口连接失败',
+    }, async response => {
+      if (response.statusCode !== 200) throw chatStatusError(response.statusCode);
+      const data = await readJson(response, MAX_RESPONSE_BYTES);
+      checkChatCompletion(data, '剧本生成');
+      return parseScript(data, title);
+    });
+  } catch (error) {
+    if (error instanceof ProviderError) error.name = 'UpstreamError';
+    throw error;
+  }
+}
+
+function parseScript(data, title) {
+  const rawContent = data?.choices?.[0]?.message?.content;
+  if (data?.error || typeof rawContent !== 'string' || !rawContent.trim()) {
+    throw upstreamError('大模型未返回有效内容');
+  }
+  let cleaned = rawContent.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+  }
+  let script;
+  try {
+    script = JSON.parse(cleaned);
+  } catch {
+    throw upstreamError('模型剧本不是有效 JSON');
+  }
+  let dialogue;
+  try {
+    dialogue = normalizeDialogue(script?.dialogue);
+  } catch (error) {
+    throw upstreamError(error.message);
+  }
+  if (dialogue.length > MAX_DIALOGUE_LINES) {
+    throw upstreamError(
+      `模型返回的台词超过 ${MAX_DIALOGUE_LINES} 行上限（当前 ${dialogue.length} 行），请缩短正文后重试`
     );
-    controller.signal.throwIfAborted();
-
-    const rawContent = response.data?.choices?.[0]?.message?.content;
-    if (!rawContent) {
-      throw new Error('大模型未返回有效内容');
-    }
-
-    // 清洗可能存在的 markdown 代码块包裹 (```json ... ```)
-    let cleaned = rawContent.trim();
-    if (cleaned.startsWith('```')) {
-      cleaned = cleaned.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
-    }
-
-    const script = JSON.parse(cleaned);
-    const dialogue = normalizeDialogue(script.dialogue);
-
-    // B-D1：模型输出与用户输入执行同等上限；超限属上游输出异常（502），不是用户输入错误
-    if (dialogue.length > MAX_DIALOGUE_LINES) {
+  }
+  dialogue.forEach((line, i) => {
+    if (line.text.length > MAX_LINE_TEXT_LENGTH) {
       throw upstreamError(
-        `模型返回的台词超过 ${MAX_DIALOGUE_LINES} 行上限（当前 ${dialogue.length} 行），请缩短正文后重试`
+        `模型返回的第 ${i + 1} 行台词超过 ${MAX_LINE_TEXT_LENGTH} 字上限，请缩短正文后重试`
       );
     }
-    dialogue.forEach((line, i) => {
-      if (line.text.length > MAX_LINE_TEXT_LENGTH) {
-        throw upstreamError(
-          `模型返回的第 ${i + 1} 行台词超过 ${MAX_LINE_TEXT_LENGTH} 字上限，请缩短正文后重试`
-        );
-      }
-    });
-
-    return {
-      success: true,
-      podcastTitle: String(script.podcastTitle || title || 'AI妙听播客').trim(),
-      summary: String(script.summary || '').trim(),
-      dialogue,
-      usage: response.data.usage,
-    };
-  } catch (error) {
-    controller.signal.throwIfAborted();
-    // B-D1：已分类错误（400 输入缺失 / 502 模型输出异常）原样传递，其余统一包装为上游错误 502
-    if (error && error.statusCode) {
-      throw error;
-    }
-    if (error.code === 'ECONNABORTED' || /timeout/i.test(error.message || '')) {
-      throw upstreamError(timeoutMessage);
-    }
-    const errorDetail = error.response?.data?.error?.message || error.message;
-    throw upstreamError(`剧本生成失败: ${errorDetail}`);
-  } finally {
-    clearTimeout(deadlineTimer);
-    signal?.removeEventListener('abort', onAbort);
-  }
+  });
+  return {
+    success: true,
+    podcastTitle: setting(script.podcastTitle) || setting(title) || 'AI妙听播客',
+    summary: setting(script.summary),
+    dialogue,
+    usage: data.usage,
+  };
 }
 
 module.exports = {

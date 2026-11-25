@@ -10,11 +10,15 @@
  */
 // 允许访问 127.0.0.1 测试端点（仅本进程生效，不放宽生产默认）
 process.env.ALLOW_PRIVATE_FETCH = '1';
+process.env.LLM_BASE_URL = 'http://127.0.0.1:9';
 
+const assert = require('node:assert/strict');
 const { generatePodcastScript } = require('../../src/services/scriptEngine');
 const { defaultFetcher } = require('../../src/services/extractor');
+const { requestProvider } = require('../../src/services/providerHttp');
 
 async function main() {
+  let connectionError;
   try {
     await generatePodcastScript({
       title: 't',
@@ -23,10 +27,20 @@ async function main() {
       baseURL: 'http://127.0.0.1:9',
       model: 'm',
       timeoutMs: 4000,
+      async llmRequest(url, options) {
+        try {
+          return await requestProvider(url, options);
+        } catch (error) {
+          connectionError = error.code;
+          throw error;
+        }
+      },
     });
     console.error('UNEXPECTED_RESOLVE_LLM');
     process.exit(2);
   } catch (error) {
+    assert.equal(error.statusCode, 502);
+    assert.equal(connectionError, 'ECONNREFUSED');
     console.log('LLM_REJECTED');
   }
 

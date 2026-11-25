@@ -11,6 +11,7 @@ const { synthesizeSentence, synthesizeDialogueScript, DEFAULT_VOICES } = require
 const { getMp3DurationSeconds } = require('../src/services/mp3Utils');
 const { startFakeEdgeTts } = require('./fakeEdgeTts');
 const { makeMp3 } = require('./helpers/mp3Fixtures');
+const { completion, configureLlm, response } = require('./helpers/llmFixture');
 
 const apiKey = 'sk-secret-test-key';
 const dialogue = ['第一句', '第二句', '第三句'].map((text, i) => ({ speaker: i % 2 ? '小晓' : '阿泽', text }));
@@ -82,6 +83,7 @@ test('服务端 Key 仅用于服务端配置的模型地址，自带 Key 可使�
   const denied = { statusCode: 400, message: '使用自定义接口地址时请提供对应的 API Key' };
   assert.throws(() => manager.createTask({ ...article, baseURL: customURL }), denied);
   assert.throws(() => manager.createTask({ ...article, baseURL: customURL, apiKey: '  ' }), denied);
+  assert.throws(() => manager.createTask({ ...article, apiKey }), { statusCode: 400, message: /同时填写对应的接口地址/ });
   assert.throws(() => manager.createTask({ ...article, title: serverKey }), { statusCode: 400, message: '输入内容包含敏感凭据，已拦截并中止保存' });
   assert.equal(fs.existsSync(config.tasksDir), false);
   assert.equal(calls.length, 0);
@@ -100,13 +102,92 @@ test('服务端 Key 仅用于服务端配置的模型地址，自带 Key 可使�
   assert.throws(() => manager.createTask({ ...article, baseURL: 'https://model.example/team' }), denied);
 });
 
+test('任务创建及续跑在首次写盘或改写检查点前拒绝无效模型配置', async t => {
+  const configuredBase = 'http://127.0.0.1:7945/team';
+  configureLlm(t, { LLM_BASE_URL: configuredBase + '/v1/', DEEPSEEK_API_KEY: 'configured-task-key' });
+  let reply = response({ error: 'mock failure' }, 500);
+  const llmRequest = t.mock.fn(async (url, options) => {
+    assert.equal(url, configuredBase + '/v1/chat/completions');
+    assert.equal(options.allowPrivateEndpoint, true);
+    return reply;
+  });
+  const ttsSynthesizer = t.mock.fn(async () => { throw new Error('保留已完成的剧本'); });
+  const { manager, config } = setup(t, { scriptGenerator: undefined, llmRequest, ttsSynthesizer });
+  const rejected = [
+    { baseURL: undefined }, { baseURL: configuredBase + '#' }, { baseURL: configuredBase + '/untrusted' },
+    { baseURL: 'http://[::1]' }, { model: 123 }, { model: {} }, { model: 'a/../model' }, { model: 'C:/private/model' },
+  ];
+  for (const fields of rejected) {
+    assert.throws(() => manager.createTask({ ...payload, ...fields }), { statusCode: 400 });
+  }
+  assert.equal(fs.existsSync(config.tasksDir), false);
+  assert.equal(llmRequest.mock.callCount(), 0);
+  const { id } = manager.createTask({ ...payload, baseURL: configuredBase });
+  const file = path.join(config.tasksDir, id + '.json');
+  for (const hasScript of [false, true]) {
+    const checkpoint = await waitFor(() => manager.getTask(id), task => task.status === 'failed' && task.hasScript === hasScript);
+    const before = fs.readFileSync(file, 'utf8');
+    const callsBefore = llmRequest.mock.callCount();
+    for (const fields of rejected) {
+      assert.throws(() => manager.resumeTask(id, { apiKey, baseURL: configuredBase, ...fields }), { statusCode: 400 });
+    }
+    assert.equal(fs.readFileSync(file, 'utf8'), before);
+    assert.deepEqual(manager.getTask(id), checkpoint);
+    assert.equal(llmRequest.mock.callCount(), callsBefore);
+    if (!hasScript) {
+      reply = response(completion(JSON.stringify(script)));
+      manager.resumeTask(id, { apiKey, baseURL: configuredBase });
+    }
+  }
+  assert.equal(llmRequest.mock.callCount(), 2);
+  assert.equal(ttsSynthesizer.mock.callCount(), 1);
+  process.env.LLM_BASE_URL = 'file:///tmp/mock';
+  assert.equal(manager.resumeTask(id).status, 'running');
+  await waitFor(() => manager.getTask(id), task => task.status === 'failed');
+  assert.equal(llmRequest.mock.callCount(), 2);
+  assert.equal(ttsSynthesizer.mock.callCount(), 2);
+});
+
+test('默认任务生成器拦截解析到私网的模型域名，且不进入合成', async t => {
+  configureLlm(t);
+  const lookup = t.mock.fn(async (host, options) => {
+    assert.equal(host, 'private.example');
+    assert.equal(options.all, true);
+    return [{ address: '127.0.0.1', family: 4 }];
+  });
+  const ttsSynthesizer = t.mock.fn();
+  const { manager, root } = setup(t, { scriptGenerator: undefined, lookup, ttsSynthesizer });
+  const { id } = manager.createTask(payload);
+  const failed = await waitFor(() => manager.getTask(id), task => task.status === 'failed');
+  assert.equal(failed.error.stage, 'script');
+  assert.match(failed.error.message, /受限网络/);
+  assert.equal(lookup.mock.callCount(), 1);
+  assert.equal(ttsSynthesizer.mock.callCount(), 0);
+  noLeaks(failed, root);
+});
+
+test('剧本回显规范化后的自定义地址时在保存剧本前拒绝', async t => {
+  configureLlm(t);
+  const baseURL = 'https://mock-script.example/team/v1/';
+  const echoed = baseURL.slice(0, -1);
+  const llmRequest = async () => response(completion(JSON.stringify({ ...script, summary: '回显 ' + echoed })));
+  const ttsSynthesizer = t.mock.fn();
+  const { manager, config } = setup(t, { scriptGenerator: undefined, llmRequest, ttsSynthesizer });
+  const { id } = manager.createTask({ ...payload, baseURL });
+  const failed = await waitFor(() => manager.getTask(id), task => task.status === 'failed');
+  assert.equal(failed.hasScript, false);
+  assert.match(failed.error.message, /模型返回内容包含敏感凭据/);
+  assert.equal(ttsSynthesizer.mock.callCount(), 0);
+  assert.ok(!fs.readFileSync(path.join(config.tasksDir, id + '.json'), 'utf8').includes(echoed));
+});
+
 test('创建时拦截含本次 Key 的标题、正文或文章链接，首次落盘前返回 400', t => {
   const unexpectedCall = () => assert.fail('输入应在任务启动前被拒绝');
   const { manager, root } = setup(t, { extractor: unexpectedCall, scriptGenerator: unexpectedCall });
   for (const input of [
     { ...payload, title: '标题' + apiKey },
     { ...payload, content: '正文' + apiKey },
-    { mode: 'url', url: 'https://article.example/' + apiKey, apiKey },
+    { ...payload, mode: 'url', url: 'https://article.example/' + apiKey },
   ]) {
     assert.throws(() => manager.createTask(input), {
       statusCode: 400, message: '输入内容包含敏感凭据，已拦截并中止保存',
@@ -124,7 +205,7 @@ test('抓取返回的标题或正文含本次 Key 时任务在 extract 失败，
   });
   for (const field of ['title', 'content']) {
     article = { title: '标题', content: '正文', [field]: '文章中包含 ' + apiKey };
-    const task = manager.createTask({ mode: 'url', url: 'https://article.example/story', apiKey });
+    const task = manager.createTask({ ...payload, mode: 'url', url: 'https://article.example/story' });
     const failed = await waitFor(() => manager.getTask(task.id), record => record.status === 'failed');
     assert.equal(failed.error.stage, 'extract');
     assert.equal(failed.error.message, '抓取内容包含敏感凭据，已拦截并中止保存');
@@ -244,7 +325,7 @@ test('重启将 queued / running 转为可恢复失败，保存的正文供重�
     assert.deepEqual(recovered.error, {
       stage: 'script', message: '服务已重启，上次生成被中断，可点击「从断点继续生成」恢复', retryable: true, failedSegmentIndex: null,
     });
-    restarted.resumeTask(id, { apiKey });
+    restarted.resumeTask(id, { apiKey, baseURL: payload.baseURL });
     await waitFor(() => restarted.getTask(id), x => x.error?.message === '模拟错误');
   }
 });
@@ -418,7 +499,7 @@ test('取消后立即续跑会等待旧调用退出，迟到的失败不能覆�
   const { id } = manager.createTask(payload);
   await waitFor(() => calls, n => n === 1);
   manager.cancelTask(id);
-  assert.equal(manager.resumeTask(id, { apiKey }).status, 'running');
+  assert.equal(manager.resumeTask(id, { apiKey, baseURL: payload.baseURL }).status, 'running');
   assert.throws(() => manager.createTask(payload), { code: 'TASK_ALREADY_RUNNING' });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(calls, 1);
@@ -511,7 +592,9 @@ test('TTS 凭据回显在首次落盘、抓取、模型输出和失败记录边�
     assert.equal(failed.error.stage, stage);
     const json = fs.readFileSync(path.join(config.tasksDir, id + '.json'), 'utf8') + JSON.stringify(failed);
     for (const secret of [tts.apiKey, tts.endpoint]) assert.ok(!json.includes(secret));
-    assert.throws(() => manager.resumeTask(id, { apiKey, tts: { provider: 'volcengine', endpoint: 'https://other.example' } }), { statusCode: 400 });
+    assert.throws(() => manager.resumeTask(id, {
+      apiKey, baseURL: payload.baseURL, tts: { provider: 'volcengine', endpoint: 'https://other.example' },
+    }), { statusCode: 400 });
   }
 });
 

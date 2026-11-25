@@ -8,10 +8,12 @@ const { Readable } = require('node:stream');
 const { setTimeout: delay } = require('node:timers/promises');
 const { extractArticle } = require('../src/services/extractor');
 const { makeMp3 } = require('./helpers/mp3Fixtures');
+const { completion, response } = require('./helpers/llmFixture');
 const { upstreamError } = require('../src/services/providerHttp');
 
 const apiKey = 'offline-credential';
-const payload = { mode: 'text', content: '离线文章正文', apiKey };
+const baseURL = 'https://offline-task.example';
+const payload = { mode: 'text', content: '离线文章正文', apiKey, baseURL };
 let root, publicDir, server, base, previousEnv;
 let generate, llmRequest, observeProbe;
 const { getTtsProvider } = require('../src/services/ttsProvider');
@@ -124,7 +126,8 @@ test('图片提取接口按顺序发送多张图片并返回结构化正文', as
     return Object.assign(response, { statusCode: 200, headers: {} });
   };
   const result = await request('extract-image', 200, { images, visionApiKey, visionBaseURL, visionModel: 'vision-fixture' });
-  assert.deepEqual(result, { success: true, data: { title: '长截图', content: '第一段\n\n第二段', length: 8, truncated: false, imageCount: 2 } });
+  assert.deepEqual(result, { success: true, data: { title: '长截图', content: '第一段\n\n第二段', length: 8, truncated: false,
+    imageCount: 2, hasIssues: false, issueHint: '' } });
   assert.equal(calls, 1);
 });
 
@@ -218,7 +221,7 @@ test('创建、单活冲突、取消、续跑、轮询成品、历史与外置�
   await request(route + '/resume', 400, {});
 
   generate = async () => ({ podcastTitle: '路由测试', summary: '测试', dialogue: [{ speaker: '阿泽', text: '开场' }] });
-  await request(route + '/resume', 202, { apiKey });
+  await request(route + '/resume', 202, { apiKey, baseURL });
   let completed;
   for (let i = 0; i < 100; i++) {
     completed = (await request(route, 200)).data;
@@ -236,7 +239,7 @@ test('创建、单活冲突、取消、续跑、轮询成品、历史与外置�
   }
   assert.ok(fs.existsSync(path.join(publicDir, 'custom-data', 'tasks', task.id + '.json')));
   assert.ok(fs.existsSync(path.join(publicDir, 'external-audio', task.id, 'meta.json')));
-  await request(route + '/resume', 409, { apiKey });
+  await request(route + '/resume', 409, { apiKey, baseURL });
   await request(route + '/cancel', 409, {});
 });
 
@@ -337,6 +340,166 @@ test('模型连接测试校验绑定与鉴权，404/405 时尝试一个 token �
   assert.ok(!JSON.stringify(failed).includes(endpoint));
   llmRequest = () => { throw new Error('private-value /Users/unknown/path'); };
   assert.equal((await request('llm/test', 502, {})).error, '模型接口连接失败');
+});
+
+test('verifyChat 为 true 时只发送最小对话并按结果判断模型能否响应', async t => {
+  const baseURL = 'https://offline-model.example/service';
+  setEnv(t, { LLM_BASE_URL: '', LLM_MODEL: '', DEEPSEEK_API_KEY: '' });
+  let status = 200;
+  llmRequest = t.mock.fn(async (url, options) => {
+    assert.equal(url, baseURL + '/v1/chat/completions');
+    assert.equal(options.method, 'POST');
+    assert.equal(options.headers.Authorization, 'Bearer ' + apiKey);
+    assert.deepEqual(JSON.parse(options.body), { model: 'selected-model', messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 });
+    return response(completion('hi'), status);
+  });
+  const body = { apiKey, baseURL, model: 'selected-model', verifyChat: true };
+  const result = await request('llm/test', 200, body);
+  assert.equal(result.data.ok, true);
+  assert.equal(result.data.model, body.model);
+  for (const [invalidStatus, guidance] of [[401, /API Key/], [403, /模型访问权限/], [404, /模型名称/], [405, /支持对话的接口地址/]]) {
+    status = invalidStatus;
+    const { error } = await request('llm/test', 502, body);
+    assert.match(error, new RegExp('HTTP ' + status));
+    assert.match(error, guidance);
+  }
+  assert.equal(llmRequest.mock.callCount(), 5);
+});
+
+test('调用方主模型或独立识图 Key 缺少各自接口地址时返回 400，并且不发请求或保存任务', async t => {
+  const llmBase = 'https://configured-llm.example/v1/';
+  const visionBase = 'https://configured-vision.example/v1/';
+  setEnv(t, { LLM_BASE_URL: llmBase, VISION_BASE_URL: visionBase,
+    DEEPSEEK_API_KEY: 'configured-llm-key', VISION_API_KEY: 'configured-vision-key' });
+  llmRequest = t.mock.fn();
+  generate = t.mock.fn();
+  const tasksDir = path.join(publicDir, 'custom-data', 'tasks');
+  const filesBefore = fs.existsSync(tasksDir) ? fs.readdirSync(tasksDir) : [];
+  const article = { mode: 'text', apiKey, content: '正文', images: ['data:image/png;base64,YQ=='] };
+  for (const route of ['llm/models', 'llm/test', 'polish-text', 'extract-image', 'tasks']) {
+    const response = await request(route, 400, article);
+    assert.equal(response.error, '填写自定义 API Key 时，请同时填写对应的接口地址（Base URL）');
+  }
+  for (const route of ['llm/models', 'extract-image']) {
+    const imageRequest = { scope: 'vision', images: article.images, visionApiKey: apiKey, baseURL: llmBase };
+    const response = await request(route, 400, imageRequest);
+    assert.equal(response.error, '填写独立识图 API Key 时，请同时填写对应的识图 Base URL');
+  }
+  assert.deepEqual(fs.existsSync(tasksDir) ? fs.readdirSync(tasksDir) : [], filesBefore);
+  assert.equal(llmRequest.mock.callCount(), 0);
+  assert.equal(generate.mock.callCount(), 0);
+});
+
+test('连接测试和模型列表拒绝非法或敏感模型字段，并在发请求前校验地址', async t => {
+  const configuredSecret = 'configured-vision-secret';
+  const callerSecret = 'caller-vision-secret';
+  setEnv(t, { VISION_API_KEY: configuredSecret, LLM_BASE_URL: 'http://127.0.0.1:7913/llm/v1/', LLM_MODEL: 'configured-model' });
+  llmRequest = t.mock.fn(async (url, args) => {
+    assert.equal(url, 'http://127.0.0.1:7913/llm/v1/chat/completions');
+    assert.equal(args.allowPrivateEndpoint, true);
+    return response(completion('hi'));
+  });
+  const body = { apiKey, baseURL: 'http://127.0.0.1:7913/llm', verifyChat: true, visionApiKey: callerSecret };
+  const badModels = [null, 123, false, {}, 'C:/local/model', 'c:\\local\\model', 'a/../b', ' x',
+    'a'.repeat(161), configuredSecret, callerSecret];
+  for (const route of ['llm/test', 'llm/models']) {
+    for (const fields of [...badModels.map(model => ({ model })), { visionModel: null }]) {
+      const result = await request(route, 400, { ...body, ...fields });
+      assert.equal(result.error, '模型名称无效或包含敏感配置');
+    }
+  }
+  for (const baseURL of [body.baseURL + '#', body.baseURL + '?', body.baseURL + '/other']) {
+    await request('llm/test', 400, { ...body, baseURL });
+  }
+  assert.equal(llmRequest.mock.callCount(), 0);
+  const result = await request('llm/test', 200, { ...body, model: '', visionModel: '' });
+  assert.equal(result.data.ok, true);
+  assert.equal(result.data.model, 'configured-model');
+  assert.equal(llmRequest.mock.callCount(), 1);
+});
+
+test('模型列表过滤请求中的 TTS 凭据和冒号后路径，保留 HTTPS 链接及模型标签', async t => {
+  const tts = { apiKey: 'offline-tts-credential', accessKey: 'offline-tts-access', appId: 'offline-tts-app',
+    endpoint: 'https://offline-tts.example/service' };
+  const publicURL = 'https://docs.example/v1/models';
+  const secrets = Object.values(tts);
+  llmRequest = t.mock.fn(async () => response({ data: [
+    ...secrets.map(id => ({ id })),
+    { id: 'vendor/model:fast', owned_by: [...secrets, 'path:C:/Users/private', 'path:/Users/private/a', publicURL].join(' ') },
+  ] }));
+  const result = await request('llm/models', 200, { apiKey, baseURL: 'https://offline-model.example', tts });
+  assert.equal(result.data.count, 1);
+  assert.deepEqual(result.data.models, [{ id: 'vendor/model:fast', ownedBy: '*** *** *** *** path:*** path:*** ' + publicURL }]);
+  assert.equal(llmRequest.mock.callCount(), 1);
+});
+
+test('模型列表路由返回模型或手动填写提示，并校验查询范围', async t => {
+  setEnv(t, { DEEPSEEK_API_KEY: '', LLM_BASE_URL: '', VISION_API_KEY: '', VISION_BASE_URL: '' });
+  const visionBaseURL = 'https://offline-vision.example';
+  let status = 200;
+  llmRequest = t.mock.fn(async (url, options) => {
+    assert.equal(url, visionBaseURL + '/v1/models');
+    assert.equal(options.method, 'GET');
+    assert.equal(options.headers.Authorization, 'Bearer ' + apiKey);
+    return response({ data: [{ id: 'vision-test', owned_by: 'fixture' }] }, status);
+  });
+  const body = { scope: 'vision', visionApiKey: apiKey, visionBaseURL };
+  const listed = await request('llm/models', 200, body);
+  assert.equal(listed.success, true);
+  assert.equal(listed.data.supported, true);
+  assert.equal(listed.data.count, 1);
+  assert.deepEqual(listed.data.models, [{ id: 'vision-test', ownedBy: 'fixture' }]);
+  status = 405;
+  const unsupported = await request('llm/models', 200, body);
+  assert.equal(unsupported.data.supported, false);
+  assert.match(unsupported.data.message, /手动填写/);
+  await request('llm/models', 400, { ...body, scope: 'other' });
+  assert.equal(llmRequest.mock.callCount(), 2);
+});
+
+test('正文润色路由返回脱敏结果，并在无正文时不调用上游', async t => {
+  const baseURL = 'https://offline-model.example';
+  llmRequest = t.mock.fn(async (url, options) => {
+    assert.equal(url, baseURL + '/v1/chat/completions');
+    assert.equal(options.method, 'POST');
+    assert.equal(options.headers.Authorization, 'Bearer ' + apiKey);
+    return response(completion(JSON.stringify({ content: '正文。', changeSummary: '修正标点 ' + baseURL })));
+  });
+  const body = { apiKey, baseURL, title: '原始标题', content: '正文' };
+  const polished = await request('polish-text', 200, body);
+  assert.deepEqual(polished, { success: true, data: {
+    title: '原始标题', content: '正文。', length: 3, truncated: false, changeSummary: '修正标点 ***',
+  } });
+  await request('polish-text', 400, { ...body, content: '' });
+  assert.equal(llmRequest.mock.callCount(), 1);
+});
+
+test('模型列表和润色路由在客户端断开时取消上游请求', { timeout: 5000 }, async () => {
+  for (const route of ['llm/models', 'polish-text']) {
+    const client = new AbortController();
+    let ready, stopped;
+    const started = new Promise(resolve => { ready = resolve; });
+    const abortedUpstream = new Promise(resolve => { stopped = resolve; });
+    llmRequest = (url, { signal }) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => {
+        reject(signal.reason);
+        stopped();
+      }, { once: true });
+      ready();
+    });
+    const pending = fetch(base + '/api/' + route, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: client.signal,
+      body: JSON.stringify({ apiKey, baseURL: 'https://offline-model.example', content: '正文' }),
+    });
+    const failed = assert.rejects(pending, { name: 'AbortError' });
+    try {
+      await started;
+      client.abort();
+      await Promise.all([failed, abortedUpstream]);
+    } finally {
+      client.abort();
+    }
+  }
 });
 
 test('语音连接测试仅在临时目录合成，成功和错误后都清理', async t => {
