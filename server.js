@@ -8,6 +8,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('node:path');
 const { createHash, timingSafeEqual } = require('node:crypto');
+const { version: APP_VERSION } = require('./package.json');
 const { extractArticle } = require('./src/services/extractor');
 const { extractTextFromImages } = require('./src/services/imageExtractor');
 const { fetchLlmModels } = require('./src/services/llmModels');
@@ -98,7 +99,9 @@ function createApp(options = {}) {
   app.get('/api/tts/providers', (req, res) => res.json({
     success: true, data: { items: getPublicTtsProviders(), defaultProvider: resolveDefaultProviderId() },
   }));
-  app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
+  app.get('/api/health', (req, res) => res.json({
+    status: 'ok', app: 'ai-podcast-generator', version: APP_VERSION, time: new Date(),
+  }));
   app.post('/api/extract-article', async (req, res) => {
     const { url, rawText } = req.body || {};
     if (url !== undefined && typeof url !== 'string') throw new InputError('url 必须是文本');
@@ -154,7 +157,16 @@ module.exports = app;
 if (require.main === module) {
   const HOST = process.env.HOST || '127.0.0.1';
   const PORT = parsePort(process.env.PORT);
-  const server = app.listen(PORT, HOST, () => {
+  const portable = process.send && process.argv[2]?.startsWith('--portable-instance=');
+  const server = app.listen(PORT, HOST, error => {
+    if (error) {
+      const code = error.code || 'LISTEN_ERROR';
+      if (portable && process.connected) process.send({ error: code }, () => {});
+      console.error('AI 妙听无法启动（%s）', code);
+      process.exitCode = 1;
+      return;
+    }
+    if (portable && process.connected) process.send({ port: server.address().port }, () => {});
     console.log(`AI 妙听播客服务已启动 http://${HOST}:${server.address().port}`);
     console.log('局域网手机试听可使用 HOST=0.0.0.0 npm start');
   });

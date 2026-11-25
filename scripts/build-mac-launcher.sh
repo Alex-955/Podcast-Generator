@@ -3,8 +3,16 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP_PATH="$PROJECT_DIR/启动 AI 妙听.app"
-NODE_FALLBACK="$(command -v node || echo /opt/homebrew/bin/node)"
+FINAL_APP_PATH="$PROJECT_DIR/启动 AI 妙听.app"
+FALLBACK_PROJECT_DIR="$PROJECT_DIR"
+
+if [ "$#" -gt 0 ]; then
+  if [ "$#" -ne 1 ] || [ "$1" != "--portable" ]; then
+    echo "用法：bash scripts/build-mac-launcher.sh [--portable]" >&2
+    exit 1
+  fi
+  FALLBACK_PROJECT_DIR=""
+fi
 
 if ! command -v osacompile >/dev/null 2>&1; then
   echo "错误：未找到 osacompile（仅支持 macOS 构建 .app 启动器）" >&2
@@ -13,146 +21,80 @@ fi
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
-
+APP_PATH="$TMP_DIR/启动 AI 妙听.app"
 APPLESCRIPT_SRC="$TMP_DIR/launcher.applescript"
 
-cat > "$APPLESCRIPT_SRC" <<EOF
-property defaultProjectDir : "$PROJECT_DIR"
-property defaultNodeBin : "$NODE_FALLBACK"
-property appUrl : "http://127.0.0.1:3000"
-
+# Finder uses the same portable launcher and Node/CA detection as the .command file.
+escaped_dir="$(printf '%s' "$FALLBACK_PROJECT_DIR" | sed 's/[\\"]/\\&/g')"
+printf 'property defaultProjectDir : "%s"\n' "$escaped_dir" > "$APPLESCRIPT_SRC"
+cat >> "$APPLESCRIPT_SRC" <<'APPLESCRIPT'
 on run
-  set projectDir to resolveProjectDir()
-  if projectDir is "" then
+  set launcherPath to resolveLauncher()
+  if launcherPath is "" then
     activate
-    display dialog "未能找到项目目录（缺少 server.js）。请将「启动 AI 妙听.app」放回项目根目录后再试。" buttons {"好"} default button "好" with icon stop with title "AI 妙听"
+    display dialog "未能找到便携启动脚本。请将「启动 AI 妙听.app」放回项目根目录后再试。" buttons {"好"} default button "好" with icon stop with title "AI 妙听"
     return
   end if
 
-  set nodeBin to resolveNodeBin()
-  if nodeBin is "" then
-    activate
-    display dialog "未能找到 Node.js，请先安装 Node.js 22+（或 Homebrew node）。" buttons {"好"} default button "好" with icon stop with title "AI 妙听"
-    return
-  end if
-
-  if isServerRunning() then
-    activate
-    set choice to button returned of (display dialog "AI 妙听服务已在后台运行（" & appUrl & "）。" buttons {"停止服务", "重启服务", "打开网页"} default button "打开网页" with title "AI 妙听")
-    if choice is "打开网页" then
-      openBrowser()
-    else if choice is "停止服务" then
-      stopServer(projectDir)
-      display notification "后台服务已停止" with title "AI 妙听"
-    else if choice is "重启服务" then
-      stopServer(projectDir)
-      delay 0.4
-      startAndOpen(projectDir, nodeBin)
+  try
+    set actionChoice to "打开网页"
+    if isServerRunning(launcherPath) then
+      activate
+      set actionChoice to button returned of (display dialog "AI 妙听服务已在后台运行。" buttons {"停止服务", "重启服务", "打开网页"} default button "打开网页" with title "AI 妙听")
     end if
-  else
-    startAndOpen(projectDir, nodeBin)
-  end if
+    if actionChoice is "停止服务" or actionChoice is "重启服务" then
+      set stopOutput to runLauncher(launcherPath, "--stop")
+      if stopOutput contains "AI 妙听已停止" then
+        if actionChoice is "停止服务" then
+          display notification "后台服务已停止" with title "AI 妙听"
+          return
+        end if
+      else
+        activate
+        display dialog stopOutput buttons {"好"} default button "好" with title "AI 妙听"
+        return
+      end if
+    end if
+    runLauncher(launcherPath, "--open")
+  on error errorMessage number errorNumber
+    if errorNumber is not -128 then
+      activate
+      display dialog ("AI 妙听操作失败。" & return & errorMessage) buttons {"好"} default button "好" with icon caution with title "AI 妙听"
+    end if
+  end try
 end run
 
-on resolveProjectDir()
-  try
-    set mePath to POSIX path of (path to me)
-    set parentDir to do shell script "dirname " & quoted form of mePath
-    if checkHasServer(parentDir) then return parentDir
-  end try
-  if checkHasServer(defaultProjectDir) then return defaultProjectDir
-  return ""
-end resolveProjectDir
+on resolveLauncher()
+  set parentDir to do shell script "/usr/bin/dirname " & quoted form of (POSIX path of (path to me))
+  set launcherPath to findLauncher(parentDir)
+  if launcherPath is "" and defaultProjectDir is not "" then set launcherPath to findLauncher(defaultProjectDir)
+  return launcherPath
+end resolveLauncher
 
-on checkHasServer(dirPath)
+on findLauncher(dirPath)
+  set launcherPath to dirPath & "/scripts/launchers/start-macos.command"
   try
-    set out to do shell script "test -f " & quoted form of (dirPath & "/server.js") & " && echo yes || echo no"
-    return out is "yes"
+    do shell script "test -f " & quoted form of launcherPath
+    return launcherPath
   on error
-    return false
+    return ""
   end try
-end checkHasServer
+end findLauncher
 
-on resolveNodeBin()
-  set candidates to {defaultNodeBin, "/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"}
-  repeat with candidate in candidates
-    try
-      set ok to do shell script "test -x " & quoted form of (candidate as text) & " && echo yes || echo no"
-      if ok is "yes" then return (candidate as text)
-    end try
-  end repeat
-  return ""
-end resolveNodeBin
-
-on isServerRunning()
+on isServerRunning(launcherPath)
   try
-    set res to do shell script "/usr/bin/curl -sf --max-time 1 " & quoted form of (appUrl & "/api/health") & " >/dev/null 2>&1 && echo up || echo down"
-    return res is "up"
+    runLauncher(launcherPath, "--status")
+    return true
   on error
     return false
   end try
 end isServerRunning
 
-on startAndOpen(projectDir, nodeBin)
-  set dataDir to projectDir & "/data"
-  set logFile to dataDir & "/server.log"
-  set pidFile to dataDir & "/server.pid"
-  set cmd to "mkdir -p " & quoted form of dataDir & " && cd " & quoted form of projectDir & " && nohup " & quoted form of nodeBin & " --use-bundled-ca server.js >> " & quoted form of logFile & " 2>&1 </dev/null & echo \$! > " & quoted form of pidFile
-  do shell script cmd
+on runLauncher(launcherPath, actionFlag)
+  return do shell script "/bin/bash " & quoted form of launcherPath & " " & quoted form of actionFlag
+end runLauncher
+APPLESCRIPT
 
-  set ready to false
-  repeat 30 times
-    if isServerRunning() then
-      set ready to true
-      exit repeat
-    end if
-    delay 0.2
-  end repeat
-
-  if ready then
-    openBrowser()
-  else
-    set errTail to ""
-    try
-      set errTail to do shell script "tail -n 8 " & quoted form of logFile
-    end try
-    activate
-    display dialog "AI 妙听服务启动超时或异常退出。请查看日志：" & return & return & errTail buttons {"好"} default button "好" with icon caution with title "AI 妙听"
-  end if
-end startAndOpen
-
-on stopServer(projectDir)
-  set pidFile to projectDir & "/data/server.pid"
-  set stopCmd to "
-    if [ -f " & quoted form of pidFile & " ]; then
-      pid=\$(cat " & quoted form of pidFile & " 2>/dev/null || true)
-      if [ -n \"\$pid\" ] && kill -0 \"\$pid\" 2>/dev/null; then
-        args=\$(ps -p \"\$pid\" -o args= 2>/dev/null || true)
-        case \"\$args\" in
-          *server.js*) kill \"\$pid\" 2>/dev/null || true ;;
-        esac
-      fi
-      rm -f " & quoted form of pidFile & "
-    fi
-    for p in \$(lsof -tiTCP:3000 -sTCP:LISTEN 2>/dev/null || true); do
-      args=\$(ps -p \"\$p\" -o args= 2>/dev/null || true)
-      case \"\$args\" in
-        *server.js*) kill \"\$p\" 2>/dev/null || true ;;
-      esac
-    done
-    sleep 0.2
-  "
-  try
-    do shell script stopCmd
-  end try
-end stopServer
-
-on openBrowser()
-  open location appUrl
-end openBrowser
-EOF
-
-rm -rf "$APP_PATH"
 osacompile -o "$APP_PATH" "$APPLESCRIPT_SRC"
 
 # 生成专属暖赤陶声波应用图标（失败不影响功能）
@@ -207,4 +149,6 @@ if command -v /usr/libexec/PlistBuddy >/dev/null 2>&1; then
     /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$APP_PATH/Contents/Info.plist" >/dev/null 2>&1 || true
 fi
 
-echo "已生成免终端双击启动器：$APP_PATH"
+rm -rf "$FINAL_APP_PATH"
+mv "$APP_PATH" "$FINAL_APP_PATH"
+echo "已生成免终端双击启动器：$FINAL_APP_PATH"
