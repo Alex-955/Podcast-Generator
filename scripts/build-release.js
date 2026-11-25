@@ -3,9 +3,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { isUtf8 } = require('node:buffer');
-const { spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
-const { deflateRawSync } = require('node:zlib');
+const { deflateRawSync, gzipSync } = require('node:zlib');
 const dotenv = require('dotenv');
 
 const SOURCE_DIR = path.resolve(__dirname, '..');
@@ -26,6 +25,7 @@ const DEPENDENCY_DOC = /^(?:readme|history|changelog|changes|security|contributi
 const CREDENTIAL_FIELD = /(?:KEY|TOKEN|SECRET|PASSWORD|APP_ID)$/i;
 const ZIP_UTF8 = 0x0800;
 const ZIP_32_LIMIT = 0xffffffff;
+const TAR_BLOCK_SIZE = 512;
 const CRC32_TABLE = Uint32Array.from({ length: 256 }, (_, byte) => {
   let crc = byte;
   for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
@@ -298,13 +298,18 @@ function runReleaseSecurityGate(stageDir) {
   return true;
 }
 
-function runArchiveTool(command, args, cwd) {
-  const result = spawnSync(command, args, {
-    cwd, shell: false, stdio: 'ignore', windowsHide: true, env: { ...process.env, COPYFILE_DISABLE: '1' },
-  });
-  if (result.error?.code === 'ENOENT') return false;
-  if (result.error || result.status !== 0) throw new Error('压缩工具 ' + command + ' 执行失败');
-  return true;
+function isExecutable(relative, stat) {
+  return relative.endsWith('.command') || relative.endsWith('/scripts/build-mac-launcher.sh') ||
+    (process.platform !== 'win32' && !relative.endsWith('.bat') && (stat.mode & 0o111) !== 0);
+}
+
+function* bundleEntries(dir, relative) {
+  const file = path.join(dir, relative);
+  const stat = fs.lstatSync(file);
+  yield { relative, file, stat };
+  if (stat.isDirectory()) {
+    for (const child of fs.readdirSync(file)) yield* bundleEntries(dir, relative + '/' + child);
+  }
 }
 
 function crc32(contents) {
@@ -349,9 +354,7 @@ function zipEntry(relative, file, stat, offset) {
   central.writeUInt16LE(0x031e, 4);
   fields.copy(central, 6);
   central.writeUInt16LE(filename.length, 28);
-  const executable = relative.endsWith('.command') || relative.endsWith('/scripts/build-mac-launcher.sh') ||
-    (stat.mode & 0o111) !== 0;
-  const mode = executable ? 0o755 : 0o644;
+  const mode = isExecutable(relative, stat) ? 0o755 : 0o644;
   central.writeUInt32LE(directory ? ((0o040755 << 16) | 0x10) >>> 0 : ((0o100000 | mode) << 16) >>> 0, 38);
   central.writeUInt32LE(offset, 42);
   filename.copy(central, 46);
@@ -370,21 +373,14 @@ function zipBundle(dir, name, archive) {
     offset += bytes.length;
   }
 
-  function add(relative) {
-    if (centralHeaders.length === 0xfffe) throw new Error('发行包条目超出标准 ZIP 数量限制');
-    const file = path.join(dir, relative);
-    const stat = fs.lstatSync(file);
-    const entry = zipEntry(relative, file, stat, offset);
-    write(entry.local);
-    write(entry.bytes);
-    centralHeaders.push(entry.central);
-    if (stat.isDirectory()) {
-      for (const child of fs.readdirSync(file)) add(relative + '/' + child);
-    }
-  }
-
   try {
-    add(name);
+    for (const { relative, file, stat } of bundleEntries(dir, name)) {
+      if (centralHeaders.length === 0xfffe) throw new Error('发行包条目超出标准 ZIP 数量限制');
+      const entry = zipEntry(relative, file, stat, offset);
+      write(entry.local);
+      write(entry.bytes);
+      centralHeaders.push(entry.central);
+    }
     const centralOffset = offset;
     for (const header of centralHeaders) write(header);
     const end = Buffer.alloc(22);
@@ -397,6 +393,65 @@ function zipBundle(dir, name, archive) {
   } finally {
     fs.closeSync(fd);
   }
+}
+
+function tarHeader(name, type, mode, size, mtime) {
+  const header = Buffer.alloc(TAR_BLOCK_SIZE);
+  function writeOctal(value, offset, width) {
+    const octal = value.toString(8);
+    if (octal.length >= width) throw new Error('条目超出标准 USTAR 数值范围');
+    header.write(octal.padStart(width - 1, '0'), offset, 'ascii');
+  }
+
+  header.write(name, 0, 'ascii');
+  writeOctal(mode, 100, 8);
+  writeOctal(0, 108, 8);
+  writeOctal(0, 116, 8);
+  writeOctal(size, 124, 12);
+  writeOctal(mtime, 136, 12);
+  header.fill(0x20, 148, 156);
+  header.write(type, 156, 'ascii');
+  header.write('ustar\0', 257, 'ascii');
+  header.write('00', 263, 'ascii');
+  writeOctal(0, 329, 8);
+  writeOctal(0, 337, 8);
+  writeOctal(header.reduce((sum, byte) => sum + byte, 0), 148, 7);
+  header[154] = 0;
+  return header;
+}
+
+function paxPath(relative) {
+  const payload = Buffer.from(' path=' + relative + '\n', 'utf8');
+  let length = payload.length + 1;
+  while (length !== payload.length + String(length).length) {
+    length = payload.length + String(length).length;
+  }
+  return Buffer.concat([Buffer.from(String(length), 'ascii'), payload], length);
+}
+
+function tarGzBundle(dir, name, archive) {
+  const chunks = [];
+  function append(headerName, type, contents, mode, mtime) {
+    chunks.push(tarHeader(headerName, type, mode, contents.length, mtime), contents);
+    const remainder = contents.length % TAR_BLOCK_SIZE;
+    if (remainder) chunks.push(Buffer.alloc(TAR_BLOCK_SIZE - remainder));
+  }
+
+  let paxIndex = 0;
+  for (const { relative, file, stat } of bundleEntries(dir, name)) {
+    const directory = stat.isDirectory();
+    const mtime = Math.max(0, Math.floor(stat.mtimeMs / 1000));
+    let entryName = directory ? relative + '/' : relative;
+    if (Buffer.byteLength(entryName) > 99 || /[^\x20-\x7e]/.test(entryName)) {
+      const index = ++paxIndex;
+      append('PaxHeaders/' + index, 'x', paxPath(entryName), 0o644, mtime);
+      entryName = 'PaxEntries/' + index + (directory ? '/' : '');
+    }
+    append(entryName, directory ? '5' : '0', directory ? Buffer.alloc(0) : fs.readFileSync(file),
+      directory || isExecutable(relative, stat) ? 0o755 : 0o644, mtime);
+  }
+  chunks.push(Buffer.alloc(2 * TAR_BLOCK_SIZE));
+  fs.writeFileSync(archive, gzipSync(Buffer.concat(chunks)), { flag: 'wx' });
 }
 
 function sha256(file) {
@@ -462,7 +517,7 @@ function buildRelease({
     for (let i = 0; i < formats.length; i++) {
       const target = path.join(scratch, archiveNames[i]);
       if (formats[i] === 'zip') zipBundle(scratch, name, target);
-      else if (!runArchiveTool('tar', ['-czf', target, name], scratch)) throw new Error('找不到 tar 压缩工具');
+      else tarGzBundle(scratch, name, target);
     }
     if (archiveNames.length) checksumFile = writeChecksums(outDir, scratch, sumsName, archiveNames);
     fs.renameSync(stage, stageDir);
@@ -470,7 +525,7 @@ function buildRelease({
     if (checksumFile) fs.renameSync(path.join(scratch, sumsName), checksumFile);
     return { stageDir, archives, checksumFile };
   } finally {
-    fs.rmSync(scratch, { recursive: true, force: true });
+    fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 

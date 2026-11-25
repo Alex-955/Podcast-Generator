@@ -33,7 +33,7 @@ function fixture(t) {
     try {
       await stopPortable(options);
     } finally {
-      fs.rmSync(projectDir, { recursive: true, force: true });
+      fs.rmSync(projectDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
   return { options, messages, pidFile: path.join(dataDir, 'server.pid') };
@@ -160,7 +160,7 @@ test('显式 --port、PORT 和 .env 中的 PORT 被占用时报错', async t => 
   await assert.rejects(startPortable({ ...options, port }), /指定端口 \d+ 已被其他服务占用/);
   await assert.rejects(exec(process.execPath, [
     LAUNCHER, '--project-dir', options.projectDir, '--data-dir', options.dataDir, '--no-open',
-  ], { env: { ...options.env, PORT: String(port) }, timeout: 10000 }), {
+  ], { env: { ...options.env, PORT: String(port) }, timeout: 20000 }), {
     code: 1, stderr: /指定端口 \d+ 已被其他服务占用/,
   });
   fs.writeFileSync(path.join(options.projectDir, '.env'), 'PORT=' + port + '\n');
@@ -177,7 +177,7 @@ test('已有受管实例时，显式指定其他端口会报告占用或要求�
   const busy = other.address().port;
   const args = [LAUNCHER, '--project-dir', options.projectDir, '--data-dir', options.dataDir,
     '--port', String(busy)];
-  await assert.rejects(exec(process.execPath, args, { env: options.env, timeout: 10000 }), {
+  await assert.rejects(exec(process.execPath, args, { env: options.env, timeout: 20000 }), {
     code: 1, stderr: new RegExp('指定端口 ' + busy + ' 已被其他服务占用'),
   });
   await assert.rejects(startPortable({ ...options, env: { ...options.env, PORT: String(busy) } }),
@@ -212,7 +212,7 @@ test('共享数据目录时另一个安装目录的启动和停止命令都保�
   const shared = { ...b.options, dataDir: a.options.dataDir };
   const cli = (options, ...args) => exec(process.execPath, [
     LAUNCHER, '--project-dir', options.projectDir, '--data-dir', options.dataDir, ...args,
-  ], { env: options.env, timeout: 10000 });
+  ], { env: options.env, timeout: 20000 });
 
   await assert.rejects(cli(shared, '--port', String(first.port)), {
     code: 1, stderr: /当前数据目录正被另一个目录的 AI 妙听实例使用/,

@@ -240,7 +240,7 @@ function processExists(pid) {
 
 function queryProcess(pid, platform) {
   if (!processExists(pid)) return null;
-  const options = { encoding: 'utf8', shell: false, windowsHide: true, timeout: 2500 };
+  const options = { encoding: 'utf8', shell: false, windowsHide: true, timeout: platform === 'win32' ? 10000 : 2500 };
   if (platform === 'win32') {
     const script = "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); " +
       `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' -ErrorAction Stop).CommandLine`;
@@ -532,7 +532,7 @@ async function stopPortable(options = {}) {
       await fs.rm(config.pidFile, { force: true });
       return { stopped: false, stale: true };
     }
-    const deadline = Date.now() + 2500;
+    const deadline = Date.now() + (process.platform === 'win32' ? 10000 : 2500);
     while (await isExpectedServerProcess(record, processOptions)) {
       if (Date.now() >= deadline) throw new Error('AI 妙听尚未停止，请稍后重试');
       await delay(50);

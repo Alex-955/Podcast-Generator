@@ -8,6 +8,7 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const { once } = require('node:events');
+const { gunzipSync } = require('node:zlib');
 const { buildRelease, runReleaseSecurityGate, parseArgs } = require('../scripts/build-release');
 const { version } = require('../package.json');
 
@@ -25,7 +26,7 @@ const PRIVATE_FILES = [
 
 function scratch(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'podcast release '));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   return directory;
 }
 
@@ -120,6 +121,46 @@ function zipEntries(archive) {
     entries.set(name, attributes >>> 16);
     offset += 46 + length + zip.readUInt16LE(offset + 30) + zip.readUInt16LE(offset + 32);
   }
+  return entries;
+}
+
+function tarEntries(archive) {
+  const bytes = gunzipSync(fs.readFileSync(archive));
+  const entries = new Map();
+  let offset = 0;
+  let paxName;
+  while (offset < bytes.length) {
+    const header = bytes.subarray(offset, offset + 512);
+    assert.equal(header.length, 512);
+    if (header.every(byte => byte === 0)) break;
+    const field = (start, end) => header.toString('ascii', start, end).split('\0', 1)[0];
+    assert.equal(header.toString('ascii', 257, 265), 'ustar\0' + '00');
+    const checksum = header.reduce((sum, byte, index) => sum + (index >= 148 && index < 156 ? 0x20 : byte), 0);
+    assert.equal(parseInt(field(148, 156), 8), checksum);
+    const size = parseInt(field(124, 136), 8);
+    assert.ok(Number.isSafeInteger(size) && size >= 0 && offset + 512 + size <= bytes.length);
+    const contents = bytes.subarray(offset + 512, offset + 512 + size);
+    assert.ok(header.subarray(0, 100).every(byte => byte < 128), 'USTAR 回退名称应为 ASCII');
+    const type = header.toString('ascii', 156, 157);
+    offset += 512 + Math.ceil(size / 512) * 512;
+    if (type === 'x') {
+      assert.equal(paxName, undefined);
+      const separator = contents.indexOf(0x20);
+      assert.ok(separator > 0);
+      assert.equal(contents.toString('ascii', 0, separator), String(contents.length));
+      assert.equal(contents.toString('ascii', separator + 1, separator + 6), 'path=');
+      assert.equal(contents.at(-1), 0x0a);
+      paxName = contents.toString('utf8', separator + 6, contents.length - 1);
+      continue;
+    }
+    const name = paxName ?? field(0, 100);
+    assert.equal(type, name.endsWith('/') ? '5' : '0');
+    assert.equal(entries.has(name), false, name);
+    entries.set(name, { mode: parseInt(field(100, 108), 8), pax: paxName !== undefined, contents });
+    paxName = undefined;
+  }
+  assert.equal(paxName, undefined);
+  assert.deepEqual(bytes.subarray(offset), Buffer.alloc(1024));
   return entries;
 }
 
@@ -322,23 +363,34 @@ test('真实便携 ZIP 和 tar.gz 包含白名单目录、匹配 SHA-256 并带�
   });
   assert.equal(fs.readFileSync(checksumFile, 'utf8'), actual.join('\n') + '\n');
   const zip = zipEntries(archives[0]);
-  const tar = spawnSync('tar', ['-tzf', archives[1]], { shell: false, encoding: 'utf8' });
-  assert.equal(tar.status, 0, tar.stderr);
-  const prefix = path.basename(stageDir) + '/';
-  for (const entries of [[...zip.keys()], tar.stdout.split(/\r?\n/)]) {
-    for (const file of ['.env.example', 'public/podcasts/.gitkeep', 'data/.gitkeep', 'LICENSE',
-      'node_modules/express/package.json']) {
-      assert.ok(entries.includes(prefix + file), file);
-    }
-    assert.ok(!entries.some(name => name === prefix + '.env' ||
-      name.startsWith(prefix + 'public/podcasts/secret') || name.startsWith(prefix + 'test/')));
+  const tar = tarEntries(archives[1]);
+  assert.deepEqual([...tar.keys()].sort(), [...zip.keys()].sort());
+  if (process.platform !== 'win32') {
+    const listing = spawnSync('tar', ['-tzf', path.basename(archives[1])], {
+      cwd: path.dirname(archives[1]), shell: false, encoding: 'utf8',
+    });
+    assert.ifError(listing.error);
+    assert.equal(listing.status, 0, listing.stderr);
+    assert.deepEqual(listing.stdout.trimEnd().split(/\r?\n/).sort(), [...tar.keys()].sort());
   }
+  const prefix = path.basename(stageDir) + '/';
+  for (const file of ['.env.example', 'public/podcasts/.gitkeep', 'data/.gitkeep', 'LICENSE',
+    'node_modules/express/package.json']) {
+    assert.ok(tar.has(prefix + file), file);
+  }
+  assert.ok(![...tar.keys()].some(name => name === prefix + '.env' ||
+    name.startsWith(prefix + 'public/podcasts/secret') || name.startsWith(prefix + 'test/')));
   const launchers = ['启动 AI 妙听.bat', '停止 AI 妙听.bat', '启动 AI 妙听.command', '停止 AI 妙听.command'];
   for (const launcher of launchers) {
-    assert.equal(zip.get(prefix + launcher), launcher.endsWith('.command') ? 0o100755 : 0o100644, launcher);
+    const mode = launcher.endsWith('.command') ? 0o755 : 0o644;
+    assert.equal(zip.get(prefix + launcher), 0o100000 | mode, launcher);
+    assert.equal(tar.get(prefix + launcher).mode, mode, launcher);
+    assert.equal(tar.get(prefix + launcher).pax, true, launcher);
   }
   assert.equal(zip.get(prefix + 'scripts/build-mac-launcher.sh'), 0o100755);
   assert.equal(zip.get(prefix + 'server.js'), 0o100644);
+  assert.equal(tar.get(prefix + 'scripts/build-mac-launcher.sh').mode, 0o755);
+  assert.equal(tar.get(prefix + 'server.js').mode, 0o644);
   if (spawnSync('python3', ['--version'], { shell: false, windowsHide: true }).status === 0) {
     const verify = [
       'import sys, zipfile', 'with zipfile.ZipFile(sys.argv[1]) as zf:',
@@ -353,4 +405,16 @@ test('真实便携 ZIP 和 tar.gz 包含白名单目录、匹配 SHA-256 并带�
     assert.equal(result.status, 0, result.stderr);
   }
   await verifyStagedServer(stageDir, root);
+});
+
+test('tar.gz 使用 PAX 保留超过 USTAR 名称长度的 ASCII 路径', t => {
+  const root = scratch(t);
+  const sourceDir = sourceFixture(root);
+  const file = 'src/' + 'long-name-'.repeat(9) + '.js';
+  const contents = 'module.exports = "portable";\n';
+  write(sourceDir, file, contents);
+  const { archives } = buildRelease({ sourceDir, outDir: path.join(root, 'archives'), name: 'pax-long', format: 'tar.gz' });
+  const entry = tarEntries(archives[0]).get('pax-long/' + file);
+  assert.equal(entry.pax, true);
+  assert.equal(entry.contents.toString('utf8'), contents);
 });
