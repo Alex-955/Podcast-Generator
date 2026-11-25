@@ -37,13 +37,13 @@ const AVAILABLE_VOLCENGINE_VOICES = [
 ];
 
 function permanentBusinessError(code, message) {
-  if ([400, 401, 403, 404, 422, 40402003, 45000001, 45000002, 45000010, 45001001, 45002001].includes(code)) return true;
+  if ([400, 401, 403, 404, 413, 422, 40402003, 45000001, 45000002, 45000010, 45001001, 45002001].includes(code)) return true;
   if (code === 45000000) {
-    const denied = /permission denied|unauthori[sz]ed|forbidden|access denied|not (?:granted|allowed|authorized|found|supported)|unsupported|not exist|invalid (?:token|parameter|resource|speaker|voice)|权限不足|无权限|未授权|鉴权失败|不支持|不存在/i;
+    const denied = /no permission|without permission|lack(?:s|ing)? permission|permission denied|unauthori[sz]ed|forbidden|access denied|not (?:granted|allowed|authorized|found|supported|enabled|activated)|unsupported|not exist|invalid (?:token|parameter|resource|speaker|voice)|权限不足|无权限|没有权限|未开通|未授权|鉴权失败|不支持|不存在/i;
     const oversized = /too (?:large|long)|too many (?:characters|tokens)|(?:body|payload).{0,80}large|(?:size|length).{0,80}exceed|请求体过大|文本过大|文本过长|超长/i;
     if (denied.test(message) || oversized.test(message)) return true;
     // Only an explicit throttle warrants a retry. A resource ID can itself end in "-concurr".
-    const throttled = /\bconcurren(?:t|cy)\b|\brate[\s_-]*limit|\bqps\b|\bthrottl|\btoo many\b|\brate\s*exceed|限流|并发超限|频率限制/i;
+    const throttled = /\b(?:concurren(?:t|cy)\s*(?:limit|quota|exceed\w*|request\w*|connection\w*)|exceed\w*\s*(?:the\s*)?(?:max\s*)?concurren\w*|max\s*concurren\w*|rate[\s_-]*limit\w*|qps\s*(?:limit|exceed\w*)|exceed\w*\s*qps|throttl\w*|too many requests|rate\s*exceed\w*)\b|限流|并发(?:数|量|请求)?(?:超限|超过限制|超额|已满|达到上限|过高|限制)|频率(?:超限|限制|过高)|请求过于频繁/i;
     return !throttled.test(message);
   }
   return /unauthorized|forbidden|invalid (?:token|parameter|speaker)|鉴权失败|参数错误/i.test(message);

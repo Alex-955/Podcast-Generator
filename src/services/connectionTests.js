@@ -44,8 +44,8 @@ async function testLlmConnection(payload, { llmRequest = requestProvider } = {})
       const data = await readJson(response, 2 * 1024 * 1024, { allowInvalidJson: !body });
       if (!body) return !data?.error && Array.isArray(data?.data) && data.data.some(item => item?.id === model);
       const first = data?.choices?.[0];
-      const hasText = typeof first?.message?.content === 'string' || typeof first?.message?.reasoning_content === 'string' ||
-        typeof first?.text === 'string';
+      const nonEmpty = value => typeof value === 'string' && value.trim().length > 0;
+      const hasText = nonEmpty(first?.message?.content) || nonEmpty(first?.message?.reasoning_content) || nonEmpty(first?.text);
       if (data?.error || !Array.isArray(data?.choices) || !first || typeof first !== 'object' || Array.isArray(first) || !hasText) {
         throw upstreamError('模型接口响应格式无效');
       }

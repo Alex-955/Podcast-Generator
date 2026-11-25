@@ -363,12 +363,13 @@ test('本地模型服务经实际 HTTP 传输完成 /models 及最小对话探�
   }
   catalogue = JSON.stringify({ data: [] });
   chatStatus = 200;
-  for (const first of [null, {}, [], 'hi', { message: { content: 42 } }]) {
+  for (const first of [null, {}, [], 'hi', { message: { content: 42 } },
+    { message: { content: '' } }, { message: { reasoning_content: '   ' } }, { text: '' }]) {
     chatBody = { choices: [first, { text: 'only the first choice counts' }] };
     const result = await request('llm/test', 502, {});
     assert.equal(result.error, '模型接口响应格式无效');
   }
-  for (const first of [{ message: { reasoning_content: 'hi' } }, { text: 'hi' }]) {
+  for (const first of [{ message: { content: '', reasoning_content: ' hi ' } }, { text: 'hi' }]) {
     chatBody = { choices: [first] };
     assert.equal((await request('llm/test', 200, {})).data.ok, true);
   }

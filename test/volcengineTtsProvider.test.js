@@ -100,6 +100,19 @@ test('豆包资源系列后缀和大小写均使用对应版本的默认音色',
   }
 });
 
+test('豆包 HTTP 客户端错误只请求一次，408 和 429 重试', async t => {
+  const { synthesizeSentence } = require('../src/services/ttsService');
+  let status;
+  const { endpoint, outputPath, requests } = await httpTtsFixture(t, res => res.writeHead(status).end());
+  for (const [code, count] of [[413, 1], [414, 1], [415, 1], [408, 3], [429, 3]]) {
+    status = code;
+    const before = requests.length;
+    await assert.rejects(synthesizeSentence({ text: '你好', provider, outputPath, adapterOptions: { endpoint, apiKey } }),
+      error => error.message.includes('HTTP ' + code) && (count === 3 || error.retryable === false));
+    assert.equal(requests.length - before, count, 'HTTP ' + code);
+  }
+});
+
 test('豆包 HTTP 200 中的参数、音色或授权错误只请求一次，并发限流仍重试', async t => {
   const { synthesizeSentence } = require('../src/services/ttsService');
   let record;
@@ -107,7 +120,12 @@ test('豆包 HTTP 200 中的参数、音色或授权错误只请求一次，并�
   for (const [code, message, count] of [
     [40402003, 'text too long', 1], [45000001, '', 1], [45000002, '', 1], [45000010, '', 1],
     [45000000, 'speaker not granted for this resource', 1], [45000000, 'permission denied', 1],
-    [45002001, 'no readable text', 1],
+    [45002001, 'no readable text', 1], [413, '', 1],
+    [45000000, 'no permission to use concurrent resource seed-tts-1.0-concurr', 1],
+    [45000000, 'concurrent resource not activated, QPS limit applies', 1],
+    [45000000, '资源未开通，无法提高并发限制', 1],
+    [45000000, 'concurrent resource seed-tts-1.0-concurr', 1],
+    [45000000, '并发数超过限制', 3],
     [45000000, 'permission denied for seed-tts-1.0-concurr', 1],
     [45000000, 'unauthorized for concurrent requests', 1],
     [45000000, 'request body too large', 1],

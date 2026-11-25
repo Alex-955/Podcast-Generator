@@ -92,7 +92,7 @@ async function readJson(response, limit, { allowInvalidJson = false } = {}) {
 }
 
 function httpStatusError(status) {
-  return upstreamError(`HTTP ${status}`, ![400, 401, 403, 404, 405, 422].includes(status) && !(status >= 300 && status < 400));
+  return upstreamError(`HTTP ${status}`, status === 408 || status === 429 || status >= 500);
 }
 
 module.exports = { ProviderError, checkEndpoint, requestProvider, boundedChunks, readJson, upstreamError, httpStatusError };
