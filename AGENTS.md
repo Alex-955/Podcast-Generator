@@ -18,7 +18,9 @@
 
 ## 2. 项目硬红线
 
-1. **分支与发布纪律**：严禁未经用户明确授权合并到 `main` 或执行 `git push`。
+1. **分支与 PR 发布纪律**：
+   - 严禁直接向 `main` 提交或推送，严禁未经用户明确授权合入（Merge）任何 PR；
+   - 每个功能批次从最新基线切出独立特性分支（如 `feat/batch6-...`），待代码实现、Codex 独立审计与离线测试全部通过后，可推送该特性分支并在 GitHub 创建 Pull Request（附变更摘要、审计与回归结果），等待用户审阅与授权后再合入 `main`。
 2. **凭据与隐私零泄露**：
    - 任何 LLM / TTS 密钥（`apiKey`、`accessKey`、`appId`、自定义 `baseURL`/`endpoint`）严禁持久化写入 `data/tasks/*.json`、`public/podcasts/*/meta.json` 或日志；
    - 所有错误消息、DTO 与响应必须经过 `redactSecrets` 脱敏且不含服务器本地绝对路径。
