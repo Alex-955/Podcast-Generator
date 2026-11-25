@@ -7,6 +7,7 @@ const { synthesizeHttp } = require('./httpTts');
 
 const DEFAULT_VOLCENGINE_ENDPOINT = 'https://openspeech.bytedance.com/api/v3/tts/unidirectional';
 const DEFAULT_VOLCENGINE_RESOURCE_ID = 'seed-tts-2.0';
+const TONE_RULE_VERSION = 'tone-v2';
 const DEFAULT_VOLCENGINE_VOICES = { 阿泽: 'zh_male_taocheng_uranus_bigtts', 小晓: 'zh_female_vv_uranus_bigtts' };
 const V1_VOICES = { 阿泽: 'zh_male_yangguangqingnian_moon_bigtts', 小晓: 'zh_female_cancan_mars_bigtts' };
 const V1_RESOURCE = /^seed-tts-1\.0/i;
@@ -42,7 +43,7 @@ const DIRECTOR_CUES = new Map([
   ['笑意 开心', '用轻松自然、带点笑意的播客聊天语气，音量稳定清晰'],
   ['感慨 温暖 总结', '用真诚温暖、娓娓道来的朋友聊天语气，音量清晰平稳不要压低变小'],
   ['好奇 疑惑 追问', '用自然好奇、像朋友插话提问的轻松语气，音量清晰平稳'],
-  ['兴奋 惊讶', '用略带惊喜、生动自然的播客口吻，但音量保持平稳不突然拔高'],
+  ['兴奋 惊讶 震惊', '用自然生动、略有兴致的播客聊天语气，克制平稳，切勿夸张惊呼或突然拔高音量'],
   ['认真 分析', '用专注清楚、不端架子的日常聊天语气，音量平稳'],
 ].flatMap(([tags, cue]) => tags.split(' ').map(tag => [tag, cue])));
 
@@ -141,12 +142,13 @@ async function readAudio(response, limit) {
 function createVolcengineProvider(options = {}) {
   return {
     id: 'volcengine', name: '火山引擎（豆包语音 V3）', requiresAuth: true, authModes: ['apiKey', 'appIdAccessKey'],
+    toneVersion: TONE_RULE_VERSION,
     model: options.resourceId || DEFAULT_VOLCENGINE_RESOURCE_ID, availableModels: ['seed-tts-2.0', 'seed-tts-1.0'],
     defaultVoices: defaultVolcengineVoices(options.resourceId), defaultVoicesForModel: defaultVolcengineVoices, availableVoices: AVAILABLE_VOLCENGINE_VOICES,
     getScopeHash(voices, overrides) {
       const credentials = { ...options, ...overrides };
       const endpoint = credentials.endpoint || DEFAULT_VOLCENGINE_ENDPOINT;
-      return speechScopeHash(endpoint, credentials, voices, AVAILABLE_VOLCENGINE_VOICES, DEFAULT_VOLCENGINE_ENDPOINT);
+      return speechScopeHash(endpoint, credentials, voices, AVAILABLE_VOLCENGINE_VOICES, DEFAULT_VOLCENGINE_ENDPOINT, TONE_RULE_VERSION);
     },
     async synthesizeToFile({ text, voice, emotion, outputPath, signal, adapterOptions }) {
       if (signal?.aborted) throw new TtsCancelledError();

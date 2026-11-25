@@ -4,6 +4,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { TtsCancelledError } = require('./edgeTtsAdapter');
 const { DEFAULT_VOICES, AVAILABLE_VOICES, AVAILABLE_VOICE_IDS, getTtsProvider } = require('./ttsProvider');
 const { buildCacheKey } = require('./ttsCache');
+const { atomicWrite } = require('./atomicWrite');
 const {
   analyzeMp3,
   compatibleFrameFormat,
@@ -15,6 +16,49 @@ const {
 const { InputError } = require('./validation');
 
 const MAX_SYNTHESIS_ATTEMPTS = 3;
+const TTS_CHECKPOINT_FILENAME = '.tts-checkpoint.json';
+const CALENDAR_YEAR = /^(?:1[1-9]\d{2}|20\d{2})$/;
+const CHINESE_DIGITS = '零一二三四五六七八九';
+const URL_OR_YEAR = /(https?:\/\/[^\s"'<>()（）《》【】，。！？；：、]+)|(?<![A-Za-z0-9._/])(?:(\d+(?:\.\d+)?)\s*([-~～—–至到])\s*)?(\d+)\s*(年代?)/gi;
+const STRICT_DURATION_PREFIX = /(?:历时|长达|持续|跨越|经过|相隔|距今|已有|超过|不到|不足|将近|满|整整|一共|共计|总共|累计|短短|为期)\s*$/;
+const APPROXIMATE_PREFIX = /(?:大约|约|近|前后)\s*$/;
+const DURATION_SUFFIX = /^(?:的?(?:历史|时间|之久|岁月|沧桑|光阴|历程)|多|余|间)/;
+
+function normalizeSpeechText(text) {
+  if (typeof text !== 'string') throw new Error('合成文本必须是非空字符串');
+  const readDigits = number => number.replace(/\d/g, digit => CHINESE_DIGITS[Number(digit)]);
+  return text.replace(URL_OR_YEAR, (match, url, start, separator, end, unit, offset) => {
+    if (url) return match;
+    if (unit === '年') {
+      const prefix = text.slice(0, offset);
+      if (STRICT_DURATION_PREFIX.test(prefix) ||
+          (APPROXIMATE_PREFIX.test(prefix) && DURATION_SUFFIX.test(text.slice(offset + match.length)))) return match;
+    }
+    if (start) {
+      if (!CALENDAR_YEAR.test(start) || !CALENDAR_YEAR.test(end)) return match;
+      return `${readDigits(start)}${separator === '至' ? '至' : '到'}${readDigits(end)}${unit}`;
+    }
+    if (CALENDAR_YEAR.test(end) || (unit === '年代' && /^[1-9]0$/.test(end))) return `${readDigits(end)}${unit}`;
+    return match;
+  });
+}
+
+function readSpeechCheckpoint(file, toneVersion) {
+  try {
+    if (fs.lstatSync(file, { throwIfNoEntry: false })?.isFile()) {
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (saved?.toneVersion === toneVersion && saved.segments && typeof saved.segments === 'object' &&
+          !Array.isArray(saved.segments)) {
+        const segments = Object.fromEntries(Object.entries(saved.segments).filter(([index, key]) =>
+          /^\d+$/.test(index) && typeof key === 'string' && /^[a-f0-9]{64}$/.test(key)));
+        return { toneVersion, segments };
+      }
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+  }
+  return { toneVersion, segments: {} };
+}
 
 function checkCancellation(signal) {
   if (signal?.aborted) throw new TtsCancelledError();
@@ -54,6 +98,8 @@ async function synthesizeSentence({
   if (typeof text !== 'string' || !text.trim()) {
     throw new Error('合成文本必须是非空字符串');
   }
+  const spokenText = normalizeSpeechText(text);
+  if (!spokenText.trim()) throw new Error('合成文本必须是非空字符串');
 
   let lastError = null;
   let maxAttempts = MAX_SYNTHESIS_ATTEMPTS;
@@ -66,7 +112,7 @@ async function synthesizeSentence({
     checkCancellation(signal);
     try {
       const { bytes, duration } = await provider.synthesizeToFile({
-        text, voice, outputPath, rate, pitch, emotion, signal, adapterOptions,
+        text: spokenText, voice, outputPath, rate, pitch, emotion, signal, adapterOptions,
       });
       checkCancellation(signal);
       return {
@@ -182,6 +228,11 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping, opt
   const voices = voiceMapping || defaultVoices;
   const intervalMs = options.minRequestIntervalMs ?? provider.getMinRequestIntervalMs?.(adapterOptions) ?? provider.minRequestIntervalMs ?? 0;
   fs.mkdirSync(workDir, { recursive: true });
+  const toneVersion = typeof provider.toneVersion === 'string' ? provider.toneVersion.trim() : '';
+  const spokenLines = dialogueList.map(line => typeof line?.text === 'string' ? normalizeSpeechText(line.text) : line?.text);
+  const checkpointFile = path.join(workDir, TTS_CHECKPOINT_FILENAME);
+  const needsCheckpoint = toneVersion || spokenLines.some((spoken, index) => spoken !== dialogueList[index]?.text);
+  const checkpoint = needsCheckpoint ? readSpeechCheckpoint(checkpointFile, toneVersion || 'speech-v1') : null;
   const entries = [];
   const totalSegments = dialogueList.length;
   let cachedSegments = 0;
@@ -199,15 +250,22 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping, opt
       checkCancellation(signal);
       report(index);
       checkCancellation(signal);
-      const existing = fs.existsSync(outputPath) && fs.readFileSync(outputPath);
+      const spokenText = spokenLines[index];
+      const getKey = () => {
+        if (typeof spokenText !== 'string') throw new Error('合成文本必须是非空字符串');
+        const scopeHash = provider.getScopeHash?.([voice], adapterOptions);
+        return buildCacheKey({ scopeHash, provider: provider.id, model: cacheModel, voice, rate, pitch, emotion, text: spokenText, toneVersion });
+      };
+      const checkpointKey = (toneVersion || spokenText !== text) && getKey();
+      const reuseAllowed = !checkpointKey || checkpoint.segments[index] === checkpointKey;
+      const existing = reuseAllowed && fs.existsSync(outputPath) && fs.readFileSync(outputPath);
       let fileSize;
       if (existing && isValidMp3(existing)) {
         reusedSegments++;
         cachedSegments++;
         fileSize = existing.length;
       } else {
-        const scopeHash = cache && provider.getScopeHash?.([voice], adapterOptions);
-        const key = cache && buildCacheKey({ scopeHash, provider: provider.id, model: cacheModel, voice, rate, pitch, emotion, text });
+        const key = checkpointKey || ((cache || checkpoint) && getKey());
         const cached = cache?.get(key, outputPath);
         if (cached?.hit) {
           cachedSegments++;
@@ -227,6 +285,10 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping, opt
           checkCancellation(signal);
           cache?.put(key, outputPath);
           fileSize = result.fileSize;
+        }
+        if (checkpoint && checkpoint.segments[index] !== key) {
+          checkpoint.segments[index] = key;
+          atomicWrite(checkpointFile, JSON.stringify(checkpoint));
         }
       }
       entries.push({ filePath: outputPath, fileSize, fileName, speaker, text, emotion });
@@ -250,7 +312,9 @@ module.exports = {
   AVAILABLE_VOICES,
   AVAILABLE_VOICE_IDS,
   SENTENCE_GAP_SECONDS,
+  TTS_CHECKPOINT_FILENAME,
   sentenceFileName,
+  normalizeSpeechText,
   synthesizeSentence,
   synthesizeDialogueScript,
   buildSentenceTimeline,

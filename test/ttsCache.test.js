@@ -4,7 +4,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
-const { buildCacheKey, createTtsCache } = require('../src/services/ttsCache');
+const { buildCacheKey, createTtsCache, speechScopeHash } = require('../src/services/ttsCache');
+const { normalizeSpeechText, synthesizeSentence, synthesizeDialogueScript, DEFAULT_VOICES, TTS_CHECKPOINT_FILENAME } = require('../src/services/ttsService');
 const { makeMp3 } = require('./helpers/mp3Fixtures');
 const { getMp3DurationSeconds } = require('../src/services/mp3Utils');
 
@@ -28,6 +29,76 @@ test('情绪区分缓存，省略或填写空情绪均保留旧缓存键', () =>
   assert.equal(buildCacheKey({ ...scoped, emotion: ' 好奇 ' }), curiousKey);
   assert.notEqual(curiousKey, oldKey);
   assert.notEqual(curiousKey, buildCacheKey({ ...scoped, emotion: '笑意' }));
+  assert.equal(buildCacheKey({ ...scoped, toneVersion: ' ' }), oldKey);
+  assert.notEqual(buildCacheKey({ ...scoped, toneVersion: 'tone-v2' }), oldKey);
+  assert.notEqual(buildCacheKey({ ...scoped, toneVersion: 'tone-v2' }), buildCacheKey({ ...scoped, emotion: 'tone-v2' }));
+});
+
+test('语音年份、年代和区间按位读，普通数字保持原样', () => {
+  const cases = [
+    ['1972 年和1972年', '一九七二年和一九七二年'],
+    ['2026 年和2026年', '二零二六年和二零二六年'],
+    ['1100年和2099年', '一一零零年和二零九九年'],
+    ['1970 年代和1970年代', '一九七零年代和一九七零年代'],
+    ['80 年代、90年代、10 年代', '八零年代、九零年代、一零年代'],
+    ['3000 年前，5000 年历史，1000 年，1099年，2100年', '3000 年前，5000 年历史，1000 年，1099年，2100年'],
+    ['1972 元，1.2024年，12024年，1.90年代，12080 年代，80年', '1972 元，1.2024年，12024年，1.90年代，12080 年代，80年'],
+    ['1000—1978 年，1972—2100年，1.1972-1978年', '1000—1978 年，1972—2100年，1.1972-1978年'],
+    ['历时1200年，长达 1500 年', '历时1200年，长达 1500 年'],
+    ['持续1200至1500年', '持续1200至1500年'],
+    ['约1972年出生', '约一九七二年出生'],
+    ['约1200年历史，大约1500年时间', '约1200年历史，大约1500年时间'],
+    ['近1200到1500年的岁月，约1972至1978年间', '近1200到1500年的岁月，约1972至1978年间'],
+    ['大约1972至1978年完成', '大约一九七二至一九七八年完成'],
+    ['v2024年版与foo/2024年', 'v2024年版与foo/2024年'],
+    ['（https://example.com/2024年），2026年', '（https://example.com/2024年），二零二六年'],
+    ['1972 至 1978 年、1972 到 1978 年', '一九七二至一九七八年、一九七二到一九七八年'],
+    ...['-', '~', '～', '—', '–'].map(separator => [`1972 ${separator} 1978 年`, '一九七二到一九七八年']),
+  ];
+  for (const [text, expected] of cases) {
+    assert.equal(normalizeSpeechText(text), expected, text);
+    assert.equal(normalizeSpeechText(expected), expected, text);
+  }
+});
+
+test('合成和缓存键使用语音读法，台词与进度保留原文', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tts-spoken-text-'));
+  t.after(() => fs.rmSync(root, { recursive: true }));
+  const cache = createTtsCache(path.join(root, 'cache'));
+  const legacyAudio = path.join(root, 'legacy.mp3');
+  fs.writeFileSync(legacyAudio, makeMp3(2));
+  const calls = [];
+  const provider = {
+    id: 'offline', model: 'v1',
+    synthesizeToFile({ outputPath, text }) {
+      calls.push(text);
+      const audio = makeMp3(5);
+      fs.writeFileSync(outputPath, audio);
+      return { bytes: audio.length, duration: 0.12 };
+    },
+  };
+  const spoken = '始于一九七二年';
+  const source = '始于1972 年';
+  const cacheKey = text => buildCacheKey({ provider: provider.id, model: provider.model, voice: DEFAULT_VOICES.阿泽, text });
+  cache.put(cacheKey(source), legacyAudio);
+  for (const text of [null, '', ' \n ']) {
+    await assert.rejects(synthesizeSentence({ text, provider }), /合成文本必须是非空字符串/);
+  }
+  await synthesizeSentence({ text: '2026年', provider, outputPath: path.join(root, 'direct.mp3') });
+  const progress = [];
+  for (const [index, text] of [source, '始于1972年', spoken].entries()) {
+    const dialogue = [{ speaker: '阿泽', text }];
+    const result = await synthesizeDialogueScript(dialogue, path.join(root, String(index)), undefined,
+      { cache, provider, onProgress: update => progress.push(update.text) });
+    assert.equal(result.cachedSegments, index === 0 ? 0 : 1);
+    assert.equal(result.dialogue[0].text, text);
+    assert.equal(dialogue[0].text, text);
+    assert.deepEqual(fs.readFileSync(result.dialogue[0].filePath), makeMp3(5));
+  }
+  assert.deepEqual(calls, ['二零二六年', spoken]);
+  assert.deepEqual(progress, [source, source, '始于1972年', '始于1972年', spoken, spoken]);
+  assert.deepEqual(fs.readFileSync(cache.getPath(cacheKey(source))), makeMp3(2));
+  assert.deepEqual(fs.readFileSync(cache.getPath(cacheKey(spoken))), makeMp3(5));
 });
 
 test('缓存校验原始音频，原子复制，损坏时清除并允许重建', t => {
@@ -58,7 +129,6 @@ test('缓存校验原始音频，原子复制，损坏时清除并允许重建',
 });
 
 test('逐句合成优先复用工作目录，然后查缓存，且报告两种命中数', async t => {
-  const { synthesizeDialogueScript, DEFAULT_VOICES } = require('../src/services/ttsService');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tts-reuse-'));
   t.after(() => fs.rmSync(root, { recursive: true }));
   const cache = createTtsCache(path.join(root, 'cache'));
@@ -88,7 +158,6 @@ test('逐句合成优先复用工作目录，然后查缓存，且报告两种�
 });
 
 test('每次合成选择的模型同时用于上游请求与缓存键，缺省音色来自当前服务商', async t => {
-  const { synthesizeDialogueScript } = require('../src/services/ttsService');
   const { createMinimaxProvider } = require('../src/services/minimaxTtsProvider');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tts-model-cache-'));
   t.after(() => fs.rmSync(root, { recursive: true }));
@@ -112,6 +181,94 @@ test('每次合成选择的模型同时用于上游请求与缓存键，缺省�
     assert.equal(result.cachedSegments, hits);
   }
   assert.deepEqual(calls, cases.filter(([, , hits]) => hits === 0).map(([model, emotion]) => [provider.defaultVoices.小晓, model, emotion]));
+});
+
+test('新版语气绕过旧缓存和断点，匹配分段键后才复用新版断点', async t => {
+  const { createMinimaxProvider, DEFAULT_MINIMAX_ENDPOINT } = require('../src/services/minimaxTtsProvider');
+  const { volcengineProvider, DEFAULT_VOLCENGINE_ENDPOINT } = require('../src/services/volcengineTtsProvider');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tts-tone-checkpoint-'));
+  t.after(() => fs.rmSync(root, { recursive: true }));
+  const cache = createTtsCache(path.join(root, 'cache'));
+  const oldAudio = makeMp3(2);
+  const newAudio = makeMp3(5);
+  for (const [original, endpoint] of [[createMinimaxProvider({ minRequestIntervalMs: 0 }), DEFAULT_MINIMAX_ENDPOINT],
+    [volcengineProvider, DEFAULT_VOLCENGINE_ENDPOINT]]) {
+    const calls = [];
+    const provider = { ...original, synthesizeToFile({ text, outputPath, emotion }) {
+      calls.push([text, emotion]);
+      fs.writeFileSync(outputPath, newAudio);
+      return { bytes: newAudio.length, duration: 0.12 };
+    } };
+    const voice = provider.defaultVoices.阿泽;
+    const settings = { provider: provider.id, model: provider.model, voice, text: '说到这里', emotion: '兴奋' };
+    const credentials = { apiKey: 'offline-voice-key' };
+    const legacyScope = speechScopeHash(endpoint, credentials, [voice], provider.availableVoices, endpoint);
+    const currentScope = provider.getScopeHash([voice], credentials);
+    assert.equal(provider.toneVersion, 'tone-v2');
+    assert.notEqual(currentScope, legacyScope);
+    const oldKey = buildCacheKey({ ...settings, scopeHash: legacyScope });
+    const newKey = buildCacheKey({ ...settings, scopeHash: currentScope, toneVersion: provider.toneVersion });
+    const workDir = path.join(root, provider.id);
+    fs.mkdirSync(workDir);
+    const segment = path.join(workDir, 'sentence_000.mp3');
+    const checkpointFile = path.join(workDir, TTS_CHECKPOINT_FILENAME);
+    fs.writeFileSync(segment, oldAudio);
+    cache.put(oldKey, segment);
+    if (provider.id === 'volcengine') {
+      fs.writeFileSync(checkpointFile, JSON.stringify({ toneVersion: 'tone-v1', segments: { 0: oldKey } }));
+    }
+
+    const dialogue = [{ speaker: '阿泽', text: settings.text, emotion: settings.emotion }];
+    const fresh = await synthesizeDialogueScript(dialogue, workDir, null, { cache, provider, adapterOptions: credentials });
+    assert.equal(fresh.cachedSegments, 0);
+    assert.equal(fresh.reusedSegments, 0);
+    assert.deepEqual(fs.readFileSync(segment), newAudio);
+    assert.deepEqual(fs.readFileSync(cache.getPath(oldKey)), oldAudio);
+    assert.deepEqual(fs.readFileSync(cache.getPath(newKey)), newAudio);
+    assert.deepEqual(JSON.parse(fs.readFileSync(checkpointFile)), { toneVersion: 'tone-v2', segments: { 0: newKey } });
+
+    const resumeWithoutCache = () => synthesizeDialogueScript(dialogue, workDir, null, { provider, adapterOptions: credentials });
+    assert.equal((await resumeWithoutCache()).reusedSegments, 1);
+    fs.writeFileSync(segment, oldAudio);
+    fs.writeFileSync(checkpointFile, JSON.stringify({ toneVersion: 'tone-v2', segments: { 0: oldKey } }));
+    assert.equal((await resumeWithoutCache()).reusedSegments, 0);
+    assert.deepEqual(fs.readFileSync(segment), newAudio);
+    assert.deepEqual(calls, [[settings.text, settings.emotion], [settings.text, settings.emotion]]);
+  }
+});
+
+test('Edge 首次续跑重合成年份台词，第二次只复用匹配口播键的断点', async t => {
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tts-speech-checkpoint-'));
+  t.after(() => fs.rmSync(workDir, { recursive: true }));
+  const legacyAudio = makeMp3(2);
+  const newAudio = makeMp3(5);
+  const calls = [];
+  const provider = { id: 'edge', model: 'offline', synthesizeToFile({ text, outputPath }) {
+    calls.push(text);
+    fs.writeFileSync(outputPath, newAudio);
+    return { bytes: newAudio.length, duration: 0.12 };
+  } };
+  const rawYear = '始于1972 年';
+  const spokenYear = '始于一九七二年';
+  const dialogue = [rawYear, '原样复用', '补合成普通台词'].map(text => ({ speaker: '阿泽', text }));
+  const legacyYearPath = path.join(workDir, 'sentence_000.mp3');
+  const ordinaryPath = path.join(workDir, 'sentence_001.mp3');
+  fs.writeFileSync(legacyYearPath, legacyAudio);
+  fs.writeFileSync(ordinaryPath, legacyAudio);
+
+  const run = () => synthesizeDialogueScript(dialogue, workDir, null, { provider });
+  const fresh = await run();
+  assert.equal(fresh.reusedSegments, 1);
+  assert.deepEqual(calls, [spokenYear, '补合成普通台词']);
+  assert.deepEqual(fs.readFileSync(legacyYearPath), newAudio);
+  assert.deepEqual(fs.readFileSync(ordinaryPath), legacyAudio);
+  assert.equal(fresh.dialogue[0].text, rawYear);
+  const keyFor = text => buildCacheKey({ provider: provider.id, model: provider.model, voice: DEFAULT_VOICES.阿泽, text });
+  const checkpoint = JSON.parse(fs.readFileSync(path.join(workDir, TTS_CHECKPOINT_FILENAME)));
+  assert.deepEqual(checkpoint, { toneVersion: 'speech-v1', segments: { 0: keyFor(spokenYear), 2: keyFor(dialogue[2].text) } });
+
+  assert.equal((await run()).reusedSegments, 3);
+  assert.deepEqual(calls, [spokenYear, '补合成普通台词']);
 });
 
 test('官方预置音色共享缓存，自定义服务只使用实际选中的认证方式生成摘要', () => {
