@@ -157,6 +157,23 @@
     edge: 'Edge 免费',
   };
 
+  const TTS_COMPACT_LABELS = {
+    minimax: 'MiniMax',
+    volcengine: '豆包',
+    edge: 'Edge 免费',
+  };
+
+  const SOURCE_TYPE_LABELS = {
+    url: '链接',
+    text: '正文',
+    image: '识图',
+  };
+
+  const PODCAST_STYLE_LABELS = {
+    deep_dive: '深度主讲',
+    dialogue: '轻松对谈',
+  };
+
   const TTS_MODEL_LABELS = {
     'speech-2.8-turbo': 'speech-2.8-turbo（新一代高性价比·推荐）',
     'speech-2.8-hd': 'speech-2.8-hd（新一代高清）',
@@ -254,6 +271,10 @@
     pollInFlight: false,
     elapsedTimer: null,
     historyItems: [],
+    pendingDeleteId: null,
+    deletingPodcastId: null,
+    historySelectSeq: 0,
+    deletedPodcastIds: new Set(),
     currentPodcast: null,
     currentMetaBaseText: '尚无已选播客',
     audioEngine: null,
@@ -403,6 +424,7 @@
     playerDeck: document.getElementById('playerDeck'),
     waveVisualizer: document.getElementById('waveVisualizer'),
     currentPodcastMeta: document.getElementById('currentPodcastMeta'),
+    currentPodcastBadges: document.getElementById('currentPodcastBadges'),
     currentPodcastTitle: document.getElementById('currentPodcastTitle'),
     currentPodcastSummary: document.getElementById('currentPodcastSummary'),
     currentTime: document.getElementById('currentTime'),
@@ -1364,6 +1386,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mode: 'text',
+          sourceType: ['url', 'text', 'image'].includes(draftSnapshot.mode) ? draftSnapshot.mode : 'text',
           title: draftSnapshot.title,
           content: draftSnapshot.content,
           podcastStyle: state.podcastStyle,
@@ -1699,6 +1722,148 @@
     }
   }
 
+  function resolveVoiceShortName(providerId, voiceId) {
+    if (!voiceId) return '';
+    const provider = getCatalogProvider(providerId || 'edge');
+    const found = provider?.availableVoices?.find((v) => v.id === voiceId);
+    if (found?.name) {
+      return String(found.name).replace(/[（(][^）)]*[）)]/g, '').trim() || found.name;
+    }
+    return voiceId;
+  }
+
+  function formatEpisodeVoiceSummary(podcast) {
+    const providerId = podcast?.ttsProvider || '';
+    const label = TTS_COMPACT_LABELS[providerId] || (providerId || 'Edge 免费');
+    const mapping = podcast?.voiceMapping;
+    if (!providerId && !mapping) {
+      return { pill: 'Edge 免费', detail: '语音引擎：Edge 免费' };
+    }
+    const host = resolveVoiceShortName(providerId || 'edge', mapping?.阿泽);
+    const guest = resolveVoiceShortName(providerId || 'edge', mapping?.小晓);
+    const pair = host && guest ? `${host} × ${guest}` : (host || guest || '');
+    const pill = pair ? `${label} · ${pair}` : label;
+    const modelPart = podcast?.ttsModel ? ` (${podcast.ttsModel})` : '';
+    return { pill, detail: `语音：${label}${modelPart}${pair ? ` · ${pair}` : ''}` };
+  }
+
+  function renderCurrentPodcastBadges(podcast) {
+    if (!dom.currentPodcastBadges) return;
+    dom.currentPodcastBadges.textContent = '';
+    if (!podcast) {
+      dom.currentPodcastBadges.classList.add('hidden');
+      return;
+    }
+    const pills = [];
+    const sourceLabel = SOURCE_TYPE_LABELS[podcast.sourceType];
+    if (sourceLabel) pills.push({ text: sourceLabel });
+    const styleLabel = PODCAST_STYLE_LABELS[podcast.podcastStyle];
+    if (styleLabel) pills.push({ text: styleLabel });
+    const voiceInfo = formatEpisodeVoiceSummary(podcast);
+    if (voiceInfo?.pill) pills.push({ text: voiceInfo.pill, title: voiceInfo.detail });
+
+    pills.forEach((p) => {
+      const span = document.createElement('span');
+      span.className = 'meta-pill';
+      span.textContent = p.text;
+      if (p.title) span.title = p.title;
+      dom.currentPodcastBadges.appendChild(span);
+    });
+    dom.currentPodcastBadges.classList.toggle('hidden', pills.length === 0);
+  }
+
+  function resetPlayerToEmptyState() {
+    state.currentPodcast = null;
+    window.InputSource.resetPlaybackHighlight(state.input);
+    state.audioEngine?.requestPause?.();
+    dom.mainAudio.pause();
+    dom.mainAudio.removeAttribute('src');
+    dom.mainAudio.load();
+
+    dom.currentPodcastTitle.textContent = '导入一篇文章，或从左侧选择一期播客开始收听';
+    state.currentMetaBaseText = '尚无已选播客';
+    dom.currentPodcastMeta.textContent = state.currentMetaBaseText;
+    renderCurrentPodcastBadges(null);
+    dom.currentPodcastSummary.textContent = '';
+    dom.currentPodcastSummary.classList.add('hidden');
+
+    dom.currentTime.textContent = '00:00';
+    dom.totalDuration.textContent = '00:00';
+    setSeekProgress(0);
+    dom.seekSlider.disabled = true;
+    dom.btnPlayPause.disabled = true;
+    dom.btnRewind10.disabled = true;
+    dom.btnForward10.disabled = true;
+    if (dom.btnBgmMode) dom.btnBgmMode.disabled = true;
+    dom.btnSpeed.disabled = true;
+    dom.btnCopyMarkdown.disabled = true;
+    dom.btnDownloadAudio.removeAttribute('href');
+    dom.btnDownloadAudio.classList.add('is-disabled');
+    dom.btnDownloadAudio.setAttribute('aria-disabled', 'true');
+
+    setDeckPlaying(false);
+    dom.playerDeck.dataset.speaker = 'none';
+    dom.miniTitle.textContent = 'AI 妙听双人播客';
+    dom.miniTime.textContent = '00:00 / 00:00';
+    if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.speaker = 'none';
+    updateMobileMiniVisibility();
+
+    dom.subtitlesList.textContent = '';
+    state.subtitleElements = [];
+    const empty = document.createElement('div');
+    empty.className = 'subtitles-empty';
+    const p = document.createElement('p');
+    p.textContent = '还没有已选播客，从左侧导入一篇文章即可生成双人对话播客。';
+    empty.appendChild(p);
+    dom.subtitlesList.appendChild(empty);
+  }
+
+  function createDeleteIconSvg() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('width', '14');
+    svg.setAttribute('height', '14');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.7');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    poly.setAttribute('points', '3 6 5 6 21 6');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2');
+    svg.append(poly, path);
+    return svg;
+  }
+
+  async function handleDeletePodcast(podcastId) {
+    if (!podcastId || state.deletingPodcastId === podcastId) return;
+    state.deletingPodcastId = podcastId;
+    renderHistoryList();
+    try {
+      await apiJson(`/api/podcasts/${encodeURIComponent(podcastId)}`, { method: 'DELETE' });
+      state.deletedPodcastIds.add(podcastId);
+      state.historySelectSeq += 1;
+      const deletedActive = state.currentPodcast?.id === podcastId;
+      state.historyItems = state.historyItems.filter((item) => item.id !== podcastId);
+      state.pendingDeleteId = null;
+      state.deletingPodcastId = null;
+      if (deletedActive) resetPlayerToEmptyState();
+      renderHistoryList();
+      showToast('已删除该期本地播客');
+      if (deletedActive && state.historyItems.length > 0) {
+        await handleSelectHistory(state.historyItems[0].id);
+      }
+    } catch (err) {
+      showToast(err.message || '删除播客失败');
+      state.pendingDeleteId = null;
+      renderHistoryList();
+    } finally {
+      state.deletingPodcastId = null;
+    }
+  }
+
   function renderHistoryList() {
     const items = state.historyItems;
     dom.historyCount.textContent = `${items.length} 集`;
@@ -1713,14 +1878,15 @@
     }
 
     items.forEach((item) => {
+      const row = document.createElement('div');
+      row.className = 'history-row';
+      const isCurrent = state.currentPodcast?.id === item.id;
+      if (isCurrent) row.classList.add('is-active');
+
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'history-item';
-      const isCurrent = state.currentPodcast?.id === item.id;
-      if (isCurrent) {
-        btn.classList.add('is-active');
-        btn.setAttribute('aria-current', 'true');
-      }
+      if (isCurrent) btn.setAttribute('aria-current', 'true');
 
       const title = document.createElement('span');
       title.className = 'history-item-title';
@@ -1728,24 +1894,73 @@
 
       const meta = document.createElement('span');
       meta.className = 'history-item-meta';
+      const sourceLabel = SOURCE_TYPE_LABELS[item.sourceType];
+      if (sourceLabel) {
+        const tag = document.createElement('span');
+        tag.className = 'history-source-tag';
+        tag.textContent = sourceLabel;
+        meta.appendChild(tag);
+      }
       const parts = [
         `${item.sentenceCount || 0} 句`,
         formatTime(item.totalDuration || 0),
         formatDateLabel(item.createAt),
       ].filter(Boolean);
-      meta.textContent = parts.join(' · ');
+      const textSpan = document.createElement('span');
+      textSpan.textContent = parts.join(' · ');
+      meta.appendChild(textSpan);
 
       btn.append(title, meta);
-      btn.addEventListener('click', () => handleSelectHistory(item.id));
-      dom.historyList.appendChild(btn);
+      btn.addEventListener('click', () => {
+        state.pendingDeleteId = null;
+        handleSelectHistory(item.id);
+      });
+      row.appendChild(btn);
+
+      if (state.pendingDeleteId === item.id) {
+        const confirmGroup = document.createElement('div');
+        confirmGroup.className = 'history-delete-confirm';
+        const deletingNow = state.deletingPodcastId === item.id;
+        const confirmBtn = createActionBtn(
+          deletingNow ? '删除中…' : '删除',
+          'btn btn-danger-ghost btn-sm',
+          () => handleDeletePodcast(item.id)
+        );
+        confirmBtn.disabled = deletingNow;
+        const cancelBtn = createActionBtn('取消', 'btn btn-ghost btn-sm', () => {
+          state.pendingDeleteId = null;
+          renderHistoryList();
+        });
+        cancelBtn.disabled = deletingNow;
+        confirmGroup.append(confirmBtn, cancelBtn);
+        row.appendChild(confirmGroup);
+      } else {
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'history-delete-btn';
+        delBtn.title = `删除《${item.podcastTitle || '未命名播客'}》`;
+        delBtn.setAttribute('aria-label', `删除播客 ${item.podcastTitle || '未命名播客'}`);
+        delBtn.appendChild(createDeleteIconSvg());
+        delBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          state.pendingDeleteId = item.id;
+          renderHistoryList();
+        });
+        row.appendChild(delBtn);
+      }
+
+      dom.historyList.appendChild(row);
     });
   }
 
   async function handleSelectHistory(podcastId) {
+    const reqSeq = ++state.historySelectSeq;
     try {
       const podcast = await apiJson(`/api/podcasts/${encodeURIComponent(podcastId)}`);
+      if (reqSeq !== state.historySelectSeq || state.deletedPodcastIds.has(podcastId)) return;
       loadPodcast(podcast, { autoplay: false });
     } catch (err) {
+      if (reqSeq !== state.historySelectSeq || state.deletedPodcastIds.has(podcastId)) return;
       showToast(err.message || '读取播客详情失败');
     }
   }
@@ -1780,6 +1995,7 @@
     dom.currentPodcastTitle.textContent = podcast.podcastTitle || 'AI 妙听双人播客';
     state.currentMetaBaseText = `共 ${sentences.length} 句对话 · 全长 ${formatTime(podcast.totalDuration || 0)}`;
     dom.currentPodcastMeta.textContent = state.currentMetaBaseText;
+    renderCurrentPodcastBadges(podcast);
 
     if (podcast.summary) {
       dom.currentPodcastSummary.textContent = podcast.summary;
