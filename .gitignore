@@ -1,8 +1,10 @@
 node_modules/
 .env
 .env.*
+!.env.example
 .DS_Store
 data/
 /public/podcasts/
 /启动 AI 妙听.app/
+/dist/
 *.log

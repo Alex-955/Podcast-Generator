@@ -40,11 +40,31 @@ npm install
 npm start
 ```
 
-服务默认监听 `http://127.0.0.1:3000`。打开浏览器后，可在右上角 **「模型与语音」** 中选择大模型快捷预设与语音服务商并填入 API Key（仅存在当前浏览器 `localStorage`，不会写入服务端任务或成品 JSON），或通过服务端 `.env` 提供默认 Key。
+服务默认监听 `http://127.0.0.1:3000`。打开浏览器后，可在右上角 **「模型与语音」** 中选择大模型快捷预设与语音服务商并填入 API Key（仅存在当前浏览器 `localStorage`，不会写入服务端任务或成品 JSON），或复制 `.env.example` 为 `.env` 提供默认 Key。
 
-> 若不习惯使用终端，可在 macOS 运行一次 `bash scripts/build-mac-launcher.sh` 生成 **`启动 AI 妙听.app`**，以后在访达或程序坞直接双击即可在后台启动服务并弹出浏览器（再次双击可一键重启或停止服务）。`npm start` 与 `npm run dev` 默认启用了 `--use-bundled-ca`，避免部分 macOS Homebrew Node 环境因缺少 OpenSSL `cert.pem` 导致 HTTPS 证书校验失败，同时保留完整证书校验并兼容 `NODE_EXTRA_CA_CERTS`。
+> `npm start` 与 `npm run dev` 默认启用了 `--use-bundled-ca`，避免部分 macOS Homebrew Node 环境因缺少 OpenSSL `cert.pem` 导致 HTTPS 证书校验失败，同时保留完整证书校验并兼容 `NODE_EXTRA_CA_CERTS`。
 
-### 2. 开发热重载与离线回归测试
+### 2. 便携版下载与一键双击启动（Windows + macOS）
+
+本项目提供同源的 Windows 与 macOS 双端便携启动器，无需数据库、Redis 或 `ffmpeg`：
+
+- **Windows**：解压便携包后直接双击根目录 **`启动 AI 妙听.bat`**（若从源码仓库直接运行，也可运行 `scripts\launchers\start-windows.bat`；会自动检测 Node.js、按需补装依赖、端口占用自动顺延并弹出浏览器）；双击 **`停止 AI 妙听.bat`** 安全停止后台服务。
+- **macOS**：解压便携包后直接双击根目录 **`启动 AI 妙听.command`**（源码仓库位于 `scripts/launchers/start-macos.command`，会自动搜索常见 PATH / Homebrew / nvm / Volta / fnm 路径下的 Node.js 并启动打开网页）；双击 **`停止 AI 妙听.command`** 停止服务。也可运行 `bash scripts/build-mac-launcher.sh` 生成 **`启动 AI 妙听.app`** 拖入程序坞使用。
+- **命令行常用命令**：
+  ```bash
+  # 启动后台服务并自动打开浏览器（端口被占用时自动顺延空闲端口）
+  npm run launcher
+  npm run launcher:stop
+
+  # 开放局域网手机试听（同一 Wi-Fi 下可直接扫码/输 IP 打开）
+  node scripts/start-portable.js --lan --open
+
+  # 构建带依赖与 SHA256 校验文件的双端干净便携包（内置发布前隐私与安全门禁）
+  npm run release:build -- --with-deps --format both
+  ```
+  推送 `v*` 标签到 GitHub 时，GitHub Actions 会自动运行全量离线测试、安全门禁并生成 `.zip` / `.tar.gz` 便携包及 `SHA256SUMS.txt` 发布到 GitHub Releases。
+
+### 3. 开发热重载与离线回归测试
 
 ```bash
 # 开发模式（监听 server.js 改动自动重启）
@@ -54,7 +74,7 @@ npm run dev
 npm test
 ```
 
-### 3. 局域网手机浏览器试听
+### 4. 局域网手机浏览器试听
 
 在桌面与手机处于同一局域网（Wi-Fi）时，指定 `HOST=0.0.0.0` 启动即可用手机浏览器访问：
 

@@ -6,6 +6,9 @@
   "scripts": {
     "start": "node --use-bundled-ca server.js",
     "dev": "node --use-bundled-ca --watch server.js",
+    "launcher": "node scripts/start-portable.js --open",
+    "launcher:stop": "node scripts/start-portable.js --stop",
+    "release:build": "node scripts/build-release.js",
     "test": "node --test test/*.test.js"
   },
   "keywords": [

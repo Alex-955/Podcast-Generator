@@ -8,7 +8,7 @@
 
 | 阶段 | 形态与目标 | 核心能力与工程重点 |
 |---|---|---|
-| **V1（当前收口）** | 本机 Web + macOS 双击启动器 | - 链接/正文双通道防串线导入与确认预览<br>- 异步 4 阶段真实进度、单句 MP3 缓存与断点续跑<br>- 多语音引擎底座（MiniMax Speech + 火山引擎豆包 V3 + Edge 兼容回退）<br>- 剧本模型厂商快捷预设 + 获取指引 + 连接检测规划<br>- 公开仓库体检（提交历史零敏感 Key/私人音频、补 `LICENSE` 与文档截图）后转为 GitHub Public |
+| **V1（当前收口）** | 本机 Web + Windows/macOS 双端便携启动 | - 链接/正文/长图识字防串线导入与润色确认预览，支持深度主讲（7:3）/轻松对谈（5:5）双节律与克制语气播报<br>- 异步 4 阶段真实进度、单句 MP3 缓存与断点续跑，纯语音年份/年代规范化（字幕保留原文）<br>- 多语音引擎底座（MiniMax Speech + 火山引擎豆包 V3 + Edge 兼容回退），历史列表支持来源标签、音色徽标与两步安全删除（局域网默认禁删）<br>- 跨平台便携启动脚本（`启动 AI 妙听.bat` / `.command` / `.app`）、纯 Node 干净便携包构建与隐私安全门禁、MIT `LICENSE`、`.env.example` 与 GitHub Actions CI / Releases 自动化 |
 | **V2（桌面通用版）** | Windows（`.exe`）+ macOS（`.dmg`）双端安装包 | - 免装 Node.js / ffmpeg，双击安装即用<br>- 动态挑选本机空闲端口，数据目录（`DATA_DIR` / `PODCASTS_DIR`）自动指向系统用户目录<br>- 接入 GitHub Actions 自动编译打包并发布至 GitHub Releases |
 | **V3（安卓移动版）** | Android `.apk` 安装包 | - 采用**纯端侧 BYOK** 架构（客户端直连文章源、LLM 与 TTS，端侧完成纯 JS MP3 帧拼接），无需自建云服务<br>- 支持后台播放与系统通知栏/锁屏媒体控制<br>- 可选支持连接同一局域网下的桌面版服务共享历史记录 |
 | **V4（远期扩展）** | iOS / 鸿蒙（HarmonyOS Next） | - 等桌面端与 Android APK 验证真实使用习惯和生态后再启动适配，降低早期维护成本 |
