@@ -15,7 +15,13 @@
     model: 'ai_podcast_model',
     visionConfig: 'ai_podcast_vision_config',
     ttsConfig: 'ai_podcast_tts_config',
+    podcastStyle: 'ai_podcast_script_style',
     activeTaskId: 'ai_podcast_active_task_id',
+  };
+
+  const PODCAST_STYLE_DESCS = {
+    deep_dive: '7:3 主讲拆解 + 主持追问 · 贴近 AI 妙听',
+    dialogue: '阿泽与小晓 5:5 轻快接力对谈',
   };
 
   const LLM_PRESETS = [
@@ -231,11 +237,16 @@
     modalTtsProvider: 'edge',
     modalVolcAuthMode: 'apiKey',
     uiInputTab: 'url',
+    podcastStyle: readStorage(STORAGE_KEYS.podcastStyle) === 'dialogue' ? 'dialogue' : 'deep_dive',
     input: window.InputSource.createState(),
     imageSlices: [],
     extractingImages: false,
+    extractAbortController: null,
+    extractTimer: null,
     confirmedDraft: null,
     polishingDraft: false,
+    polishAbortController: null,
+    polishTimer: null,
     fullPreviewExpanded: false,
     llmModelsCache: new Map(),
     activeTask: null,
@@ -334,6 +345,11 @@
     imageDropZone: document.getElementById('imageDropZone'),
     inputImageFiles: document.getElementById('inputImageFiles'),
     imagePreviewStrip: document.getElementById('imagePreviewStrip'),
+    imageProgressPanel: document.getElementById('imageProgressPanel'),
+    imageProgressStage: document.getElementById('imageProgressStage'),
+    imageProgressElapsed: document.getElementById('imageProgressElapsed'),
+    imageProgressFill: document.getElementById('imageProgressFill'),
+    btnCancelExtractImages: document.getElementById('btnCancelExtractImages'),
     imageSelectionMeta: document.getElementById('imageSelectionMeta'),
     btnClearImages: document.getElementById('btnClearImages'),
     btnExtractImages: document.getElementById('btnExtractImages'),
@@ -352,9 +368,13 @@
     confirmTruncatedBadge: document.getElementById('confirmTruncatedBadge'),
     confirmTitle: document.getElementById('confirmTitle'),
     confirmExcerpt: document.getElementById('confirmExcerpt'),
+    confirmStyleButtons: document.querySelectorAll('[data-podcast-style]'),
+    confirmStyleDesc: document.getElementById('confirmStyleDesc'),
     btnToggleFullPreview: document.getElementById('btnToggleFullPreview'),
     btnPolishDraft: document.getElementById('btnPolishDraft'),
     polishBanner: document.getElementById('polishBanner'),
+    polishProgressBar: document.getElementById('polishProgressBar'),
+    polishProgressFill: document.getElementById('polishProgressFill'),
     polishBannerText: document.getElementById('polishBannerText'),
     polishBannerActions: document.getElementById('polishBannerActions'),
     btnEditInput: document.getElementById('btnEditInput'),
@@ -571,9 +591,19 @@
   }
 
   function invalidateConfirmedDraft() {
+    if (state.polishAbortController) {
+      state.polishAbortController.abort();
+      state.polishAbortController = null;
+    }
+    if (state.polishTimer) {
+      window.clearInterval(state.polishTimer);
+      state.polishTimer = null;
+    }
     state.confirmedDraft = null;
     state.fullPreviewExpanded = false;
     dom.confirmCard.classList.add('hidden');
+    if (dom.polishBanner) dom.polishBanner.classList.remove('is-loading');
+    if (dom.polishProgressBar) dom.polishProgressBar.classList.add('hidden');
     if (dom.studioRail) dom.studioRail.classList.remove('has-confirm');
     const previewSpan = dom.btnPreviewText.querySelector('span');
     if (previewSpan) previewSpan.textContent = '预览并确认';
@@ -635,12 +665,26 @@
     dom.textCharCount.classList.toggle('is-over', len > MAX_CONTENT_LENGTH);
   }
 
+  function updatePodcastStyleUI() {
+    const style = state.podcastStyle === 'dialogue' ? 'dialogue' : 'deep_dive';
+    dom.confirmStyleButtons?.forEach((btn) => {
+      const active = btn.dataset.podcastStyle === style;
+      btn.classList.toggle('is-active', active);
+      btn.setAttribute('aria-checked', String(active));
+    });
+    if (dom.confirmStyleDesc) {
+      dom.confirmStyleDesc.textContent = PODCAST_STYLE_DESCS[style] || PODCAST_STYLE_DESCS.deep_dive;
+    }
+  }
+
   function renderPolishBanner() {
     const draft = state.confirmedDraft;
     if (!dom.polishBanner || !draft) return;
 
     dom.polishBannerActions.textContent = '';
-    dom.polishBanner.classList.remove('is-done');
+    dom.polishBanner.classList.remove('is-done', 'is-loading');
+    if (dom.polishProgressBar) dom.polishProgressBar.classList.add('hidden');
+    if (dom.polishProgressFill) dom.polishProgressFill.style.width = '0%';
 
     if (draft.polishedFrom) {
       dom.polishBanner.classList.remove('hidden');
@@ -648,6 +692,13 @@
       dom.polishBannerText.textContent = draft.changeSummary || '已完成上下文纠错与语句顺滑处理';
       const undoBtn = createActionBtn('恢复润色前原文', 'btn btn-subtle btn-sm', restoreDraftBeforePolish);
       dom.polishBannerActions.appendChild(undoBtn);
+      return;
+    }
+
+    if (draft.changeSummary) {
+      dom.polishBanner.classList.remove('hidden');
+      dom.polishBanner.classList.add('is-done');
+      dom.polishBannerText.textContent = draft.changeSummary;
       return;
     }
 
@@ -663,6 +714,27 @@
 
     dom.polishBanner.classList.add('hidden');
     dom.polishBannerText.textContent = '';
+  }
+
+  function renderPolishLoading(elapsedSeconds) {
+    if (!dom.polishBanner) return;
+    dom.polishBanner.classList.remove('hidden', 'is-done');
+    dom.polishBanner.classList.add('is-loading');
+    if (dom.polishProgressBar) dom.polishProgressBar.classList.remove('hidden');
+    const pct = Math.min(88, Math.round(16 + 72 * (1 - Math.exp(-elapsedSeconds / 6))));
+    if (dom.polishProgressFill) dom.polishProgressFill.style.width = `${pct}%`;
+    let stage = '正在扫描错别字与同音误识（局部极速校对）…';
+    if (elapsedSeconds >= 10) stage = '正文较长，模型仍在细校修订项，请稍候…';
+    else if (elapsedSeconds >= 4) stage = '正在结合上下文精准定位修改片段…';
+    dom.polishBannerText.textContent = `${stage} · 已耗时 ${Math.floor(elapsedSeconds)}s`;
+    if (!dom.polishBannerActions.querySelector('[data-polish-cancel]')) {
+      dom.polishBannerActions.textContent = '';
+      const cancelBtn = createActionBtn('取消', 'btn btn-ghost btn-sm', () => {
+        state.polishAbortController?.abort();
+      });
+      cancelBtn.dataset.polishCancel = '1';
+      dom.polishBannerActions.appendChild(cancelBtn);
+    }
   }
 
   function restoreDraftBeforePolish() {
@@ -692,22 +764,46 @@
     const draft = state.confirmedDraft;
     if (!draft || state.polishingDraft) return;
     state.polishingDraft = true;
+    const controller = new AbortController();
+    state.polishAbortController = controller;
+    const startedAt = Date.now();
     const polishBtnSpan = dom.btnPolishDraft?.querySelector('span');
     if (dom.btnPolishDraft) dom.btnPolishDraft.disabled = true;
-    if (polishBtnSpan) polishBtnSpan.textContent = '正在纠错润色…';
-    const bannerBtn = dom.polishBannerActions?.querySelector('button');
-    if (bannerBtn) bannerBtn.disabled = true;
+    if (polishBtnSpan) polishBtnSpan.textContent = '润色校对中…';
+
+    renderPolishLoading(0);
+    state.polishTimer = window.setInterval(() => {
+      renderPolishLoading((Date.now() - startedAt) / 1000);
+    }, 250);
 
     try {
       const data = await apiJson('/api/polish-text', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           title: draft.title,
           content: draft.content,
           ...buildCredsPayload(),
         }),
       });
+
+      const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
+      if (dom.polishProgressFill) dom.polishProgressFill.style.width = '100%';
+
+      const noChanges = data.mode === 'patch' && data.editCount === 0 && (data.title || draft.title) === draft.title;
+      if (noChanges) {
+        renderConfirmationCard({
+          ...draft,
+          truncated: Boolean(draft.truncated || data.truncated),
+          hasIssues: false,
+          issueHint: '',
+          polishedFrom: draft.polishedFrom || null,
+          changeSummary: `核对完成（用时 ${elapsedSec}s）：未发现明显错别字，原文已保持不变`,
+        });
+        showToast(`已完成全文核对（${elapsedSec}s），未发现需要修改的错别字`);
+        return;
+      }
 
       const originalSnapshot = draft.polishedFrom || {
         title: draft.title,
@@ -717,16 +813,17 @@
         issueHint: draft.issueHint || '',
       };
 
+      const editPrefix = data.editCount > 0 ? `已修正 ${data.editCount} 处 · ` : '';
       renderConfirmationCard({
         ...draft,
         title: data.title || draft.title,
         content: data.content,
         length: data.length,
-        truncated: Boolean(data.truncated),
+        truncated: Boolean(draft.truncated || data.truncated),
         hasIssues: false,
         issueHint: '',
         polishedFrom: originalSnapshot,
-        changeSummary: data.changeSummary || '已完成上下文纠错与语句顺滑处理',
+        changeSummary: `${editPrefix}用时 ${elapsedSec}s · ${data.changeSummary || '已完成上下文纠错与语句顺滑处理'}`,
       });
 
       if (state.uiInputTab === 'text') {
@@ -734,10 +831,25 @@
         dom.inputText.value = data.content || '';
         updateTextCounter();
       }
-      showToast('已完成 AI 纠错润色，可核对或一键还原');
+      showToast(`已完成 AI 纠错润色（${elapsedSec}s），可核对或一键还原`);
     } catch (err) {
+      if (err.name === 'AbortError') {
+        if (state.confirmedDraft === draft) {
+          renderPolishBanner();
+          showToast('已取消 AI 纠错润色');
+        }
+        return;
+      }
+      if (state.confirmedDraft === draft) renderPolishBanner();
       handleCredentialOrTaskError(err);
     } finally {
+      if (state.polishTimer) {
+        window.clearInterval(state.polishTimer);
+        state.polishTimer = null;
+      }
+      if (state.polishAbortController === controller) {
+        state.polishAbortController = null;
+      }
       state.polishingDraft = false;
       if (dom.btnPolishDraft) dom.btnPolishDraft.disabled = false;
       if (polishBtnSpan) polishBtnSpan.textContent = 'AI 纠错润色';
@@ -756,6 +868,7 @@
     dom.confirmTitle.textContent = draft.title || '未命名文章（生成时将自动提炼标题）';
 
     updateExcerptView();
+    updatePodcastStyleUI();
     renderPolishBanner();
     dom.confirmCard.classList.remove('hidden');
     if (dom.studioRail) dom.studioRail.classList.add('has-confirm');
@@ -933,7 +1046,7 @@
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, outW, outH);
     ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
-    return canvas.toDataURL('image/jpeg', 0.88);
+    return canvas.toDataURL('image/jpeg', 0.82);
   }
 
   async function sliceImageFile(file, remainingQuota) {
@@ -942,7 +1055,7 @@
     const natH = img.naturalHeight || img.height;
     if (!natW || !natH) throw new Error('图片尺寸无效');
 
-    const targetW = Math.min(natW, 1360);
+    const targetW = Math.min(natW, 1120);
     const scale = targetW / natW;
     const scaledH = Math.max(1, Math.round(natH * scale));
     const slices = [];
@@ -1075,20 +1188,52 @@
     hideParseError();
     invalidateConfirmedDraft();
     state.extractingImages = true;
+    const controller = new AbortController();
+    state.extractAbortController = controller;
+    const sliceCount = state.imageSlices.length;
+    const startedAt = Date.now();
     dom.btnExtractImages.disabled = true;
+    if (dom.btnClearImages) dom.btnClearImages.disabled = true;
     const btnSpan = dom.btnExtractImages.querySelector('span');
-    if (btnSpan) btnSpan.textContent = '正在识别文字…';
+    if (btnSpan) btnSpan.textContent = '识别中…';
+
+    const updateProgress = (elapsedSec) => {
+      if (dom.imageProgressElapsed) {
+        dom.imageProgressElapsed.textContent = `已耗时 ${Math.floor(elapsedSec)}s`;
+      }
+      if (dom.imageProgressStage) {
+        let stage = `正在将 ${sliceCount} 个图片片段上传至识图模型…`;
+        if (elapsedSec >= 14) stage = '正在核对专名、标点与疑似错字…';
+        else if (elapsedSec >= 2.5) stage = '模型正在逐字转录正文并去重拼接…';
+        dom.imageProgressStage.textContent = stage;
+      }
+      if (dom.imageProgressFill) {
+        const pct = Math.min(88, Math.round(14 + 74 * (1 - Math.exp(-elapsedSec / 12))));
+        dom.imageProgressFill.style.width = `${pct}%`;
+      }
+    };
+
+    if (dom.imagePreviewStrip) dom.imagePreviewStrip.classList.add('is-scanning');
+    if (dom.imageProgressPanel) dom.imageProgressPanel.classList.remove('hidden');
+    updateProgress(0);
+    state.extractTimer = window.setInterval(() => {
+      updateProgress((Date.now() - startedAt) / 1000);
+    }, 250);
 
     try {
       const data = await apiJson('/api/extract-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           images: state.imageSlices.map((s) => s.dataUrl),
           ...buildCredsPayload(),
           ...buildVisionPayload(),
         }),
       });
+
+      if (dom.imageProgressFill) dom.imageProgressFill.style.width = '100%';
+      const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
 
       switchTab('text');
       dom.inputTitle.value = data.title || '';
@@ -1105,15 +1250,30 @@
         issueHint: data.issueHint || '',
       });
       showToast(data.hasIssues
-        ? `已识别 ${data.length.toLocaleString('zh-CN')} 字（检测到疑似错字，可点「AI 纠错润色」）`
-        : `已从截图识别 ${data.length.toLocaleString('zh-CN')} 字，请核对后生成播客`);
+        ? `已识别 ${data.length.toLocaleString('zh-CN')} 字（用时 ${elapsedSec}s · 检测到疑似错字，可点「AI 纠错润色」）`
+        : `已从截图识别 ${data.length.toLocaleString('zh-CN')} 字（用时 ${elapsedSec}s），请核对后生成播客`);
     } catch (err) {
+      if (err.name === 'AbortError') {
+        showToast('已取消图片识别');
+        return;
+      }
       const msg = err.message || '图片文字识别失败，建议换清晰截图或直接贴正文';
       const needsVisionConfig = err.status === 400 && /识图|图片|视觉|多模态|API Key/i.test(msg);
       showParseError(msg, null, { source: 'image', showVisionConfig: needsVisionConfig });
     } finally {
+      if (state.extractTimer) {
+        window.clearInterval(state.extractTimer);
+        state.extractTimer = null;
+      }
+      if (state.extractAbortController === controller) {
+        state.extractAbortController = null;
+      }
       state.extractingImages = false;
+      if (dom.imagePreviewStrip) dom.imagePreviewStrip.classList.remove('is-scanning');
+      if (dom.imageProgressPanel) dom.imageProgressPanel.classList.add('hidden');
+      if (dom.imageProgressFill) dom.imageProgressFill.style.width = '0%';
       if (btnSpan) btnSpan.textContent = '识别图片文字';
+      if (dom.btnClearImages) dom.btnClearImages.disabled = false;
       dom.btnExtractImages.disabled = state.imageSlices.length === 0;
     }
   }
@@ -1206,6 +1366,7 @@
           mode: 'text',
           title: draftSnapshot.title,
           content: draftSnapshot.content,
+          podcastStyle: state.podcastStyle,
           ...buildCredsPayload(),
           tts: buildTtsPayload(),
         }),
@@ -2711,6 +2872,19 @@
     }
     if (dom.btnClearImages) dom.btnClearImages.addEventListener('click', clearSelectedImages);
     if (dom.btnExtractImages) dom.btnExtractImages.addEventListener('click', handleExtractImages);
+    if (dom.btnCancelExtractImages) {
+      dom.btnCancelExtractImages.addEventListener('click', () => {
+        state.extractAbortController?.abort();
+      });
+    }
+    dom.confirmStyleButtons?.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const nextStyle = btn.dataset.podcastStyle === 'dialogue' ? 'dialogue' : 'deep_dive';
+        state.podcastStyle = nextStyle;
+        writeStorage(STORAGE_KEYS.podcastStyle, nextStyle);
+        updatePodcastStyleUI();
+      });
+    });
 
     document.addEventListener('paste', (e) => {
       if (!dom.settingsModal.classList.contains('hidden')) return;
@@ -3005,6 +3179,7 @@
     initWaveformBars();
     hydrateTtsControlsFromCatalog();
     updateApiKeyStatus();
+    updatePodcastStyleUI();
     updateTextCounter();
     renderImageSelection();
     bindEvents();
