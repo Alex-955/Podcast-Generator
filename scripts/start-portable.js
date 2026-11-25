@@ -1,6 +1,6 @@
 'use strict';
 
-const { readFileSync, readlinkSync } = require('node:fs');
+const { lstatSync, readFileSync, readlinkSync, unlinkSync } = require('node:fs');
 const fs = require('node:fs/promises');
 const http = require('node:http');
 const net = require('node:net');
@@ -227,26 +227,34 @@ async function readPidRecord(file) {
   }
 }
 
-function queryProcess(pid, platform) {
+function processExists(pid) {
   try {
     process.kill(pid, 0);
+    return true;
   } catch (error) {
-    if (error.code === 'ESRCH') return null;
+    if (error.code === 'ESRCH') return false;
+    if (error.code === 'EPERM') return true;
     throw error;
   }
+}
 
+function queryProcess(pid, platform) {
+  if (!processExists(pid)) return null;
   const options = { encoding: 'utf8', shell: false, windowsHide: true, timeout: 2500 };
   if (platform === 'win32') {
     const script = "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); " +
       `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' -ErrorAction Stop).CommandLine`;
     const powershell = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], options);
-    if (powershell.status === 0) return powershell.stdout.trim() || null;
+    const commandLine = powershell.status === 0 && powershell.stdout.trim();
+    if (commandLine) return commandLine;
     const wmic = spawnSync('wmic.exe', ['process', 'where', `ProcessId=${pid}`, 'get', 'CommandLine', '/value'],
       { ...options, encoding: 'buffer' });
     if (wmic.status === 0) {
       const encoding = wmic.stdout.includes(0) ? 'utf16le' : 'utf8';
-      return wmic.stdout.toString(encoding).replace(/^\uFEFF/, '').match(/^CommandLine=(.*)$/m)?.[1].trim() ?? null;
+      const fallback = wmic.stdout.toString(encoding).replace(/^\uFEFF/, '').match(/^CommandLine=(.*)$/m)?.[1].trim();
+      if (fallback) return fallback;
     }
+    if (!processExists(pid)) return null;
   } else {
     const ps = spawnSync('ps', ['-ww', '-p', String(pid), '-o', 'args='], options);
     if (ps.status === 1 && !ps.stderr.trim()) return null;
@@ -265,37 +273,89 @@ function processCwd(pid, platform) {
   return undefined;
 }
 
-async function isExpectedServerProcess(record, {
-  projectDir = DEFAULT_PROJECT_DIR, platform = process.platform, processQuery = queryProcess,
+async function queryServerInvocation(record, {
+  platform = process.platform, processQuery = queryProcess,
 } = {}) {
-  if (!validPid(record?.pid) || record.pid === process.pid) return false;
+  if (!validPid(record?.pid) || record.pid === process.pid) return null;
   const result = await processQuery(record.pid, platform);
   const commandLine = typeof result === 'string' ? result : result?.commandLine;
-  if (!commandLine) return false;
+  if (!commandLine) return null;
   const compare = value => platform === 'win32' ? value.toLowerCase() : value;
-  const command = compare(commandLine);
   const execPrefix = compare(process.execPath) + ' ';
-  const invocation = command.match(/^(?:"[^"]*[/\\]node(?:\.exe)?"|[^\s"]*[/\\]node(?:\.exe)?|node(?:\.exe)?)\s+(.+)$/);
-  const commandArgs = command.startsWith(execPrefix) ? command.slice(execPrefix.length) : invocation?.[1];
-  if (!commandArgs) return false;
-  const script = (platform === 'win32' ? path.win32 : path).join(projectDir, 'server.js');
-  const marker = record.instance ? ` --portable-instance=${record.instance}` : '';
-  const args = commandArgs.replace(/^--use-bundled-ca\s+/, '');
-  if ([script, `"${script}"`].some(candidate => args === compare(candidate + marker))) return true;
-  if (record.instance || !['server.js', '"server.js"', './server.js', '"./server.js"'].includes(args)) return false;
+  const invocation = commandLine.match(/^(?:"[^"]*[/\\]node(?:\.exe)?"|[^\s"]*[/\\]node(?:\.exe)?|node(?:\.exe)?)\s+(.+)$/i);
+  const commandArgs = compare(commandLine).startsWith(execPrefix) ? commandLine.slice(execPrefix.length) : invocation?.[1];
+  if (!commandArgs) return null;
 
-  // Legacy Finder launchers started a relative server.js from the project directory.
+  let script = commandArgs.replace(/^--use-bundled-ca\s+/, '');
+  if (record.instance) {
+    const marker = ` --portable-instance=${record.instance}`;
+    if (!script.endsWith(marker)) return null;
+    script = script.slice(0, -marker.length);
+  }
+  if (script.startsWith('"') && script.endsWith('"')) script = script.slice(1, -1);
+  const paths = platform === 'win32' ? path.win32 : path;
+  const absolute = paths.isAbsolute(script);
+  if (absolute ? compare(paths.basename(script)) !== 'server.js'
+    : record.instance || !['server.js', './server.js', '.\\server.js'].includes(compare(script))) return null;
+  return { script, absolute, cwd: result?.cwd, platform, compare, paths };
+}
+
+async function isProjectInvocation(invocation, record, projectDir) {
+  const { script, absolute, cwd, platform, compare, paths } = invocation;
+  if (absolute && compare(script) !== compare(paths.join(projectDir, 'server.js'))) return false;
+  if (record.instance) return true;
+  // Legacy records have no instance marker, so also verify the working directory.
   try {
-    const cwd = result?.cwd ?? processCwd(record.pid, platform);
-    return Boolean(cwd && compare(await fs.realpath(cwd)) === compare(await fs.realpath(projectDir)));
+    const workingDir = cwd ?? processCwd(record.pid, platform);
+    return Boolean(workingDir && compare(await fs.realpath(workingDir)) === compare(await fs.realpath(projectDir)));
   } catch {
     return false;
   }
 }
 
+async function isExpectedServerProcess(record, options = {}) {
+  const invocation = await queryServerInvocation(record, options);
+  return Boolean(invocation && await isProjectInvocation(invocation, record, options.projectDir ?? DEFAULT_PROJECT_DIR));
+}
+
+async function isForeignManagedServerProcess(record, options = {}) {
+  const invocation = await queryServerInvocation(record, options);
+  // Keep a live legacy server's record if its working directory cannot be verified.
+  return Boolean(invocation && !await isProjectInvocation(invocation, record, options.projectDir ?? DEFAULT_PROJECT_DIR));
+}
+
+function removeOwnedLock(lockFile, expected, checkMtime = false) {
+  const current = lstatSync(lockFile, { throwIfNoEntry: false });
+  if (!current || current.ino !== expected.ino || current.dev !== expected.dev ||
+      (checkMtime && current.mtimeMs !== expected.mtimeMs)) return false;
+  try {
+    unlinkSync(lockFile);
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+function reclaimStaleLock(lockFile) {
+  const stat = lstatSync(lockFile, { throwIfNoEntry: false });
+  if (!stat) return true;
+  if (!stat.isFile()) return false;
+  let record;
+  try {
+    record = JSON.parse(readFileSync(lockFile, 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return true;
+    if (!(error instanceof SyntaxError)) throw error;
+  }
+  const expired = validPid(record?.pid) ? !processExists(record.pid) : Date.now() - stat.mtimeMs > 1500;
+  return expired && removeOwnedLock(lockFile, stat, true);
+}
+
 async function withPidLock(config, operation) {
   await fs.mkdir(config.dataDir, { recursive: true, mode: 0o700 });
   const lockFile = config.pidFile + '.lock';
+  const lockLabel = path.basename(config.dataDir) + '/server.pid.lock';
   let lock;
   const deadline = Date.now() + START_TIMEOUT_MS + 2000;
   while (!lock) {
@@ -303,29 +363,26 @@ async function withPidLock(config, operation) {
       lock = await fs.open(lockFile, 'wx', 0o600);
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      if (Date.now() >= deadline) throw new Error('有其他启动或停止操作正在运行；如上次异常中断，请确认后清理 data/server.pid.lock');
+      if (reclaimStaleLock(lockFile)) continue;
+      if (Date.now() >= deadline) throw new Error('有其他启动或停止操作正在运行；如上次异常中断，请确认后清理 ' + lockLabel);
       await delay(75);
     }
   }
+  let owner;
   try {
+    owner = await lock.stat();
+    await lock.writeFile(JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }) + '\n');
     return await operation();
   } finally {
     await lock.close();
-    await fs.rm(lockFile, { force: true });
+    if (owner) removeOwnedLock(lockFile, owner);
   }
 }
 
 async function runningInstance(config, record, options) {
-  if (record?.port) {
+  if (record?.port && await isExpectedServerProcess(record, { ...options, projectDir: config.projectDir })) {
     const health = await probeHealth(record.host, record.port);
-    if (health && await isExpectedServerProcess(record, { ...options, projectDir: config.projectDir })) {
-      return { running: true, host: record.host, port: record.port, health, pid: record.pid };
-    }
-  }
-  const health = await probeHealth(config.host, config.port);
-  if (health) {
-    // A service discovered without a matching record may only be bound to loopback.
-    return { running: true, host: connectHost(config.host), port: config.port, health };
+    if (health) return { running: true, host: record.host, port: record.port, health, pid: record.pid };
   }
   return { running: false };
 }
@@ -341,7 +398,7 @@ function reportInstance(result, options, config) {
   log(`AI 妙听${result.reused ? '已在运行' : '已启动'}：${url}`);
   if (result.host === '0.0.0.0' || result.host === '::') {
     for (const address of getLanAddresses()) log(`局域网：http://${address}:${result.port}`);
-    log('局域网设备默认仅可浏览试听，无 ADMIN_TOKEN 时禁止删除本地历史播客');
+    log('局域网设备默认禁止删除本地历史播客（无 ADMIN_TOKEN 时删除返回 403；浏览、播放与任务生成不受影响）');
   } else if (options.lan) {
     log('当前实例未确认开启局域网监听。若需局域网试听，请先停止服务，再使用 --lan 启动。');
   }
@@ -364,7 +421,13 @@ function launchServer(config, options, port, instance) {
     child.once('error', () => resolve(1));
   });
   const listening = new Promise(resolve => child.once('message', resolve));
-  return { child, exited, listening };
+  const forwardSignal = () => child.kill();
+  const signals = ['SIGINT', 'SIGTERM'];
+  for (const signal of signals) process.on(signal, forwardSignal);
+  const stopForwarding = () => {
+    for (const signal of signals) process.removeListener(signal, forwardSignal);
+  };
+  return { child, exited, listening, stopForwarding };
 }
 
 async function awaitListening(server) {
@@ -373,9 +436,6 @@ async function awaitListening(server) {
 }
 
 async function manageForeground(server, config, record) {
-  const forwardSignal = () => { server.child.kill(); };
-  const signals = ['SIGINT', 'SIGTERM'];
-  for (const signal of signals) process.on(signal, forwardSignal);
   try {
     const code = await server.exited;
     await withPidLock(config, async () => {
@@ -385,23 +445,32 @@ async function manageForeground(server, config, record) {
     });
     return code ?? 0;
   } finally {
-    for (const signal of signals) process.removeListener(signal, forwardSignal);
+    server.stopForwarding();
   }
 }
 
 async function startPortable(options = {}) {
   const config = settings(options);
+  const processOptions = { ...options, projectDir: config.projectDir };
   let foreground;
   const result = await withPidLock(config, async () => {
     const previous = await readPidRecord(config.pidFile);
     const current = await runningInstance(config, previous, options);
-    if (current.running) return { ...current, reused: true };
-    if (await isExpectedServerProcess(previous, { ...options, projectDir: config.projectDir })) {
+    if (current.running) {
+      if (config.explicitPort && current.port !== config.port) {
+        await findAvailablePort(config.host, config.port, true);
+        throw new Error(`当前目录的 AI 妙听已在端口 ${current.port} 运行，请先停止后再指定新端口 ${config.port}`);
+      }
+      return { ...current, reused: true };
+    }
+    if (await isExpectedServerProcess(previous, processOptions)) {
       throw new Error('已有 AI 妙听进程，但健康检查未通过，请停止后重试');
     }
-    await fs.rm(config.pidFile, { force: true });
+    if (await isForeignManagedServerProcess(previous, processOptions)) {
+      throw new Error('当前数据目录正被另一个目录的 AI 妙听实例使用，请先停止该实例或指定独立的 --data-dir');
+    }
     try {
-      await fs.access(path.join(config.projectDir, 'server.js'));
+      if (!(await fs.stat(path.join(config.projectDir, 'server.js'))).isFile()) throw new Error();
     } catch {
       throw new Error('找不到 server.js，请检查项目目录');
     }
@@ -414,8 +483,6 @@ async function startPortable(options = {}) {
       try {
         const ready = await awaitListening(server);
         if (ready?.error === 'EADDRINUSE' && candidate !== 0) {
-          const current = await runningInstance(config, null, options);
-          if (current.running) return { ...current, reused: true };
           if (config.explicitPort) throw new Error(`指定端口 ${candidate} 已被其他服务占用，请选择其他端口`);
           candidate = candidate < 3020 ? await findAvailablePort(config.host, candidate + 1) : 0;
           continue;
@@ -428,6 +495,7 @@ async function startPortable(options = {}) {
           pid: server.child.pid, port, host: config.host,
           startedAt: new Date().toISOString(), script: 'server.js', instance,
         };
+        await fs.rm(config.pidFile, { force: true });
         await fs.writeFile(config.pidFile, JSON.stringify(record) + '\n', { mode: 0o600, flag: 'wx' });
         if (options.foreground) foreground = { server, record };
         else server.child.unref();
@@ -435,6 +503,7 @@ async function startPortable(options = {}) {
         return { running: true, reused: false, host: config.host, port, health, pid: record.pid };
       } finally {
         if (server.child.connected) server.child.disconnect();
+        if (!started || !options.foreground) server.stopForwarding();
         if (!started) server.child.kill();
       }
     }
@@ -446,9 +515,13 @@ async function startPortable(options = {}) {
 
 async function stopPortable(options = {}) {
   const config = settings(options);
+  const processOptions = { ...options, projectDir: config.projectDir };
   return withPidLock(config, async () => {
     const record = await readPidRecord(config.pidFile);
-    if (!await isExpectedServerProcess(record, { ...options, projectDir: config.projectDir })) {
+    if (!await isExpectedServerProcess(record, processOptions)) {
+      if (await isForeignManagedServerProcess(record, processOptions)) {
+        return { stopped: false, stale: false, foreign: true };
+      }
       await fs.rm(config.pidFile, { force: true });
       return { stopped: false, stale: Boolean(record) };
     }
@@ -456,9 +529,11 @@ async function stopPortable(options = {}) {
       (options.kill ?? process.kill)(record.pid, 'SIGTERM');
     } catch (error) {
       if (error.code !== 'ESRCH') throw new Error('无法停止 AI 妙听进程');
+      await fs.rm(config.pidFile, { force: true });
+      return { stopped: false, stale: true };
     }
     const deadline = Date.now() + 2500;
-    while (await isExpectedServerProcess(record, { ...options, projectDir: config.projectDir })) {
+    while (await isExpectedServerProcess(record, processOptions)) {
       if (Date.now() >= deadline) throw new Error('AI 妙听尚未停止，请稍后重试');
       await delay(50);
     }
@@ -474,7 +549,8 @@ async function main() {
     if (result.completion) process.exitCode = await result.completion;
   } else if (options.action === 'stop') {
     const result = await stopPortable(options);
-    console.log(result.stopped ? 'AI 妙听已停止'
+    if (result.foreign) console.log('当前数据目录正由另一个目录的 AI 妙听实例使用，未停止且未删除其 PID 记录');
+    else console.log(result.stopped ? 'AI 妙听已停止'
       : result.stale ? 'PID 未通过校验，未终止进程，已清理过期记录' : '没有正在运行的便携启动实例');
   } else {
     const result = await statusPortable(options);

@@ -5,6 +5,8 @@ const path = require('node:path');
 const { isUtf8 } = require('node:buffer');
 const { spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
+const { deflateRawSync } = require('node:zlib');
+const dotenv = require('dotenv');
 
 const SOURCE_DIR = path.resolve(__dirname, '..');
 const FORMATS = ['zip', 'tar.gz', 'both', 'dir'];
@@ -20,9 +22,19 @@ const LAUNCHERS = {
 };
 const LAUNCHER_FILES = Object.entries(LAUNCHERS).flatMap(([source, target]) => ['scripts/launchers/' + source, target]);
 const REQUIRED_FILES = [...ROOT_FILES, ...PUBLIC_FILES, ...SCRIPTS, ...PLACEHOLDERS, ...LAUNCHER_FILES];
+const DEPENDENCY_DOC = /^(?:readme|history|changelog|changes|security|contributing)(?:\.[a-z]+)?$/i;
+const CREDENTIAL_FIELD = /(?:KEY|TOKEN|SECRET|PASSWORD|APP_ID)$/i;
+const ZIP_UTF8 = 0x0800;
+const ZIP_32_LIMIT = 0xffffffff;
+const CRC32_TABLE = Uint32Array.from({ length: 256 }, (_, byte) => {
+  let crc = byte;
+  for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  return crc;
+});
 
 const CONTENT_RULES = [
-  ['本机绝对路径', /\/(?:Users|home)\/[^/\r\n"'<>]+\/|\b[A-Z]:[\\/]{1,2}Users[\\/]{1,2}[^\\/\r\n"'<>]+[\\/]{1,2}/i],
+  ['本机绝对路径', /(?:^|[\s"'\x60(=:])\/(?:Users|home)\/[^\s/\\"'\x60<>),;:]+(?:\/|$|[\s"'\x60<>),;:])/],
+  ['本机绝对路径', /(?:^|[\s"'\x60(=:])[A-Za-z]:[\\/]{1,2}Users[\\/]{1,2}[^\s/\\"'\x60<>),;:]+(?:[\\/]|$|[\s"'\x60<>),;:])/i],
   ['私钥头', /-{5}BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-{5}/i],
   ['疑似 API 密钥', /\b(?:sk-[A-Za-z0-9_-]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AIza[A-Za-z0-9_-]{35}|xox[baprs]-[A-Za-z0-9-]{20,})\b/],
 ];
@@ -75,6 +87,50 @@ function plainDirectory(sourceDir, relative) {
   return directory;
 }
 
+function isWithin(parent, child) {
+  const relative = path.relative(parent, child);
+  return relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative);
+}
+
+function resolveOutputPath(outDir) {
+  const components = [];
+  let ancestor = outDir;
+  while (!fs.lstatSync(ancestor, { throwIfNoEntry: false })) {
+    components.unshift(path.basename(ancestor));
+    ancestor = path.dirname(ancestor);
+  }
+  const existingAncestor = fs.realpathSync.native(ancestor);
+  return { existingAncestor, realOutDir: path.join(existingAncestor, ...components), exists: components.length === 0 };
+}
+
+function validateOutputPath(outDir, sourceDir, withDeps) {
+  const subtrees = ['src', 'public', 'scripts'];
+  if (withDeps) subtrees.push('node_modules');
+  const { existingAncestor, realOutDir, exists } = resolveOutputPath(outDir);
+  const realSourceDir = fs.realpathSync.native(sourceDir);
+  const invalidOutput = () => new Error('发行输出目录不能是源码根目录，也不能位于会被复制的源码或依赖目录内');
+  for (const [source, target] of [[sourceDir, outDir], [realSourceDir, realOutDir]]) {
+    if (!path.relative(source, target) || subtrees.some(dir => isWithin(path.join(source, dir), target))) {
+      throw invalidOutput();
+    }
+  }
+  const sameDirectory = (left, right) => left.dev === right.dev && left.ino === right.ino;
+  const copiedDirectories = subtrees.map(dir => fs.lstatSync(path.join(realSourceDir, dir), {
+    bigint: true, throwIfNoEntry: false,
+  })).filter(stat => stat?.isDirectory());
+  const sourceIdentity = fs.lstatSync(realSourceDir, { bigint: true });
+  let ancestor = existingAncestor;
+  for (;;) {
+    const identity = fs.lstatSync(ancestor, { bigint: true });
+    if ((exists && ancestor === existingAncestor && sameDirectory(identity, sourceIdentity)) ||
+        copiedDirectories.some(dir => sameDirectory(identity, dir))) throw invalidOutput();
+    const parent = path.dirname(ancestor);
+    if (parent === ancestor) break;
+    ancestor = parent;
+  }
+  return realOutDir;
+}
+
 function copyFile(from, to) {
   fs.mkdirSync(path.dirname(to), { recursive: true });
   fs.copyFileSync(from, to);
@@ -92,23 +148,23 @@ function copySourceTree(from, to, relative = 'src') {
 
 function copyDependencies(sourceDir, stageDir) {
   const source = fs.realpathSync(plainDirectory(sourceDir, 'node_modules'));
+  const skipDirectory = name => name.toLowerCase() === '.bin' || name.toLowerCase() === '.cache';
   function copyEntry(from, to, relative, ancestors) {
     const real = fs.realpathSync(from);
-    const within = path.relative(source, real);
-    if (within === '..' || within.startsWith('..' + path.sep) || path.isAbsolute(within)) {
+    if (!isWithin(source, real)) {
       throw new Error('依赖符号链接指向 node_modules 之外：' + relative);
     }
-    if (within.split(path.sep).includes('.cache')) return;
+    if (path.relative(source, real).split(path.sep).some(skipDirectory)) return;
     const stat = fs.statSync(real);
     if (stat.isFile()) {
-      copyFile(real, to);
+      if (!DEPENDENCY_DOC.test(path.basename(real))) copyFile(real, to);
     } else if (stat.isDirectory()) {
       if (ancestors.has(real)) throw new Error('依赖符号链接存在循环：' + relative);
       fs.mkdirSync(to, { recursive: true });
       const parents = new Set([...ancestors, real]);
-      for (const entry of fs.readdirSync(real)) {
-        if (entry.toLowerCase() === '.cache') continue;
-        copyEntry(path.join(real, entry), path.join(to, entry), relative + '/' + entry, parents);
+      for (const entry of fs.readdirSync(real, { withFileTypes: true })) {
+        if (skipDirectory(entry.name) || (!entry.isDirectory() && DEPENDENCY_DOC.test(entry.name))) continue;
+        copyEntry(path.join(real, entry.name), path.join(to, entry.name), relative + '/' + entry.name, parents);
       }
     } else {
       throw new Error('依赖目录包含非常规文件：' + relative);
@@ -151,7 +207,7 @@ function forbiddenPath(relative) {
   const name = path.posix.basename(lower);
   return (name.startsWith('.env') && relative !== '.env.example') ||
     ['.git', '.ds_store', '启动 ai 妙听.app'].includes(name) || /\.(?:log|pid)$/.test(name) ||
-    lower === 'test' || lower === 'data/tts-cache' || /^data\/tasks\/.*\.json$/.test(lower) ||
+    lower === 'test' || (lower.startsWith('data/') && relative !== 'data/.gitkeep') ||
     (lower.startsWith('public/podcasts/') && relative !== 'public/podcasts/.gitkeep');
 }
 
@@ -160,18 +216,37 @@ function fileText(contents) {
   if (contents[0] === 0xfe && contents[1] === 0xff) {
     return contents.subarray(2, contents.length & ~1).swap16().toString('utf16le');
   }
-  if (isUtf8(contents) && !contents.includes(0)) return contents.toString('utf8');
+  if (isUtf8(contents)) return contents.toString('utf8');
   return null;
 }
 
 function scanContent(contents, relative, issues) {
   let source = fileText(contents);
+  if (relative === '.env.example' && (source === null || !isUtf8(contents))) {
+    issues.push('.env.example 必须是有效的 UTF-8 文本文件');
+    return;
+  }
   if (source === null) return;
   if (relative === 'public/index.html') {
     // This fixed example is already present in the shipped password input.
     source = source.replace(/(<input type="password" id="settingApiKey" class="field-input" placeholder=")sk-x{24}(")/g, '$1$2');
   }
   const lines = source.split(/\r?\n/);
+  if (relative === '.env.example') {
+    const reported = new Set();
+    for (const [index, line] of lines.entries()) {
+      const field = line.match(/^\s*(?:export\s+)?([A-Za-z_]\w*)\s*[:=](.*)$/);
+      if (field && CREDENTIAL_FIELD.test(field[1]) && field[2].trim()) {
+        issues.push(relative + ':' + (index + 1) + ' 凭据字段 ' + field[1] + ' 必须为空');
+        reported.add(field[1]);
+      }
+    }
+    for (const [key, value] of Object.entries(dotenv.parse(source))) {
+      if (CREDENTIAL_FIELD.test(key) && value.trim() && !reported.has(key)) {
+        issues.push(relative + ' 凭据字段 ' + key + ' 必须为空');
+      }
+    }
+  }
   for (const [reason, pattern] of CONTENT_RULES) {
     const index = lines.findIndex(line => pattern.test(line));
     if (index !== -1) issues.push(relative + ':' + (index + 1) + ' 包含' + reason);
@@ -194,7 +269,6 @@ function runReleaseSecurityGate(stageDir) {
         issues.push(relative + ' 不是常规文件或目录');
       } else {
         files.add(relative);
-        if (relative.startsWith('node_modules/')) continue;
         if (relative.startsWith('src/') && relative.endsWith('.js')) hasSource = true;
         const contents = fs.readFileSync(file);
         if (PLACEHOLDERS.includes(relative) && contents.length) issues.push(relative + ' 必须为空');
@@ -205,7 +279,7 @@ function runReleaseSecurityGate(stageDir) {
               issues.push(relative + ' 必须使用 CRLF 换行');
             }
           } else if (!launcher.includes('\n') || launcher.includes('\r') ||
-              (process.platform !== 'win32' && !(fs.statSync(file).mode & 0o111))) {
+              (process.platform !== 'win32' && (fs.statSync(file).mode & 0o777) !== 0o755)) {
             issues.push(relative + ' 必须使用 LF 换行并具有执行权限');
           }
         }
@@ -224,29 +298,105 @@ function runReleaseSecurityGate(stageDir) {
   return true;
 }
 
-function runArchiveTool(command, args, cwd, env = {}) {
+function runArchiveTool(command, args, cwd) {
   const result = spawnSync(command, args, {
-    cwd, shell: false, stdio: 'ignore', windowsHide: true, env: { ...process.env, COPYFILE_DISABLE: '1', ...env },
+    cwd, shell: false, stdio: 'ignore', windowsHide: true, env: { ...process.env, COPYFILE_DISABLE: '1' },
   });
   if (result.error?.code === 'ENOENT') return false;
   if (result.error || result.status !== 0) throw new Error('压缩工具 ' + command + ' 执行失败');
   return true;
 }
 
-function zipBundle(dir, name, archive) {
-  if (process.platform === 'win32') {
-    const script = 'Compress-Archive -LiteralPath $env:PODCAST_RELEASE_STAGE -DestinationPath $env:PODCAST_RELEASE_TARGET -ErrorAction Stop';
-    if (runArchiveTool('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], dir, {
-      PODCAST_RELEASE_STAGE: path.join(dir, name), PODCAST_RELEASE_TARGET: archive,
-    })) return;
-  } else {
-    if (runArchiveTool('zip', ['-q', '-r', archive, name], dir)) return;
-    if (process.platform === 'darwin' &&
-        runArchiveTool('ditto', ['-c', '-k', '--keepParent', name, archive], dir)) return;
-    if (process.platform === 'linux' &&
-        runArchiveTool('python3', ['-m', 'zipfile', '-c', archive, name], dir)) return;
+function crc32(contents) {
+  let crc = 0xffffffff;
+  for (const byte of contents) crc = (crc >>> 8) ^ CRC32_TABLE[(crc ^ byte) & 0xff];
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function zipEntry(relative, file, stat, offset) {
+  const directory = stat.isDirectory();
+  const filename = Buffer.from(relative + (directory ? '/' : ''), 'utf8');
+  if (filename.length > 0xffff || stat.size >= ZIP_32_LIMIT) {
+    throw new Error('条目超出标准 ZIP 大小限制');
   }
-  throw new Error('当前系统没有可用的 ZIP 压缩工具');
+  const contents = directory ? Buffer.alloc(0) : fs.readFileSync(file);
+  const method = contents.length ? 8 : 0;
+  const bytes = method === 8 ? deflateRawSync(contents) : contents;
+  if (bytes.length >= ZIP_32_LIMIT) throw new Error('压缩条目超出标准 ZIP 大小限制');
+
+  // The local and central headers share these fields, including UTF-8 bit 11.
+  const date = new Date(Math.max(Date.UTC(1980, 0, 1), Math.min(stat.mtimeMs, Date.UTC(2107, 11, 31, 23, 59, 58))));
+  const dosDate = ((date.getUTCFullYear() - 1980) << 9) | ((date.getUTCMonth() + 1) << 5) | date.getUTCDate();
+  const dosTime = (date.getUTCHours() << 11) | (date.getUTCMinutes() << 5) | (date.getUTCSeconds() >> 1);
+  const fields = Buffer.alloc(22);
+  fields.writeUInt16LE(20, 0);
+  fields.writeUInt16LE(ZIP_UTF8, 2);
+  fields.writeUInt16LE(method, 4);
+  fields.writeUInt16LE(dosTime, 6);
+  fields.writeUInt16LE(dosDate, 8);
+  fields.writeUInt32LE(crc32(contents), 10);
+  fields.writeUInt32LE(bytes.length, 14);
+  fields.writeUInt32LE(contents.length, 18);
+
+  const local = Buffer.alloc(30 + filename.length);
+  local.writeUInt32LE(0x04034b50, 0);
+  fields.copy(local, 4);
+  local.writeUInt16LE(filename.length, 26);
+  filename.copy(local, 30);
+
+  const central = Buffer.alloc(46 + filename.length);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(0x031e, 4);
+  fields.copy(central, 6);
+  central.writeUInt16LE(filename.length, 28);
+  const executable = relative.endsWith('.command') || relative.endsWith('/scripts/build-mac-launcher.sh') ||
+    (stat.mode & 0o111) !== 0;
+  const mode = executable ? 0o755 : 0o644;
+  central.writeUInt32LE(directory ? ((0o040755 << 16) | 0x10) >>> 0 : ((0o100000 | mode) << 16) >>> 0, 38);
+  central.writeUInt32LE(offset, 42);
+  filename.copy(central, 46);
+  return { local, bytes, central };
+}
+
+function zipBundle(dir, name, archive) {
+  const fd = fs.openSync(archive, 'wx');
+  const centralHeaders = [];
+  let offset = 0;
+  function write(bytes) {
+    if (offset + bytes.length >= ZIP_32_LIMIT) throw new Error('发行包超出标准 ZIP 大小限制');
+    for (let position = 0; position < bytes.length;) {
+      position += fs.writeSync(fd, bytes, position, bytes.length - position);
+    }
+    offset += bytes.length;
+  }
+
+  function add(relative) {
+    if (centralHeaders.length === 0xfffe) throw new Error('发行包条目超出标准 ZIP 数量限制');
+    const file = path.join(dir, relative);
+    const stat = fs.lstatSync(file);
+    const entry = zipEntry(relative, file, stat, offset);
+    write(entry.local);
+    write(entry.bytes);
+    centralHeaders.push(entry.central);
+    if (stat.isDirectory()) {
+      for (const child of fs.readdirSync(file)) add(relative + '/' + child);
+    }
+  }
+
+  try {
+    add(name);
+    const centralOffset = offset;
+    for (const header of centralHeaders) write(header);
+    const end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0);
+    end.writeUInt16LE(centralHeaders.length, 8);
+    end.writeUInt16LE(centralHeaders.length, 10);
+    end.writeUInt32LE(offset - centralOffset, 12);
+    end.writeUInt32LE(centralOffset, 16);
+    write(end);
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 function sha256(file) {
@@ -261,12 +411,33 @@ function sha256(file) {
   return hash.digest('hex');
 }
 
+function writeChecksums(outDir, scratch, sumsName, archiveNames) {
+  const filename = path.join(outDir, sumsName);
+  const sums = new Map();
+  const existing = fs.lstatSync(filename, { throwIfNoEntry: false });
+  if (existing) {
+    if (!existing.isFile()) throw new Error('已有的 SHA256SUMS.txt 不是常规文件');
+    for (const line of fs.readFileSync(filename, 'utf8').split(/\r?\n/)) {
+      const match = line.match(/^([0-9a-f]{64})  ([^/\\:\r\n]+(?:\.zip|\.tar\.gz))$/i);
+      if (!match) continue;
+      const [, digest, archive] = match;
+      if (fs.lstatSync(path.join(outDir, archive), { throwIfNoEntry: false })?.isFile()) {
+        sums.set(archive, digest.toLowerCase());
+      }
+    }
+  }
+  for (const archive of archiveNames) sums.set(archive, sha256(path.join(scratch, archive)));
+  const lines = [...sums.keys()].sort().map(archive => sums.get(archive) + '  ' + archive);
+  fs.writeFileSync(path.join(scratch, sumsName), lines.join('\n') + '\n');
+  return filename;
+}
+
 function buildRelease({
   sourceDir = SOURCE_DIR, outDir = 'dist', name, format = 'zip', withDeps = false,
 } = {}) {
   validateFormat(format);
   sourceDir = path.resolve(sourceDir);
-  outDir = path.resolve(outDir);
+  outDir = validateOutputPath(path.resolve(outDir), sourceDir, withDeps);
   const { version } = JSON.parse(fs.readFileSync(plainFile(sourceDir, 'package.json'), 'utf8'));
   name ??= 'ai-podcast-generator-v' + version + '-portable';
   validateName(name);
@@ -293,11 +464,7 @@ function buildRelease({
       if (formats[i] === 'zip') zipBundle(scratch, name, target);
       else if (!runArchiveTool('tar', ['-czf', target, name], scratch)) throw new Error('找不到 tar 压缩工具');
     }
-    if (archiveNames.length) {
-      const sums = archiveNames.map(filename => sha256(path.join(scratch, filename)) + '  ' + filename);
-      fs.writeFileSync(path.join(scratch, sumsName), sums.join('\n') + '\n');
-      checksumFile = path.join(outDir, sumsName);
-    }
+    if (archiveNames.length) checksumFile = writeChecksums(outDir, scratch, sumsName, archiveNames);
     fs.renameSync(stage, stageDir);
     for (let i = 0; i < archives.length; i++) fs.renameSync(path.join(scratch, archiveNames[i]), archives[i]);
     if (checksumFile) fs.renameSync(path.join(scratch, sumsName), checksumFile);

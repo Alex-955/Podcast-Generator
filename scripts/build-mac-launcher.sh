@@ -43,9 +43,15 @@ on run
       set actionChoice to button returned of (display dialog "AI 妙听服务已在后台运行。" buttons {"停止服务", "重启服务", "打开网页"} default button "打开网页" with title "AI 妙听")
     end if
     if actionChoice is "停止服务" or actionChoice is "重启服务" then
-      runLauncher(launcherPath, "--stop")
-      if actionChoice is "停止服务" then
-        display notification "后台服务已停止" with title "AI 妙听"
+      set stopOutput to runLauncher(launcherPath, "--stop")
+      if stopOutput contains "AI 妙听已停止" then
+        if actionChoice is "停止服务" then
+          display notification "后台服务已停止" with title "AI 妙听"
+          return
+        end if
+      else
+        activate
+        display dialog stopOutput buttons {"好"} default button "好" with title "AI 妙听"
         return
       end if
     end if
@@ -85,7 +91,7 @@ on isServerRunning(launcherPath)
 end isServerRunning
 
 on runLauncher(launcherPath, actionFlag)
-  do shell script "/bin/bash " & quoted form of launcherPath & " " & quoted form of actionFlag
+  return do shell script "/bin/bash " & quoted form of launcherPath & " " & quoted form of actionFlag
 end runLauncher
 APPLESCRIPT
 
