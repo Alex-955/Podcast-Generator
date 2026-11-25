@@ -51,13 +51,16 @@
         <section class="rail-section input-section enter-stagger-1">
           <div class="section-head">
             <h1 class="rail-heading">导入文稿</h1>
-            <div class="segmented" role="tablist" aria-label="输入方式">
+            <div class="segmented segmented-3" role="tablist" aria-label="输入方式">
               <div id="tabIndicator" class="segmented-indicator" aria-hidden="true"></div>
-              <button type="button" id="tabBtnUrl" class="segmented-btn is-active" role="tab" aria-selected="true" aria-controls="panelUrl" data-mode="url">
-                文章链接
+              <button type="button" id="tabBtnUrl" class="segmented-btn is-active" role="tab" aria-selected="true" aria-controls="panelUrl" data-mode="url" aria-label="文章链接">
+                链接
               </button>
-              <button type="button" id="tabBtnText" class="segmented-btn" role="tab" aria-selected="false" aria-controls="panelText" data-mode="text">
-                直接贴正文
+              <button type="button" id="tabBtnText" class="segmented-btn" role="tab" aria-selected="false" aria-controls="panelText" data-mode="text" aria-label="直接贴正文">
+                正文
+              </button>
+              <button type="button" id="tabBtnImage" class="segmented-btn" role="tab" aria-selected="false" aria-controls="panelImage" data-mode="image" aria-label="长图识字">
+                识图
               </button>
             </div>
           </div>
@@ -96,10 +99,37 @@
             </div>
           </div>
 
+          <!-- 长图识字模式 -->
+          <div id="panelImage" class="tab-panel hidden" role="tabpanel" aria-labelledby="tabBtnImage">
+            <div id="imageDropZone" class="image-dropzone" tabindex="0" role="button" aria-label="点击选择、拖拽或粘贴长截图文章">
+              <input type="file" id="inputImageFiles" class="sr-only" accept="image/png,image/jpeg,image/webp" multiple>
+              <svg class="dropzone-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="3"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <path d="M21 15l-5-5L5 21"></path>
+              </svg>
+              <div class="dropzone-copy">
+                <span class="dropzone-title">点击选图、拖拽或 Ctrl/Cmd+V 粘贴截图</span>
+                <span class="dropzone-sub">支持微信 / 小红书 / 微博长截图，超长图会自动分段切片提纯</span>
+              </div>
+            </div>
+            <div id="imagePreviewStrip" class="image-preview-strip hidden" aria-live="polite"></div>
+            <div class="text-footer image-footer">
+              <span id="imageSelectionMeta" class="char-counter">尚未选择图片</span>
+              <div class="image-actions-group">
+                <button type="button" id="btnClearImages" class="btn btn-ghost btn-sm hidden">清空</button>
+                <button type="button" id="btnExtractImages" class="btn btn-primary" disabled>
+                  <span>识别图片文字</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
           <!-- 解析/输入校验内联提示条（紧贴输入框与主按钮下方） -->
           <div id="parseErrorBanner" class="inline-callout is-error hidden" role="alert">
             <p id="parseErrorText" class="callout-msg"></p>
             <div class="callout-actions">
+              <button type="button" id="btnOpenVisionFromParse" class="btn btn-subtle btn-sm hidden">配置识图模型</button>
               <button type="button" id="btnSwitchToTextFromParse" class="btn btn-subtle btn-sm">切换到直接贴正文</button>
               <button type="button" id="btnRetryParseUrl" class="btn btn-ghost btn-sm">原链接重试</button>
             </div>
@@ -340,6 +370,14 @@
             </div>
 
             <div class="toolbar-speed">
+              <button type="button" id="btnBgmMode" class="btn-bgm" title="切换播客纯音乐配乐" aria-label="切换播客纯音乐配乐" data-bgm-mode="warm" disabled>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M9 18V5l12-2v13"></path>
+                  <circle cx="6" cy="18" r="3"></circle>
+                  <circle cx="18" cy="16" r="3"></circle>
+                </svg>
+                <span id="bgmModeLabel">暖调配乐</span>
+              </button>
               <button type="button" id="btnSpeed" class="btn-speed" title="切换播放倍速" aria-label="切换播放倍速" disabled>1.0x</button>
             </div>
           </div>
@@ -435,6 +473,36 @@
                 <button type="button" id="btnTestLlm" class="btn btn-subtle btn-sm">测试模型连接</button>
                 <span id="llmTestStatus" class="test-status" aria-live="polite"></span>
               </div>
+
+              <details id="visionSettingsDisclosure" class="advanced-disclosure vision-disclosure">
+                <summary>长图识字模型（可选 · DeepSeek 等纯文本模型专用）</summary>
+                <div class="vision-fields">
+                  <p class="form-help">若上方剧本模型已选 Kimi（kimi-k2.5）、豆包或通义千问多模态版，此处留空即可自动复用；若剧本用 DeepSeek，可单独配一个识图模型。</p>
+                  <div class="preset-strip" id="visionPresetStrip" role="group" aria-label="识图模型快捷预设">
+                    <button type="button" class="preset-pill is-active" data-vision-preset="reuse">同剧本模型</button>
+                    <button type="button" class="preset-pill" data-vision-preset="kimi">Kimi K2.5</button>
+                    <button type="button" class="preset-pill" data-vision-preset="doubao">豆包视觉</button>
+                    <button type="button" class="preset-pill" data-vision-preset="qwen">通义千问 VL</button>
+                  </div>
+                  <div class="form-field">
+                    <label for="settingVisionApiKey" class="form-label">识图 API Key（留空则复用上方或 .env）</label>
+                    <div class="password-wrap">
+                      <input type="password" id="settingVisionApiKey" class="field-input" placeholder="留空默认复用上方 API Key" autocomplete="off" spellcheck="false">
+                      <button type="button" id="btnToggleVisionKey" class="btn-reveal" aria-label="显示或隐藏识图 API Key">显示</button>
+                    </div>
+                  </div>
+                  <div class="field-row-2">
+                    <div class="form-field">
+                      <label for="settingVisionBaseUrl" class="form-label">识图 Base URL</label>
+                      <input type="url" id="settingVisionBaseUrl" class="field-input" placeholder="留空复用上方地址" spellcheck="false">
+                    </div>
+                    <div class="form-field">
+                      <label for="settingVisionModel" class="form-label">识图模型名称</label>
+                      <input type="text" id="settingVisionModel" class="field-input" placeholder="如 kimi-k2.5 / qwen-vl-plus" spellcheck="false">
+                    </div>
+                  </div>
+                </div>
+              </details>
             </div>
 
             <!-- Tab 2：语音合成 -->
@@ -611,6 +679,7 @@
   </div>
 
   <script src="inputSource.js"></script>
+  <script src="audioEngine.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

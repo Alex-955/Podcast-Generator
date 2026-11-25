@@ -13,6 +13,7 @@
     apiKey: 'ai_podcast_apikey',
     baseURL: 'ai_podcast_baseurl',
     model: 'ai_podcast_model',
+    visionConfig: 'ai_podcast_vision_config',
     ttsConfig: 'ai_podcast_tts_config',
     activeTaskId: 'ai_podcast_active_task_id',
   };
@@ -23,21 +24,21 @@
       label: 'DeepSeek',
       baseURL: 'https://api.deepseek.com',
       model: 'deepseek-chat',
-      hint: '性价比与中文播客口语感兼顾（推荐）。前往 DeepSeek 开放平台（platform.deepseek.com）创建 API Key。',
+      hint: '性价比与中文播客口语感兼顾（推荐）。前往 DeepSeek 开放平台（platform.deepseek.com）创建 API Key；如需用长图识字，请在下方折叠项单独配一个识图模型。',
     },
     {
       id: 'kimi',
       label: 'Kimi',
       baseURL: 'https://api.moonshot.cn/v1',
-      model: 'kimi-k2-0711-preview',
-      hint: '长文消化与中文对话自然度极佳，适合有 Kimi Token 套餐的用户。前往 platform.moonshot.cn 获取 API Key。',
+      model: 'kimi-k2.5',
+      hint: '原生多模态 + 长文消化极佳，一套 Key 同时支持剧本生成与长截图识字。前往 platform.moonshot.cn 获取 API Key。',
     },
     {
       id: 'doubao',
       label: '豆包',
       baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
       model: 'doubao-seed-1-6-250615',
-      hint: '中文网感强、响应快。前往火山方舟（console.volcengine.com/ark）获取 API Key 或填写推理接入点 ID。',
+      hint: '中文网感强、支持图片识别。前往火山方舟（console.volcengine.com/ark）获取 API Key 或填写推理接入点 ID。',
     },
     {
       id: 'qwen',
@@ -69,6 +70,13 @@
     },
   ];
 
+  const VISION_PRESETS = [
+    { id: 'reuse', baseURL: '', model: '' },
+    { id: 'kimi', baseURL: 'https://api.moonshot.cn/v1', model: 'kimi-k2.5' },
+    { id: 'doubao', baseURL: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seed-1-6-250615' },
+    { id: 'qwen', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-vl-plus' },
+  ];
+
   const FALLBACK_TTS_CATALOG = {
     defaultProvider: 'edge',
     items: [
@@ -77,18 +85,21 @@
         name: 'MiniMax Speech',
         requiresAuth: true,
         authModes: ['apiKey'],
-        availableModels: ['speech-02-hd', 'speech-02-turbo', 'speech-2.8-hd', 'speech-2.8-turbo'],
-        defaultModel: 'speech-02-hd',
-        defaultVoices: { 阿泽: 'male-qn-jingying', 小晓: 'female-yujie' },
+        availableModels: ['speech-2.8-turbo', 'speech-2.8-hd', 'speech-02-turbo', 'speech-02-hd'],
+        defaultModel: 'speech-2.8-turbo',
+        defaultVoices: { 阿泽: 'male-qn-jingying', 小晓: 'Chinese (Mandarin)_Warm_Bestie' },
         availableVoices: [
           { id: 'male-qn-jingying', name: '精英青年（沉稳自然·阿泽推荐）', gender: 'male' },
           { id: 'Chinese (Mandarin)_Radio_Host', name: '电台主播（从容播报）', gender: 'male' },
           { id: 'Chinese (Mandarin)_Sincere_Adult', name: '真诚成年（温和朋友感）', gender: 'male' },
           { id: 'male-qn-qingse', name: '青涩青年（年轻明快）', gender: 'male' },
-          { id: 'female-yujie', name: '知性御姐（干练细腻·小晓推荐）', gender: 'female' },
-          { id: 'Chinese (Mandarin)_Warm_Bestie', name: '温暖闺蜜（亲切放松）', gender: 'female' },
+          { id: 'Chinese (Mandarin)_Warm_Bestie', name: '温暖闺蜜（亲切自然·小晓推荐）', gender: 'female' },
+          { id: 'presenter_female', name: '女性主持人（清亮大方）', gender: 'female' },
+          { id: 'danya_xuejie', name: '淡雅学姐（柔和知性）', gender: 'female' },
+          { id: 'female-tianmei', name: '甜美女性（轻快明朗）', gender: 'female' },
+          { id: 'female-shaonv', name: '清脆少女（活泼灵动）', gender: 'female' },
           { id: 'Chinese (Mandarin)_Wise_Women', name: '知性女性（深度解析）', gender: 'female' },
-          { id: 'female-shaonv', name: '清脆少女（轻快活泼）', gender: 'female' },
+          { id: 'female-yujie', name: '知性御姐（干练沉稳）', gender: 'female' },
         ],
         serverConfigured: false,
       },
@@ -99,11 +110,11 @@
         authModes: ['apiKey', 'appIdAccessKey'],
         availableModels: ['seed-tts-2.0', 'seed-tts-1.0'],
         defaultModel: 'seed-tts-2.0',
-        defaultVoices: { 阿泽: 'zh_male_m191_uranus_bigtts', 小晓: 'zh_female_vv_uranus_bigtts' },
+        defaultVoices: { 阿泽: 'zh_male_taocheng_uranus_bigtts', 小晓: 'zh_female_vv_uranus_bigtts' },
         availableVoices: [
-          { id: 'zh_male_m191_uranus_bigtts', name: '云舟 2.0（自然播客男声·阿泽推荐）', gender: 'male' },
+          { id: 'zh_male_taocheng_uranus_bigtts', name: '小天 2.0（明快青年男声·阿泽推荐）', gender: 'male' },
+          { id: 'zh_male_m191_uranus_bigtts', name: '云舟 2.0（沉稳播客男声）', gender: 'male' },
           { id: 'zh_male_liufei_uranus_bigtts', name: '刘飞 2.0（对话磁性男声）', gender: 'male' },
-          { id: 'zh_male_taocheng_uranus_bigtts', name: '小天 2.0（明快青年男声）', gender: 'male' },
           { id: 'zh_female_vv_uranus_bigtts', name: 'Vivi 2.0（灵动自然女声·小晓推荐）', gender: 'female' },
           { id: 'zh_female_xiaohe_uranus_bigtts', name: '小何 2.0（亲和对话女声）', gender: 'female' },
           { id: 'zh_female_cancan_uranus_bigtts', name: '知性灿灿 2.0（清亮拆解女声）', gender: 'female' },
@@ -141,17 +152,17 @@
   };
 
   const TTS_MODEL_LABELS = {
-    'speech-02-hd': 'speech-02-hd（高清自然·推荐）',
-    'speech-02-turbo': 'speech-02-turbo（高速低延）',
+    'speech-2.8-turbo': 'speech-2.8-turbo（新一代高性价比·推荐）',
     'speech-2.8-hd': 'speech-2.8-hd（新一代高清）',
-    'speech-2.8-turbo': 'speech-2.8-turbo（新一代极速）',
+    'speech-02-turbo': 'speech-02-turbo（高速经典）',
+    'speech-02-hd': 'speech-02-hd（经典高清·费率较高）',
     'seed-tts-2.0': 'seed-tts-2.0（豆包语音大模型 2.0 · 推荐）',
     'seed-tts-1.0': 'seed-tts-1.0（豆包经典版 1.0）',
   };
 
   const TTS_GUIDES = {
-    minimax: '音色自然且带有真实对话停顿与呼吸感（推荐）。前往 MiniMax 开放平台（platform.minimaxi.com）创建 API Key 即可使用（新用户含体验额度，默认内置国内版接口）。',
-    volcengine: '字节跳动豆包大模型语音（OPPO AI 妙听同款语音体系）。在火山引擎控制台（console.volcengine.com/speech/app）开通「大模型语音合成」后获取 API Key（或 AppID + Access Key）；1.0 与 2.0 音色会按资源版本自动匹配。',
+    minimax: '默认采用新一代 speech-2.8-turbo（比 02-hd 省约 43% 费用），内置句间节流防 1002 限流。前往 platform.minimaxi.com 创建 API Key 即可使用。',
+    volcengine: '字节跳动豆包大模型语音（OPPO AI 妙听同款语音体系，小天 2.0 + Vivi 2.0 搭配自然）。在 console.volcengine.com/speech/app 开通「大模型语音合成」后获取 API Key。',
     edge: '免配置密钥的微软神经网络语音试用通道；因非官方公开接口，近期偶发 403 限流且拟真度一般，长期稳定制作建议使用 MiniMax 或火山豆包。',
   };
 
@@ -159,10 +170,10 @@
     provider: '',
     minimax: {
       apiKey: '',
-      model: 'speech-02-hd',
+      model: 'speech-2.8-turbo',
       endpoint: '',
       voiceHost: 'male-qn-jingying',
-      voiceGuest: 'female-yujie',
+      voiceGuest: 'Chinese (Mandarin)_Warm_Bestie',
     },
     volcengine: {
       authMode: 'apiKey',
@@ -171,7 +182,7 @@
       accessKey: '',
       resourceId: 'seed-tts-2.0',
       endpoint: '',
-      voiceHost: 'zh_male_m191_uranus_bigtts',
+      voiceHost: 'zh_male_taocheng_uranus_bigtts',
       voiceGuest: 'zh_female_vv_uranus_bigtts',
     },
     edge: {
@@ -211,12 +222,16 @@
     apiKey: readStorage(STORAGE_KEYS.apiKey),
     baseURL: readStorage(STORAGE_KEYS.baseURL) || DEFAULT_BASE_URL,
     model: readStorage(STORAGE_KEYS.model) || DEFAULT_MODEL,
+    visionConfig: loadVisionConfig(),
     ttsConfig: loadTtsConfig(),
     ttsCatalog: FALLBACK_TTS_CATALOG,
     settingsTab: 'llm',
     modalTtsProvider: 'edge',
     modalVolcAuthMode: 'apiKey',
+    uiInputTab: 'url',
     input: window.InputSource.createState(),
+    imageSlices: [],
+    extractingImages: false,
     confirmedDraft: null,
     fullPreviewExpanded: false,
     activeTask: null,
@@ -225,6 +240,8 @@
     elapsedTimer: null,
     historyItems: [],
     currentPodcast: null,
+    currentMetaBaseText: '尚无已选播客',
+    audioEngine: null,
     playbackRate: 1.0,
     isSeeking: false,
     subtitleElements: [],
@@ -250,6 +267,12 @@
     btnToggleKeyVisible: document.getElementById('btnToggleKeyVisible'),
     btnTestLlm: document.getElementById('btnTestLlm'),
     llmTestStatus: document.getElementById('llmTestStatus'),
+    visionSettingsDisclosure: document.getElementById('visionSettingsDisclosure'),
+    visionPresetPills: document.querySelectorAll('[data-vision-preset]'),
+    settingVisionApiKey: document.getElementById('settingVisionApiKey'),
+    btnToggleVisionKey: document.getElementById('btnToggleVisionKey'),
+    settingVisionBaseUrl: document.getElementById('settingVisionBaseUrl'),
+    settingVisionModel: document.getElementById('settingVisionModel'),
 
     ttsProviderButtons: document.querySelectorAll('[data-tts-provider]'),
     ttsFieldsMinimax: document.getElementById('ttsFieldsMinimax'),
@@ -286,17 +309,26 @@
     tabIndicator: document.getElementById('tabIndicator'),
     tabBtnUrl: document.getElementById('tabBtnUrl'),
     tabBtnText: document.getElementById('tabBtnText'),
+    tabBtnImage: document.getElementById('tabBtnImage'),
     panelUrl: document.getElementById('panelUrl'),
     panelText: document.getElementById('panelText'),
+    panelImage: document.getElementById('panelImage'),
     inputUrl: document.getElementById('inputUrl'),
     btnFetchUrl: document.getElementById('btnFetchUrl'),
     inputTitle: document.getElementById('inputTitle'),
     inputText: document.getElementById('inputText'),
     textCharCount: document.getElementById('textCharCount'),
     btnPreviewText: document.getElementById('btnPreviewText'),
+    imageDropZone: document.getElementById('imageDropZone'),
+    inputImageFiles: document.getElementById('inputImageFiles'),
+    imagePreviewStrip: document.getElementById('imagePreviewStrip'),
+    imageSelectionMeta: document.getElementById('imageSelectionMeta'),
+    btnClearImages: document.getElementById('btnClearImages'),
+    btnExtractImages: document.getElementById('btnExtractImages'),
     samplePills: document.querySelectorAll('.sample-pill'),
     parseErrorBanner: document.getElementById('parseErrorBanner'),
     parseErrorText: document.getElementById('parseErrorText'),
+    btnOpenVisionFromParse: document.getElementById('btnOpenVisionFromParse'),
     btnSwitchToTextFromParse: document.getElementById('btnSwitchToTextFromParse'),
     btnRetryParseUrl: document.getElementById('btnRetryParseUrl'),
 
@@ -346,6 +378,8 @@
     btnPlayPause: document.getElementById('btnPlayPause'),
     playRipple: document.getElementById('playRipple'),
     btnForward10: document.getElementById('btnForward10'),
+    btnBgmMode: document.getElementById('btnBgmMode'),
+    bgmModeLabel: document.getElementById('bgmModeLabel'),
     btnSpeed: document.getElementById('btnSpeed'),
     subtitlesList: document.getElementById('subtitlesList'),
 
@@ -378,6 +412,30 @@
     } catch {
       // 隐私模式下忽略本地存储写入失败
     }
+  }
+
+  function loadVisionConfig() {
+    const raw = readStorage(STORAGE_KEYS.visionConfig);
+    if (!raw) return { apiKey: '', baseURL: '', model: '' };
+    try {
+      const parsed = JSON.parse(raw);
+      return {
+        apiKey: typeof parsed?.apiKey === 'string' ? parsed.apiKey : '',
+        baseURL: typeof parsed?.baseURL === 'string' ? parsed.baseURL : '',
+        model: typeof parsed?.model === 'string' ? parsed.model : '',
+      };
+    } catch {
+      return { apiKey: '', baseURL: '', model: '' };
+    }
+  }
+
+  function saveVisionConfigToStorage() {
+    const cfg = state.visionConfig;
+    if (!cfg.apiKey && !cfg.baseURL && !cfg.model) {
+      writeStorage(STORAGE_KEYS.visionConfig, '');
+      return;
+    }
+    writeStorage(STORAGE_KEYS.visionConfig, JSON.stringify(cfg));
   }
 
   function loadTtsConfig() {
@@ -482,7 +540,8 @@
   }
 
   function positionTabIndicator(immediate) {
-    const activeBtn = state.input.mode === 'url' ? dom.tabBtnUrl : dom.tabBtnText;
+    const map = { url: dom.tabBtnUrl, text: dom.tabBtnText, image: dom.tabBtnImage };
+    const activeBtn = map[state.uiInputTab] || dom.tabBtnUrl;
     if (!activeBtn) return;
     if (immediate) {
       dom.tabIndicator.style.transition = 'none';
@@ -509,27 +568,45 @@
     dom.parseErrorText.textContent = '';
     dom.inputUrl.classList.remove('is-invalid');
     dom.inputText.classList.remove('is-invalid');
+    if (dom.btnOpenVisionFromParse) dom.btnOpenVisionFromParse.classList.add('hidden');
   }
 
-  function showParseError(message, fieldEl) {
+  function showParseError(message, fieldEl, { source = state.uiInputTab, showVisionConfig = false } = {}) {
     dom.parseErrorText.textContent = message;
     dom.parseErrorBanner.classList.remove('hidden');
     if (fieldEl) fieldEl.classList.add('is-invalid');
+
+    if (dom.btnOpenVisionFromParse) {
+      dom.btnOpenVisionFromParse.classList.toggle('hidden', !showVisionConfig);
+    }
+    if (dom.btnSwitchToTextFromParse) {
+      dom.btnSwitchToTextFromParse.classList.toggle('hidden', source === 'text');
+    }
+    if (dom.btnRetryParseUrl) {
+      dom.btnRetryParseUrl.classList.toggle('hidden', source !== 'url');
+    }
   }
 
   function switchTab(mode, { immediateIndicator = false } = {}) {
-    window.InputSource.setMode(state.input, mode);
-    const isUrl = mode === 'url';
+    const uiMode = ['url', 'text', 'image'].includes(mode) ? mode : 'url';
+    state.uiInputTab = uiMode;
+    window.InputSource.setMode(state.input, uiMode === 'url' ? 'url' : 'text');
 
-    dom.tabBtnUrl.classList.toggle('is-active', isUrl);
-    dom.tabBtnUrl.setAttribute('aria-selected', String(isUrl));
-    dom.tabBtnText.classList.toggle('is-active', !isUrl);
-    dom.tabBtnText.setAttribute('aria-selected', String(!isUrl));
-
-    dom.panelUrl.classList.toggle('hidden', !isUrl);
-    dom.panelUrl.classList.toggle('is-active', isUrl);
-    dom.panelText.classList.toggle('hidden', isUrl);
-    dom.panelText.classList.toggle('is-active', !isUrl);
+    const tabs = [
+      [dom.tabBtnUrl, dom.panelUrl, uiMode === 'url'],
+      [dom.tabBtnText, dom.panelText, uiMode === 'text'],
+      [dom.tabBtnImage, dom.panelImage, uiMode === 'image'],
+    ];
+    tabs.forEach(([btn, panel, active]) => {
+      if (btn) {
+        btn.classList.toggle('is-active', active);
+        btn.setAttribute('aria-selected', String(active));
+      }
+      if (panel) {
+        panel.classList.toggle('hidden', !active);
+        panel.classList.toggle('is-active', active);
+      }
+    });
 
     invalidateConfirmedDraft();
     hideParseError();
@@ -546,7 +623,8 @@
     state.confirmedDraft = draft;
     state.fullPreviewExpanded = false;
 
-    dom.confirmSourceBadge.textContent = draft.mode === 'url' ? '链接解析' : '直接贴正文';
+    const badgeText = draft.mode === 'url' ? '链接解析' : draft.mode === 'image' ? '长图识字' : '直接贴正文';
+    dom.confirmSourceBadge.textContent = badgeText;
     dom.confirmCharBadge.textContent = `${draft.length.toLocaleString('zh-CN')} 字`;
     updateConfirmTtsBadge();
     dom.confirmTruncatedBadge.classList.toggle('hidden', !draft.truncated);
@@ -693,6 +771,221 @@
       length: content.length,
       truncated,
     });
+  }
+
+  function buildVisionPayload(source = state.visionConfig) {
+    const out = {};
+    if (source?.apiKey?.trim()) out.visionApiKey = source.apiKey.trim();
+    if (source?.baseURL?.trim()) out.visionBaseURL = source.baseURL.trim();
+    if (source?.model?.trim()) out.visionModel = source.model.trim();
+    return out;
+  }
+
+  const MAX_IMAGE_SLICES = 8;
+
+  function loadImageFromFile(file) {
+    return new Promise((resolve, reject) => {
+      const objectUrl = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        resolve(img);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error(`无法读取图片 ${file.name || ''}`));
+      };
+      img.src = objectUrl;
+    });
+  }
+
+  function encodeCanvasSlice(img, sx, sy, sw, sh, outW, outH) {
+    const canvas = document.createElement('canvas');
+    canvas.width = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, outW, outH);
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+    return canvas.toDataURL('image/jpeg', 0.88);
+  }
+
+  async function sliceImageFile(file, remainingQuota) {
+    const img = await loadImageFromFile(file);
+    const natW = img.naturalWidth || img.width;
+    const natH = img.naturalHeight || img.height;
+    if (!natW || !natH) throw new Error('图片尺寸无效');
+
+    const targetW = Math.min(natW, 1360);
+    const scale = targetW / natW;
+    const scaledH = Math.max(1, Math.round(natH * scale));
+    const slices = [];
+
+    if (natH / natW > 2.2 && remainingQuota > 1) {
+      const targetSliceOutH = Math.round(targetW * 1.45);
+      const overlapOutH = Math.round(targetW * 0.14);
+      let stepOut = Math.max(200, targetSliceOutH - overlapOutH);
+      const estimatedCount = Math.ceil((scaledH - overlapOutH) / stepOut);
+
+      if (estimatedCount > remainingQuota) {
+        stepOut = Math.ceil((scaledH - overlapOutH) / remainingQuota);
+      }
+
+      const sliceSrcH = Math.min(natH, Math.round(Math.max(targetSliceOutH, stepOut + overlapOutH) / scale));
+      const stepSrc = Math.max(100, Math.round(stepOut / scale));
+
+      for (let sy = 0; sy < natH && slices.length < remainingQuota; sy += stepSrc) {
+        const sh = Math.min(sliceSrcH, natH - sy);
+        const outH = Math.max(1, Math.round(sh * scale));
+        slices.push({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          dataUrl: encodeCanvasSlice(img, 0, sy, natW, sh, targetW, outH),
+          sourceName: file.name || '截图',
+          autoSliced: true,
+        });
+        if (sy + sh >= natH) break;
+      }
+      return slices;
+    }
+
+    const cappedOutH = Math.min(scaledH, 3200);
+    const cappedW = cappedOutH < scaledH ? Math.max(1, Math.round(targetW * (cappedOutH / scaledH))) : targetW;
+    slices.push({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      dataUrl: encodeCanvasSlice(img, 0, 0, natW, natH, cappedW, cappedOutH),
+      sourceName: file.name || '截图',
+      autoSliced: false,
+    });
+    return slices;
+  }
+
+  function renderImageSelection() {
+    const list = state.imageSlices;
+    dom.imagePreviewStrip.textContent = '';
+
+    if (!list.length) {
+      dom.imagePreviewStrip.classList.add('hidden');
+      dom.imageSelectionMeta.textContent = '尚未选择图片';
+      dom.btnClearImages.classList.add('hidden');
+      dom.btnExtractImages.disabled = true;
+      return;
+    }
+
+    dom.imagePreviewStrip.classList.remove('hidden');
+    dom.btnClearImages.classList.remove('hidden');
+    dom.btnExtractImages.disabled = state.extractingImages;
+
+    const slicedCount = list.filter((item) => item.autoSliced).length;
+    dom.imageSelectionMeta.textContent = slicedCount > 0
+      ? `已准备 ${list.length}/${MAX_IMAGE_SLICES} 片段（含长图自动切片）`
+      : `已选 ${list.length}/${MAX_IMAGE_SLICES} 张图片`;
+
+    list.forEach((item, idx) => {
+      const card = document.createElement('div');
+      card.className = 'image-thumb-card';
+
+      const img = document.createElement('img');
+      img.src = item.dataUrl;
+      img.alt = `待识别图片 ${idx + 1}`;
+
+      const badge = document.createElement('span');
+      badge.className = 'image-thumb-idx';
+      badge.textContent = `#${idx + 1}`;
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'image-thumb-del';
+      delBtn.setAttribute('aria-label', `移除第 ${idx + 1} 张图片`);
+      delBtn.textContent = '×';
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        state.imageSlices = state.imageSlices.filter((slice) => slice.id !== item.id);
+        renderImageSelection();
+      });
+
+      card.append(img, badge, delBtn);
+      dom.imagePreviewStrip.appendChild(card);
+    });
+  }
+
+  async function appendImageFiles(fileList) {
+    const files = Array.from(fileList || []).filter((f) => /^image\/(png|jpeg|jpg|webp)$/i.test(f.type));
+    if (!files.length) {
+      showToast('请选择 PNG、JPG 或 WebP 格式的截图文件');
+      return;
+    }
+    hideParseError();
+
+    let added = 0;
+    for (const file of files) {
+      const remaining = MAX_IMAGE_SLICES - state.imageSlices.length;
+      if (remaining <= 0) {
+        showToast(`单次最多支持 ${MAX_IMAGE_SLICES} 张（或切片），多余部分已跳过`);
+        break;
+      }
+      try {
+        const sliced = await sliceImageFile(file, remaining);
+        state.imageSlices.push(...sliced);
+        added += sliced.length;
+      } catch (err) {
+        showToast(err.message || '图片处理失败');
+      }
+    }
+    renderImageSelection();
+    if (added > 0) {
+      showToast(`已载入 ${added} 个图片片段`);
+    }
+  }
+
+  function clearSelectedImages() {
+    state.imageSlices = [];
+    if (dom.inputImageFiles) dom.inputImageFiles.value = '';
+    hideParseError();
+    renderImageSelection();
+  }
+
+  async function handleExtractImages() {
+    if (!state.imageSlices.length || state.extractingImages) return;
+    hideParseError();
+    invalidateConfirmedDraft();
+    state.extractingImages = true;
+    dom.btnExtractImages.disabled = true;
+    const btnSpan = dom.btnExtractImages.querySelector('span');
+    if (btnSpan) btnSpan.textContent = '正在识别文字…';
+
+    try {
+      const data = await apiJson('/api/extract-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          images: state.imageSlices.map((s) => s.dataUrl),
+          ...buildCredsPayload(),
+          ...buildVisionPayload(),
+        }),
+      });
+
+      switchTab('text');
+      dom.inputTitle.value = data.title || '';
+      dom.inputText.value = data.content || '';
+      updateTextCounter();
+
+      renderConfirmationCard({
+        mode: 'image',
+        title: data.title || '',
+        content: data.content,
+        length: data.length,
+        truncated: Boolean(data.truncated),
+      });
+      showToast(`已从截图识别 ${data.length.toLocaleString('zh-CN')} 字，请核对后生成播客`);
+    } catch (err) {
+      const msg = err.message || '图片文字识别失败，建议换清晰截图或直接贴正文';
+      const needsVisionConfig = err.status === 400 && /识图|图片识别|视觉|API Key/i.test(msg);
+      showParseError(msg, null, { source: 'image', showVisionConfig: needsVisionConfig });
+    } finally {
+      state.extractingImages = false;
+      if (btnSpan) btnSpan.textContent = '识别图片文字';
+      dom.btnExtractImages.disabled = state.imageSlices.length === 0;
+    }
   }
 
   function buildCredsPayload(source = state) {
@@ -1166,13 +1459,36 @@
     }
   }
 
+  function updateBgmButton(mode = state.audioEngine?.getBgmMode?.() || 'warm') {
+    if (!dom.btnBgmMode) return;
+    dom.btnBgmMode.dataset.bgmMode = mode;
+    if (dom.bgmModeLabel) {
+      dom.bgmModeLabel.textContent = state.audioEngine?.getBgmLabel?.(mode) || '暖调配乐';
+    }
+  }
+
+  function handleAudioPhaseChange({ phase, isActive, bgmMode }) {
+    const playingNow = isActive || !dom.mainAudio.paused;
+    setDeckPlaying(playingNow);
+    updateBgmButton(bgmMode);
+    if (!dom.currentPodcastMeta) return;
+    if (phase === 'intro') {
+      dom.currentPodcastMeta.textContent = `${state.currentMetaBaseText} · 片头纯音乐…`;
+    } else if (phase === 'outro') {
+      dom.currentPodcastMeta.textContent = `${state.currentMetaBaseText} · 片尾淡出…`;
+    } else {
+      dom.currentPodcastMeta.textContent = state.currentMetaBaseText;
+    }
+  }
+
   function loadPodcast(podcast, { autoplay = false } = {}) {
     state.currentPodcast = podcast;
     window.InputSource.resetPlaybackHighlight(state.input);
 
     const sentences = Array.isArray(podcast.sentences) ? podcast.sentences : [];
     dom.currentPodcastTitle.textContent = podcast.podcastTitle || 'AI 妙听双人播客';
-    dom.currentPodcastMeta.textContent = `共 ${sentences.length} 句对话 · 全长 ${formatTime(podcast.totalDuration || 0)}`;
+    state.currentMetaBaseText = `共 ${sentences.length} 句对话 · 全长 ${formatTime(podcast.totalDuration || 0)}`;
+    dom.currentPodcastMeta.textContent = state.currentMetaBaseText;
 
     if (podcast.summary) {
       dom.currentPodcastSummary.textContent = podcast.summary;
@@ -1194,6 +1510,7 @@
     dom.btnPlayPause.disabled = false;
     dom.btnRewind10.disabled = false;
     dom.btnForward10.disabled = false;
+    if (dom.btnBgmMode) dom.btnBgmMode.disabled = false;
     dom.btnSpeed.disabled = false;
     dom.btnCopyMarkdown.disabled = sentences.length === 0;
 
@@ -1208,12 +1525,19 @@
     dom.miniTime.textContent = `00:00 / ${formatTime(podcast.totalDuration || 0)}`;
     if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.speaker = 'none';
 
+    state.audioEngine?.loadPodcast(podcast);
+    updateBgmButton();
+
     renderSubtitles(sentences);
     renderHistoryList();
     updateMobileMiniVisibility();
 
     if (autoplay) {
-      dom.mainAudio.play().catch(() => {});
+      if (state.audioEngine) {
+        state.audioEngine.requestPlay().catch(() => {});
+      } else {
+        dom.mainAudio.play().catch(() => {});
+      }
     }
   }
 
@@ -1268,10 +1592,14 @@
       const jumpAndPlay = () => {
         if (!dom.mainAudio.src) return;
         const target = Math.max(0, Number(s.startTime) || 0);
-        dom.mainAudio.currentTime = target;
         syncHighlightToTime(target);
-        if (dom.mainAudio.paused) {
-          dom.mainAudio.play().catch(() => {});
+        if (state.audioEngine) {
+          state.audioEngine.seekAndPlay(target).catch(() => {});
+        } else {
+          dom.mainAudio.currentTime = target;
+          if (dom.mainAudio.paused) {
+            dom.mainAudio.play().catch(() => {});
+          }
         }
       };
 
@@ -1346,6 +1674,18 @@
   function togglePlayPause() {
     if (!dom.mainAudio.src) return;
     triggerPlayRipple();
+    if (state.audioEngine) {
+      const phase = state.audioEngine.getPhase();
+      const activeNow = phase === 'intro' || phase === 'playing' || phase === 'outro' || !dom.mainAudio.paused;
+      if (activeNow) {
+        state.audioEngine.requestPause();
+      } else {
+        state.audioEngine.requestPlay().catch((err) => {
+          showToast('未能播放音频：' + (err.message || '请检查音频文件'));
+        });
+      }
+      return;
+    }
     if (dom.mainAudio.paused) {
       dom.mainAudio.play().catch((err) => {
         showToast('未能播放音频：' + (err.message || '请检查音频文件'));
@@ -1365,8 +1705,13 @@
     if (!dom.mainAudio.src) return;
     const duration = dom.mainAudio.duration || state.currentPodcast?.totalDuration || 0;
     const target = Math.max(0, Math.min(duration, dom.mainAudio.currentTime + delta));
-    dom.mainAudio.currentTime = target;
     syncHighlightToTime(target);
+    if (state.audioEngine?.getPhase?.() === 'intro') {
+      state.audioEngine.seekAndPlay(target).catch(() => {});
+      return;
+    }
+    dom.mainAudio.currentTime = target;
+    state.audioEngine?.syncTime(target);
   }
 
   function cyclePlaybackSpeed() {
@@ -1444,7 +1789,7 @@
       };
     }
     return {
-      阿泽: 'zh_male_m191_uranus_bigtts',
+      阿泽: 'zh_male_taocheng_uranus_bigtts',
       小晓: 'zh_female_vv_uranus_bigtts',
     };
   }
@@ -1763,13 +2108,57 @@
     btnEl.textContent = '显示';
   }
 
-  function openSettingsModal(initialTab = 'llm') {
+  function detectVisionPresetId(baseURL, model) {
+    const normalized = normalizeBaseUrlForMatch(baseURL);
+    if (!normalized && !String(model || '').trim()) return 'reuse';
+    for (const preset of VISION_PRESETS) {
+      if (preset.id === 'reuse') continue;
+      if (normalized === normalizeBaseUrlForMatch(preset.baseURL)) {
+        return preset.id;
+      }
+    }
+    return 'reuse';
+  }
+
+  function updateVisionPresetSelection(presetId) {
+    dom.visionPresetPills.forEach((pill) => {
+      pill.classList.toggle('is-active', pill.dataset.visionPreset === presetId);
+    });
+  }
+
+  function applyVisionPreset(presetId) {
+    const preset = VISION_PRESETS.find((item) => item.id === presetId);
+    if (!preset) return;
+    if (preset.id === 'reuse') {
+      dom.settingVisionApiKey.value = '';
+      dom.settingVisionBaseUrl.value = '';
+      dom.settingVisionModel.value = '';
+    } else {
+      dom.settingVisionBaseUrl.value = preset.baseURL;
+      dom.settingVisionModel.value = preset.model;
+    }
+    updateVisionPresetSelection(preset.id);
+  }
+
+  function openSettingsModal(initialTab = 'llm', { expandVision = false } = {}) {
     dom.settingApiKey.value = state.apiKey;
     dom.settingBaseUrl.value = state.baseURL || DEFAULT_BASE_URL;
     dom.settingModel.value = state.model || DEFAULT_MODEL;
     updateLlmPresetSelection(detectLlmPresetId(dom.settingBaseUrl.value));
     resetSecretFieldVisibility(dom.settingApiKey, dom.btnToggleKeyVisible);
     setTestStatus(dom.llmTestStatus, '', '');
+
+    if (dom.settingVisionApiKey) {
+      dom.settingVisionApiKey.value = state.visionConfig.apiKey || '';
+      dom.settingVisionBaseUrl.value = state.visionConfig.baseURL || '';
+      dom.settingVisionModel.value = state.visionConfig.model || '';
+      resetSecretFieldVisibility(dom.settingVisionApiKey, dom.btnToggleVisionKey);
+      const hasCustomVision = Boolean(state.visionConfig.apiKey || state.visionConfig.baseURL || state.visionConfig.model);
+      updateVisionPresetSelection(detectVisionPresetId(dom.settingVisionBaseUrl.value, dom.settingVisionModel.value));
+      if (dom.visionSettingsDisclosure) {
+        dom.visionSettingsDisclosure.open = Boolean(expandVision || hasCustomVision);
+      }
+    }
 
     dom.settingMinimaxKey.value = state.ttsConfig.minimax.apiKey;
     dom.settingMinimaxEndpoint.value = state.ttsConfig.minimax.endpoint;
@@ -1795,6 +2184,8 @@
         else if (state.modalTtsProvider === 'volcengine') {
           (state.modalVolcAuthMode === 'appIdAccessKey' ? dom.settingVolcAppId : dom.settingVolcApiKey).focus();
         }
+      } else if (expandVision && dom.settingVisionApiKey) {
+        dom.settingVisionApiKey.focus();
       } else {
         dom.settingApiKey.focus();
       }
@@ -1814,11 +2205,17 @@
     state.apiKey = llm.apiKey;
     state.baseURL = llm.baseURL;
     state.model = llm.model;
+    state.visionConfig = {
+      apiKey: dom.settingVisionApiKey?.value.trim() || '',
+      baseURL: dom.settingVisionBaseUrl?.value.trim() || '',
+      model: dom.settingVisionModel?.value.trim() || '',
+    };
     state.ttsConfig = tts;
 
     writeStorage(STORAGE_KEYS.apiKey, state.apiKey);
     writeStorage(STORAGE_KEYS.baseURL, state.baseURL);
     writeStorage(STORAGE_KEYS.model, state.model);
+    saveVisionConfigToStorage();
     saveTtsConfigToStorage();
 
     updateApiKeyStatus();
@@ -1838,6 +2235,7 @@
   function bindEvents() {
     dom.tabBtnUrl.addEventListener('click', () => switchTab('url'));
     dom.tabBtnText.addEventListener('click', () => switchTab('text'));
+    if (dom.tabBtnImage) dom.tabBtnImage.addEventListener('click', () => switchTab('image'));
     window.addEventListener('resize', () => positionTabIndicator(true));
 
     dom.inputUrl.addEventListener('input', () => {
@@ -1872,8 +2270,56 @@
       switchTab('text');
       dom.inputText.focus();
     });
+    if (dom.btnOpenVisionFromParse) {
+      dom.btnOpenVisionFromParse.addEventListener('click', () => {
+        openSettingsModal('llm', { expandVision: true });
+      });
+    }
 
     dom.btnPreviewText.addEventListener('click', confirmTextDraft);
+
+    if (dom.imageDropZone && dom.inputImageFiles) {
+      dom.imageDropZone.addEventListener('click', () => dom.inputImageFiles.click());
+      dom.imageDropZone.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          dom.inputImageFiles.click();
+        }
+      });
+      dom.inputImageFiles.addEventListener('change', (e) => {
+        appendImageFiles(e.target.files);
+        e.target.value = '';
+      });
+      dom.imageDropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dom.imageDropZone.classList.add('is-dragover');
+      });
+      dom.imageDropZone.addEventListener('dragleave', () => {
+        dom.imageDropZone.classList.remove('is-dragover');
+      });
+      dom.imageDropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dom.imageDropZone.classList.remove('is-dragover');
+        appendImageFiles(e.dataTransfer?.files);
+      });
+    }
+    if (dom.btnClearImages) dom.btnClearImages.addEventListener('click', clearSelectedImages);
+    if (dom.btnExtractImages) dom.btnExtractImages.addEventListener('click', handleExtractImages);
+
+    document.addEventListener('paste', (e) => {
+      if (!dom.settingsModal.classList.contains('hidden')) return;
+      const items = Array.from(e.clipboardData?.items || []);
+      const imageFiles = items
+        .filter((item) => item.kind === 'file' && /^image\//.test(item.type))
+        .map((item) => item.getAsFile())
+        .filter(Boolean);
+      if (!imageFiles.length) return;
+      const activeTag = document.activeElement?.tagName;
+      if (state.uiInputTab !== 'image' && (activeTag === 'INPUT' || activeTag === 'TEXTAREA')) return;
+      e.preventDefault();
+      if (state.uiInputTab !== 'image') switchTab('image');
+      appendImageFiles(imageFiles);
+    });
 
     dom.samplePills.forEach((pill) => {
       pill.addEventListener('click', () => {
@@ -1915,6 +2361,13 @@
     dom.btnPlayPause.addEventListener('click', togglePlayPause);
     dom.btnRewind10.addEventListener('click', () => seekRelative(-10));
     dom.btnForward10.addEventListener('click', () => seekRelative(10));
+    if (dom.btnBgmMode) {
+      dom.btnBgmMode.addEventListener('click', async () => {
+        const mode = await state.audioEngine?.cycleBgmMode?.();
+        updateBgmButton(mode);
+        showToast(`播客配乐已切换为：${state.audioEngine?.getBgmLabel?.(mode) || mode}`);
+      });
+    }
     dom.btnSpeed.addEventListener('click', cyclePlaybackSpeed);
     dom.btnCopyMarkdown.addEventListener('click', handleCopyMarkdown);
     if (dom.btnMiniPlayPause) dom.btnMiniPlayPause.addEventListener('click', togglePlayPause);
@@ -1936,9 +2389,14 @@
       const pct = Number(dom.seekSlider.value) || 0;
       const dur = dom.mainAudio.duration || state.currentPodcast?.totalDuration || 0;
       const target = (pct / 100) * dur;
-      dom.mainAudio.currentTime = target;
       state.isSeeking = false;
       syncHighlightToTime(target);
+      if (state.audioEngine?.getPhase?.() === 'intro') {
+        state.audioEngine.seekAndPlay(target).catch(() => {});
+        return;
+      }
+      dom.mainAudio.currentTime = target;
+      state.audioEngine?.syncTime(target);
     });
 
     dom.mainAudio.addEventListener('loadedmetadata', () => {
@@ -1958,19 +2416,28 @@
         setSeekProgress((cur / dur) * 100);
       }
       syncHighlightToTime(cur);
+      state.audioEngine?.syncTime(cur);
     });
 
     dom.mainAudio.addEventListener('play', () => {
+      state.audioEngine?.handleAudioPlay();
       setDeckPlaying(true);
       syncHighlightToTime(dom.mainAudio.currentTime || 0);
     });
 
     dom.mainAudio.addEventListener('pause', () => {
-      setDeckPlaying(false);
+      state.audioEngine?.handleAudioPause();
+      const enginePhase = state.audioEngine?.getPhase?.();
+      if (enginePhase !== 'intro' && enginePhase !== 'outro') {
+        setDeckPlaying(false);
+      }
     });
 
     dom.mainAudio.addEventListener('ended', () => {
-      setDeckPlaying(false);
+      state.audioEngine?.handleAudioEnded();
+      if (!state.audioEngine || state.audioEngine.getPhase() !== 'outro') {
+        setDeckPlaying(false);
+      }
       dom.playerDeck.dataset.speaker = 'none';
       if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.speaker = 'none';
     });
@@ -1999,6 +2466,14 @@
     dom.llmPresetPills.forEach((pill) => {
       pill.addEventListener('click', () => applyLlmPreset(pill.dataset.llmPreset));
     });
+    dom.visionPresetPills.forEach((pill) => {
+      pill.addEventListener('click', () => applyVisionPreset(pill.dataset.visionPreset));
+    });
+    if (dom.settingVisionBaseUrl) {
+      dom.settingVisionBaseUrl.addEventListener('input', () => {
+        updateVisionPresetSelection(detectVisionPresetId(dom.settingVisionBaseUrl.value, dom.settingVisionModel?.value));
+      });
+    }
     dom.settingBaseUrl.addEventListener('input', () => {
       updateLlmPresetSelection(detectLlmPresetId(dom.settingBaseUrl.value));
       setTestStatus(dom.llmTestStatus, '', '');
@@ -2023,6 +2498,7 @@
     dom.btnTestTts.addEventListener('click', handleTestTtsConnection);
 
     bindPasswordToggle(dom.settingApiKey, dom.btnToggleKeyVisible);
+    bindPasswordToggle(dom.settingVisionApiKey, dom.btnToggleVisionKey);
     bindPasswordToggle(dom.settingMinimaxKey, dom.btnToggleMinimaxKey);
     bindPasswordToggle(dom.settingVolcApiKey, dom.btnToggleVolcApiKey);
     bindPasswordToggle(dom.settingVolcAccessKey, dom.btnToggleVolcAccessKey);
@@ -2066,10 +2542,15 @@
   }
 
   async function bootstrap() {
+    state.audioEngine = window.PodcastAudioEngine?.createAudioEngine(dom.mainAudio, {
+      onPhaseChange: handleAudioPhaseChange,
+    }) || null;
+    updateBgmButton();
     initWaveformBars();
     hydrateTtsControlsFromCatalog();
     updateApiKeyStatus();
     updateTextCounter();
+    renderImageSelection();
     bindEvents();
     positionTabIndicator(true);
 

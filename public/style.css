@@ -446,9 +446,132 @@ button {
   font-weight: 500;
 }
 
-/* 正文模式下隐藏 URL 示例芯片，避免与正文输入区错位 */
-.input-section:has(#panelText.is-active) .samples-block {
+/* 正文/识图模式下隐藏 URL 示例芯片，避免与输入区错位 */
+.input-section:has(#panelText.is-active) .samples-block,
+.input-section:has(#panelImage.is-active) .samples-block {
   display: none;
+}
+
+/* 长图识字上传与切片预览区 */
+.image-dropzone {
+  border: 1.5px dashed var(--hairline-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  padding: 18px 14px;
+  min-height: 112px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.image-dropzone:hover,
+.image-dropzone.is-dragover {
+  border-color: var(--accent);
+  background: rgba(176, 62, 36, 0.04);
+}
+
+.image-dropzone:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.dropzone-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.dropzone-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dropzone-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.dropzone-sub {
+  font-size: 12px;
+  color: var(--ink-muted);
+  line-height: 1.45;
+}
+
+.image-preview-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 188px;
+  overflow-y: auto;
+  padding: 2px 0;
+}
+
+.image-thumb-card {
+  position: relative;
+  width: 68px;
+  height: 86px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-subtle);
+  flex-shrink: 0;
+}
+
+.image-thumb-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.image-thumb-idx {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: rgba(26, 25, 22, 0.72);
+  color: #FFFFFF;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.image-thumb-del {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(26, 25, 22, 0.72);
+  color: #FFFFFF;
+  font-size: 13px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-thumb-del:hover {
+  background: var(--err);
+}
+
+.image-footer {
+  flex-wrap: wrap;
+}
+
+.image-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* 示例芯片：轻底无框 */
@@ -1366,7 +1489,49 @@ button {
 
 .toolbar-speed {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
+}
+
+.btn-bgm {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 6px 11px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--bg-subtle);
+  color: var(--ink-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color 160ms ease, color 160ms ease, transform 180ms var(--ease-snap);
+}
+
+.btn-bgm[data-bgm-mode="warm"],
+.btn-bgm[data-bgm-mode="airy"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.btn-bgm:hover:not(:disabled) {
+  background: var(--bg-subtle-hover);
+}
+
+.btn-bgm[data-bgm-mode="warm"]:hover:not(:disabled),
+.btn-bgm[data-bgm-mode="airy"]:hover:not(:disabled) {
+  background: rgba(176, 62, 36, 0.16);
+}
+
+.btn-bgm:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.btn-bgm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .btn-transport {
@@ -1930,6 +2095,18 @@ button {
   margin-top: 8px;
 }
 
+.vision-disclosure {
+  padding-top: 4px;
+  border-top: 1px solid var(--hairline);
+}
+
+.vision-fields {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 /* 连接测试条 */
 .test-action-row {
   display: flex;
@@ -2159,6 +2336,7 @@ button {
   .btn-play-main,
   .btn-transport,
   .btn-settings,
+  .btn-bgm,
   .btn-speed,
   .btn-reveal,
   .segmented-btn,
