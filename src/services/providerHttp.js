@@ -122,8 +122,9 @@ function checkChatCompletion(data, action) {
 }
 
 function redactProviderDetail(text, sensitive) {
+  // Non-ASCII characters also delimit paths in prose without spaces, such as Chinese.
   return redactSecrets(text, sensitive).replace(
-    /(^|[\s"'=(\[：:])(?:\/[\w.~@%+-]+\/[^\s"'<>),，。]*|[a-z]:[\\/][^\s"'<>),，。]+)/gi,
+    /(^|[\s"'=(\[:]|[^\x00-\x7f])(?:\/[\w.~@%+-]+\/[^\s"'<>),\]，。）】》」』；、]*|[a-z]:(?!\/\/)[\\/][^\s"'<>),\]，。）】》」』；、]+)/giu,
     '$1***'
   );
 }
