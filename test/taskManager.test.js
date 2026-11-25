@@ -6,6 +6,7 @@ const path = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
 const { createTaskManager } = require('../src/services/taskManager');
 const { getTtsProvider } = require('../src/services/ttsProvider');
+const { createMinimaxProvider } = require('../src/services/minimaxTtsProvider');
 const { synthesizeSentence, synthesizeDialogueScript, DEFAULT_VOICES } = require('../src/services/ttsService');
 const { getMp3DurationSeconds } = require('../src/services/mp3Utils');
 const { startFakeEdgeTts } = require('./fakeEdgeTts');
@@ -526,7 +527,7 @@ test('合成输入错误仅尝试一次', async () => {
 test('同一家服务换模型或换音色时清理工作目录，补凭据续跑时复用原片段', async t => {
   const calls = [];
   const provider = {
-    ...getTtsProvider('minimax'),
+    ...createMinimaxProvider({ minRequestIntervalMs: 0 }),
     synthesizeToFile({ outputPath, adapterOptions, voice }) {
       calls.push({ model: adapterOptions.model, voice });
       const audio = makeMp3(2);
@@ -565,6 +566,42 @@ test('同一家服务换模型或换音色时清理工作目录，补凭据续�
   const done = await status('completed');
   assert.equal(done.progress.cachedSegments, 3);
   assert.equal(calls.length, 7);
+});
+
+test('触发限流时实时保存重试进度，恢复合成后完成任务', async t => {
+  const { upstreamError } = require('../src/services/providerHttp');
+  const messages = [];
+  let calls = 0;
+  const { manager, config } = setup(t, {
+    ttsProvider: {
+      id: 'offline', model: 'test',
+      synthesizeToFile({ outputPath }) {
+        if (++calls === 1) throw upstreamError('限流', true, { rateLimited: true });
+        const audio = makeMp3(2);
+        fs.writeFileSync(outputPath, audio);
+        return { bytes: audio.length, duration: 0.048 };
+      },
+    },
+    ttsSynthesizer(lines, workDir, voices, options) {
+      return synthesizeDialogueScript(lines, workDir, voices, {
+        ...options, rateLimitBackoffMs: [5],
+        onProgress(progress) {
+          options.onProgress(progress);
+          if (progress.retrying) {
+            const file = path.join(config.tasksDir, path.basename(workDir) + '.json');
+            messages.push(JSON.parse(fs.readFileSync(file, 'utf8')).progress);
+          }
+        },
+      });
+    },
+  });
+  const { id } = manager.createTask(payload);
+  const done = await waitFor(() => manager.getTask(id), task => task.status === 'completed');
+  assert.equal(calls, dialogue.length + 1);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].completedSegments, 0);
+  assert.equal(messages[0].message, '第 1/3 句触发频率限制，约 1 秒后自动重试（第 1/6 次）…');
+  assert.doesNotMatch(done.progress.message, /频率限制/);
 });
 
 async function checkAccountIsolation(t, voice) {

@@ -60,15 +60,17 @@ async function requestProvider(endpoint, { method, headers, body, signal, allowP
 }
 
 class ProviderError extends Error {
-  constructor(message, retryable) {
+  constructor(message, retryable, options = {}) {
     super(message);
     this.statusCode = 502;
     this.retryable = retryable;
+    this.rateLimited = Boolean(options.rateLimited);
+    if (options.retryAfterMs !== undefined) this.retryAfterMs = options.retryAfterMs;
   }
 }
 
-function upstreamError(message, retryable = true) {
-  return new ProviderError(message, retryable);
+function upstreamError(message, retryable = true, options) {
+  return new ProviderError(message, retryable, options);
 }
 
 async function* boundedChunks(response, limit) {
@@ -92,7 +94,7 @@ async function readJson(response, limit, { allowInvalidJson = false } = {}) {
 }
 
 function httpStatusError(status) {
-  return upstreamError(`HTTP ${status}`, status === 408 || status === 429 || status >= 500);
+  return upstreamError(`HTTP ${status}`, status === 408 || status === 429 || status >= 500, { rateLimited: status === 429 });
 }
 
 module.exports = { ProviderError, checkEndpoint, requestProvider, boundedChunks, readJson, upstreamError, httpStatusError };

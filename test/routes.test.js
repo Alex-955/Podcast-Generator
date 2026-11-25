@@ -4,9 +4,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { once } = require('node:events');
+const { Readable } = require('node:stream');
 const { setTimeout: delay } = require('node:timers/promises');
 const { extractArticle } = require('../src/services/extractor');
 const { makeMp3 } = require('./helpers/mp3Fixtures');
+const { upstreamError } = require('../src/services/providerHttp');
 
 const apiKey = 'offline-credential';
 const payload = { mode: 'text', content: '离线文章正文', apiKey };
@@ -18,7 +20,7 @@ test.before(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'podcast-routes-'));
   publicDir = path.join(root, 'public');
   fs.mkdirSync(publicDir);
-  for (const file of ['index.html', 'style.css', 'app.js', 'inputSource.js']) {
+  for (const file of ['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js']) {
     fs.writeFileSync(path.join(publicDir, file), file);
   }
   const settings = {
@@ -104,6 +106,61 @@ test('健康、文章预览、CORS 白名单与上游错误脱敏', async () => 
   }
 });
 
+test('图片提取接口按顺序发送多张图片并返回结构化正文', async () => {
+  const images = ['data:image/png;base64,YQ==', 'data:image/webp;base64,Yg=='];
+  const visionBaseURL = 'https://offline-vision.example/API/v1/';
+  const visionApiKey = 'offline-request-vision-token';
+  let calls = 0;
+  llmRequest = async (url, options) => {
+    calls++;
+    assert.equal(url, 'https://offline-vision.example/API/v1/chat/completions');
+    assert.equal(options.headers.Authorization, 'Bearer ' + visionApiKey);
+    const { model, messages } = JSON.parse(options.body);
+    assert.equal(model, 'vision-fixture');
+    assert.deepEqual(messages[1].content.filter(item => item.type === 'image_url').map(item => item.image_url.url), images);
+    const response = Readable.from([Buffer.from(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ title: '长截图', content: '第一段\n\n第二段' }) } }],
+    }))]);
+    return Object.assign(response, { statusCode: 200, headers: {} });
+  };
+  const result = await request('extract-image', 200, { images, visionApiKey, visionBaseURL, visionModel: 'vision-fixture' });
+  assert.deepEqual(result, { success: true, data: { title: '长截图', content: '第一段\n\n第二段', length: 8, truncated: false, imageCount: 2 } });
+  assert.equal(calls, 1);
+});
+
+test('图片提取接口遮盖请求和服务端的视觉配置，拒绝无效请求与超限请求', async t => {
+  const visionApiKey = 'offline-request-vision-secret';
+  const visionBaseURL = 'https://caller-vision.example/private';
+  const VISION_API_KEY = 'offline-server-vision-secret';
+  const VISION_BASE_URL = 'https://server-vision.example/private';
+  setEnv(t, { VISION_API_KEY, VISION_BASE_URL, VISION_MODEL: 'test-vision' });
+  const images = ['data:image/jpeg;base64,YQ=='];
+  const body = { images, visionApiKey, visionBaseURL, visionModel: 'test-vision' };
+  const sensitive = [visionApiKey, visionBaseURL, VISION_API_KEY, VISION_BASE_URL];
+  let calls = 0;
+  llmRequest = async () => {
+    calls++;
+    throw upstreamError('识图失败 ' + sensitive.join(' '));
+  };
+  const failed = await request('extract-image', 502, body);
+  assert.equal(failed.error, '识图失败 *** *** *** ***');
+  for (const invalid of [[], '截图', ['data:image/gif;base64,YQ==']]) {
+    const result = await request('extract-image', 400, { ...body, images: invalid });
+    assert.ok(sensitive.every(value => !JSON.stringify(result).includes(value)));
+  }
+  const invalidJson = await fetch(base + '/api/extract-image', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body).slice(0, -1),
+  });
+  assert.equal(invalidJson.status, 400);
+  assert.equal((await invalidJson.json()).error, '请求体必须是有效 JSON');
+  const img = 'data:image/png;base64,' + 'A'.repeat(5.5 * 1024 * 1024);
+  await request('extract-image', 502, { ...body, images: [img, img] });
+  await request('extract-article', 413, { rawText: img + img });
+  const oversized = await request('extract-image', 413, { ...body, padding: 'A'.repeat(25 * 1024 * 1024) });
+  assert.ok(sensitive.every(value => !JSON.stringify(oversized).includes(value)));
+  assert.equal(calls, 2);
+});
+
 test('任务入参、不存在资源、非法 ID 与移除的接口', async () => {
   for (const body of [
     { mode: 'text', content: '正文' }, { ...payload, mode: 'unknown' },
@@ -127,7 +184,7 @@ test('前端只公开指定的 GET/HEAD 文件，运行目录只通过音频路�
   const bytes = makeMp3(2);
   fs.writeFileSync(path.join(audioDir, 'clip.mp3'), bytes);
 
-  for (const route of ['/', '/index.html', '/style.css', '/app.js', '/inputSource.js']) {
+  for (const route of ['/', '/index.html', '/style.css', '/app.js', '/inputSource.js', '/audioEngine.js']) {
     const get = await fetch(base + route);
     assert.equal(get.status, 200);
     assert.equal(await get.text(), route === '/' ? 'index.html' : route.slice(1));
@@ -232,12 +289,11 @@ test('模型配置目录屏蔽误填为模型名称的带空白凭据', async t 
   const secret = 'misconfigured-credential';
   setEnv(t, { MINIMAX_API_KEY: '  ' + secret + '  ', MINIMAX_TTS_MODEL: secret });
   const { data } = await (await fetch(base + '/api/tts/providers')).json();
-  assert.equal(data.items.find(item => item.id === 'minimax').defaultModel, 'speech-02-hd');
+  assert.equal(data.items.find(item => item.id === 'minimax').defaultModel, 'speech-2.8-turbo');
   assert.ok(!JSON.stringify(data).includes(secret));
 });
 
 test('模型连接测试校验绑定与鉴权，404/405 时尝试一个 token 的对话', async t => {
-  const { Readable } = require('node:stream');
   const endpoint = 'https://llm-service.example/api/v1/';
   setEnv(t, { DEEPSEEK_API_KEY: '', LLM_BASE_URL: endpoint, LLM_MODEL: 'server-model' });
   const calls = [];

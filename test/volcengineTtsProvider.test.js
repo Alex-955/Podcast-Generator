@@ -93,10 +93,33 @@ test('豆包资源系列后缀和大小写均使用对应版本的默认音色',
   const { endpoint, outputPath, requests } = await httpTtsFixture(t, res =>
     res.end(JSON.stringify({ code: 20000000, data: audio.toString('base64') })));
   for (const [resourceId, voice] of [['seed-tts-1.0-concurr', 'zh_male_yangguangqingnian_moon_bigtts'],
-    ['SEED-TTS-1.0-concurr', 'zh_male_yangguangqingnian_moon_bigtts'], ['seed-tts-2.0-concurr', 'zh_male_m191_uranus_bigtts']]) {
+    ['SEED-TTS-1.0-concurr', 'zh_male_yangguangqingnian_moon_bigtts'], ['seed-tts-2.0-concurr', 'zh_male_taocheng_uranus_bigtts']]) {
     await provider.synthesizeToFile({ outputPath, text: '你好', adapterOptions: { endpoint, apiKey, resourceId } });
     assert.equal(requests.at(-1).headers['x-api-resource-id'], resourceId);
     assert.equal(requests.at(-1).body.req_params.speaker, voice);
+  }
+});
+
+test('豆包 2.0 的情绪提示使用 additions JSON 字符串，旧资源和空情绪省略该字段', async t => {
+  const { endpoint, outputPath, requests } = await httpTtsFixture(t, res =>
+    res.end(JSON.stringify({ code: 20000000, data: audio.toString('base64') })));
+  assert.deepEqual(provider.defaultVoices, { 阿泽: 'zh_male_taocheng_uranus_bigtts', 小晓: 'zh_female_vv_uranus_bigtts' });
+  for (const [options, emotion, cue] of [
+    [{}, ' 温暖 ', '用真诚温暖、娓娓道来的朋友聊天语气，音量清晰平稳不要压低变小'],
+    [{ resourceId: 'seed-tts-2.0-concurr' }, '兴奋', '用略带惊喜、生动自然的播客口吻，但音量保持平稳不突然拔高'],
+    [{}, '诚恳', '用自然生动的诚恳播客聊天语气，音量保持清晰平稳'],
+    [{}, ' '], [{}, undefined], [{ resourceId: 'seed-tts-1.0-concurr' }, '笑意'],
+    [{ resourceId: 'volc.service_type.10029' }, '好奇'],
+    [{ resourceId: 'legacy-custom', speaker: 'zh_female_cancan_mars_bigtts' }, '好奇'],
+  ]) {
+    const { resourceId, speaker: voice } = options;
+    await provider.synthesizeToFile({ outputPath, text: '你好', emotion, voice, adapterOptions: { endpoint, apiKey, resourceId } });
+    const { req_params: params } = requests.at(-1).body;
+    assert.equal(Object.hasOwn(params, 'additions'), cue !== undefined);
+    if (cue) {
+      assert.equal(typeof params.additions, 'string');
+      assert.deepEqual(JSON.parse(params.additions), { disable_markdown_filter: true, context_texts: [cue] });
+    }
   }
 });
 
@@ -104,12 +127,16 @@ test('豆包 HTTP 客户端错误只请求一次，408 和 429 重试', async t 
   const { synthesizeSentence } = require('../src/services/ttsService');
   let status;
   const { endpoint, outputPath, requests } = await httpTtsFixture(t, res => res.writeHead(status).end());
-  for (const [code, count] of [[413, 1], [414, 1], [415, 1], [408, 3], [429, 3]]) {
+  for (const [code, count] of [[413, 1], [414, 1], [415, 1], [408, 3], [429, 6]]) {
     status = code;
     const before = requests.length;
-    await assert.rejects(synthesizeSentence({ text: '你好', provider, outputPath, adapterOptions: { endpoint, apiKey } }),
-      error => error.message.includes('HTTP ' + code) && (count === 3 || error.retryable === false));
+    const retries = [];
+    await assert.rejects(synthesizeSentence({ text: '你好', provider, outputPath, adapterOptions: { endpoint, apiKey },
+      rateLimitBackoffMs: [5, 5, 5, 5, 5], onRetry: info => retries.push(info) }),
+    error => error.message.includes('HTTP ' + code) &&
+      (count === 1 ? error.retryable === false : error.message.includes(`已尝试 ${count} 次`)));
     assert.equal(requests.length - before, count, 'HTTP ' + code);
+    assert.deepEqual(retries.map(info => info.rateLimited), Array(count - 1).fill(code === 429));
   }
 });
 
@@ -126,12 +153,12 @@ test('豆包 HTTP 200 中的参数、音色或授权错误只请求一次，并�
     [45000000, '资源未开通，无法提高并发限制', 1],
     [45000000, 'concurrent resource seed-tts-1.0-concurr', 1],
     [45000000, 'Concurrent requests', 1],
-    [45000000, 'Concurrency has reached the limit', 3],
-    [45000000, 'Concurrent session quota exceeded', 3],
-    [45000000, 'Concurrent request limit exceeded for this payload', 3],
-    [45000000, 'Concurrent connection pool size limit reached', 3],
+    [45000000, 'Concurrency has reached the limit', 6],
+    [45000000, 'Concurrent session quota exceeded', 6],
+    [45000000, 'Concurrent request limit exceeded for this payload', 6],
+    [45000000, 'Concurrent connection pool size limit reached', 6],
     [45000000, 'Concurrent resource quota upgrade requires permission', 1],
-    [45000000, '并发数超过限制', 3],
+    [45000000, '并发数超过限制', 6],
     [45000000, 'permission denied for seed-tts-1.0-concurr', 1],
     [45000000, 'unauthorized for concurrent requests', 1],
     [45000000, 'Authentication failed for concurrent requests', 1],
@@ -142,12 +169,14 @@ test('豆包 HTTP 200 中的参数、音色或授权错误只请求一次，并�
     [45000000, 'text length exceeds limit', 1],
     [45000000, 'payload size exceeds the rate limit', 1],
     [45000000, 'generic provider error', 1],
-    [45000000, 'quota not enough for voice', 1], [45000000, 'resource concurrency limit exceeded', 3],
+    [45000000, 'quota not enough for voice', 1], [45000000, 'resource concurrency limit exceeded', 6],
   ]) {
     record = { code, message };
     const before = requests.length;
-    await assert.rejects(synthesizeSentence({ text: '你好', provider, outputPath, adapterOptions: { endpoint, apiKey } }),
-      error => error.message.includes(String(code)) && (count === 3 || error.retryable === false));
+    await assert.rejects(synthesizeSentence({ text: '你好', provider, outputPath, adapterOptions: { endpoint, apiKey },
+      rateLimitBackoffMs: [5, 5, 5, 5, 5] }),
+    error => error.message.includes(String(code)) &&
+      (count === 1 ? error.retryable === false : error.message.includes('已尝试 6 次')));
     assert.equal(requests.length - before, count, message);
   }
 });

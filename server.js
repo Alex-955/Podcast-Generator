@@ -8,6 +8,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('node:path');
 const { extractArticle } = require('./src/services/extractor');
+const { extractTextFromImages } = require('./src/services/imageExtractor');
 const { createTaskManager } = require('./src/services/taskManager');
 const { InputError, redactSecrets, ttsSecrets } = require('./src/services/validation');
 
@@ -16,7 +17,7 @@ const { getPublicTtsProviders, resolveDefaultProviderId } = require('./src/servi
 const { testLlmConnection, testTtsConnection } = require('./src/services/connectionTests');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const FRONTEND_FILES = new Set(['/index.html', '/style.css', '/app.js', '/inputSource.js']);
+const FRONTEND_FILES = new Set(['/index.html', '/style.css', '/app.js', '/inputSource.js', '/audioEngine.js']);
 
 function parsePort(value) {
   const text = value?.trim();
@@ -41,6 +42,17 @@ function createApp(options = {}) {
     app.use(cors({ origin: origins, preflightContinue: true }));
     app.options(/^\/api\//, (req, res) => res.sendStatus(204));
   }
+  app.post('/api/extract-image', express.json({ limit: '25mb' }), async (req, res) => {
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    res.once('close', cancel);
+    try {
+      const data = await extractTextFromImages(req.body || {}, { ...options, signal: controller.signal });
+      res.json({ success: true, data });
+    } finally {
+      res.removeListener('close', cancel);
+    }
+  });
   app.use('/api', express.json({ limit: '10mb' }));
 
   app.post('/api/llm/test', async (req, res) => {
@@ -88,6 +100,7 @@ function createApp(options = {}) {
     if (status === 500 || err.path) detail = '本地服务未能完成请求';
     if (err.type === 'entity.parse.failed') detail = '请求体必须是有效 JSON';
     const sensitive = [req.body?.apiKey, req.body?.baseURL, process.env.DEEPSEEK_API_KEY, process.env.LLM_BASE_URL,
+      req.body?.visionApiKey, req.body?.visionBaseURL, process.env.VISION_API_KEY, process.env.VISION_BASE_URL,
       ...ttsSecrets(req.body?.tts ?? {}), dataDir, podcastsDir];
     const error = redactSecrets(detail, sensitive);
     const code = typeof err.code === 'string' ? redactSecrets(err.code, sensitive) : undefined;

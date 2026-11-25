@@ -7,10 +7,11 @@ const { synthesizeHttp } = require('./httpTts');
 
 const DEFAULT_VOLCENGINE_ENDPOINT = 'https://openspeech.bytedance.com/api/v3/tts/unidirectional';
 const DEFAULT_VOLCENGINE_RESOURCE_ID = 'seed-tts-2.0';
-const DEFAULT_VOLCENGINE_VOICES = { 阿泽: 'zh_male_m191_uranus_bigtts', 小晓: 'zh_female_vv_uranus_bigtts' };
+const DEFAULT_VOLCENGINE_VOICES = { 阿泽: 'zh_male_taocheng_uranus_bigtts', 小晓: 'zh_female_vv_uranus_bigtts' };
 const V1_VOICES = { 阿泽: 'zh_male_yangguangqingnian_moon_bigtts', 小晓: 'zh_female_cancan_mars_bigtts' };
 const V1_RESOURCE = /^seed-tts-1\.0/i;
 const V2_RESOURCE = /^seed-tts-2\.0/i;
+const V1_SPEAKER = /_(?:moon|mars|wvae)_bigtts$/;
 
 function defaultVolcengineVoices(resourceId) {
   return V1_RESOURCE.test(resourceId) ? V1_VOICES : DEFAULT_VOLCENGINE_VOICES;
@@ -19,15 +20,15 @@ function defaultVolcengineVoices(resourceId) {
 function validateVolcengineVoice(resourceId, voice) {
   if (voice.startsWith('S_')) return;
   if ((V1_RESOURCE.test(resourceId) && voice.endsWith('_uranus_bigtts')) ||
-      (V2_RESOURCE.test(resourceId) && /_(?:moon|mars|wvae)_bigtts$/.test(voice))) {
+      (V2_RESOURCE.test(resourceId) && V1_SPEAKER.test(voice))) {
     throw new InputError('所选音色与豆包语音资源版本不匹配');
   }
 }
 
 const AVAILABLE_VOLCENGINE_VOICES = [
-  { id: 'zh_male_m191_uranus_bigtts', name: '云舟 2.0（自然播客男声·阿泽推荐）', gender: 'male' },
+  { id: 'zh_male_taocheng_uranus_bigtts', name: '小天 2.0（明快青年男声·阿泽推荐）', gender: 'male' },
+  { id: 'zh_male_m191_uranus_bigtts', name: '云舟 2.0（沉稳播客男声）', gender: 'male' },
   { id: 'zh_male_liufei_uranus_bigtts', name: '刘飞 2.0（对话磁性男声）', gender: 'male' },
-  { id: 'zh_male_taocheng_uranus_bigtts', name: '小天 2.0（明快青年男声）', gender: 'male' },
   { id: 'zh_female_vv_uranus_bigtts', name: 'Vivi 2.0（灵动自然女声·小晓推荐）', gender: 'female' },
   { id: 'zh_female_xiaohe_uranus_bigtts', name: '小何 2.0（亲和对话女声）', gender: 'female' },
   { id: 'zh_female_cancan_uranus_bigtts', name: '知性灿灿 2.0（清亮拆解女声）', gender: 'female' },
@@ -35,6 +36,15 @@ const AVAILABLE_VOLCENGINE_VOICES = [
   { id: V1_VOICES.阿泽, name: '阳光青年 1.0', gender: 'male' },
   { id: V1_VOICES.小晓, name: '灿灿 1.0', gender: 'female' },
 ];
+
+const DIRECTOR_CUES = new Map([
+  ['平静 温和', '用平和柔和、自然松弛的播客聊天语气，音量适中清晰不要偏高'],
+  ['笑意 开心', '用轻松自然、带点笑意的播客聊天语气，音量稳定清晰'],
+  ['感慨 温暖 总结', '用真诚温暖、娓娓道来的朋友聊天语气，音量清晰平稳不要压低变小'],
+  ['好奇 疑惑 追问', '用自然好奇、像朋友插话提问的轻松语气，音量清晰平稳'],
+  ['兴奋 惊讶', '用略带惊喜、生动自然的播客口吻，但音量保持平稳不突然拔高'],
+  ['认真 分析', '用专注清楚、不端架子的日常聊天语气，音量平稳'],
+].flatMap(([tags, cue]) => tags.split(' ').map(tag => [tag, cue])));
 
 function permanentBusinessError(code, message) {
   if ([400, 401, 403, 404, 413, 422, 40402003, 45000001, 45000002, 45000010, 45001001, 45002001].includes(code)) return true;
@@ -66,7 +76,8 @@ async function readAudio(response, limit) {
     if (obj.code !== undefined && obj.code !== 0 && obj.code !== 20000000) {
       const code = obj.code;
       const permanent = permanentBusinessError(code, typeof obj.message === 'string' ? obj.message : '');
-      throw upstreamError(`状态码 ${Number.isSafeInteger(code) ? code : '未知'}：语音请求失败`, !permanent);
+      throw upstreamError(`状态码 ${Number.isSafeInteger(code) ? code : '未知'}：语音请求失败`, !permanent,
+        { rateLimited: code === 45000000 && !permanent });
     }
     if (typeof obj.data === 'string' && obj.data.length) {
       const encoded = obj.data;
@@ -137,22 +148,28 @@ function createVolcengineProvider(options = {}) {
       const endpoint = credentials.endpoint || DEFAULT_VOLCENGINE_ENDPOINT;
       return speechScopeHash(endpoint, credentials, voices, AVAILABLE_VOLCENGINE_VOICES, DEFAULT_VOLCENGINE_ENDPOINT);
     },
-    async synthesizeToFile({ text, voice, outputPath, signal, adapterOptions }) {
+    async synthesizeToFile({ text, voice, emotion, outputPath, signal, adapterOptions }) {
       if (signal?.aborted) throw new TtsCancelledError();
       const { apiKey, appId, accessKey, resourceId, endpoint, timeoutMs, allowPrivateEndpoint, lookup } = { ...options, ...adapterOptions };
       if (!apiKey?.trim() && !(appId?.trim() && accessKey?.trim())) {
         throw new InputError('请先配置火山引擎语音 API Key（或 AppID + Access Key）后再生成');
       }
       const speaker = voice || defaultVolcengineVoices(resourceId).阿泽;
-      validateVolcengineVoice(resourceId || DEFAULT_VOLCENGINE_RESOURCE_ID, speaker);
+      const resource = resourceId || DEFAULT_VOLCENGINE_RESOURCE_ID;
+      validateVolcengineVoice(resource, speaker);
+      const reqParams = { text, speaker, audio_params: { format: 'mp3', sample_rate: 24000, bit_rate: 128000 } };
+      const cleanEmotion = typeof emotion === 'string' && emotion.trim();
+      if (cleanEmotion && V2_RESOURCE.test(resource) && !V1_SPEAKER.test(speaker.toLowerCase())) {
+        const cue = DIRECTOR_CUES.get(cleanEmotion) || `用自然生动的${cleanEmotion}播客聊天语气，音量保持清晰平稳`;
+        reqParams.additions = JSON.stringify({ disable_markdown_filter: true, context_texts: [cue] });
+      }
       const auth = apiKey?.trim() ? { 'X-Api-Key': apiKey } : { 'X-Api-App-Id': appId, 'X-Api-Access-Key': accessKey };
       return synthesizeHttp({
         name: '火山引擎', endpoint: endpoint || DEFAULT_VOLCENGINE_ENDPOINT,
-        headers: { ...auth, 'X-Api-Resource-Id': resourceId || DEFAULT_VOLCENGINE_RESOURCE_ID, 'X-Api-Request-Id': randomUUID() },
+        headers: { ...auth, 'X-Api-Resource-Id': resource, 'X-Api-Request-Id': randomUUID() },
         body: {
           user: { uid: 'ai-podcast-generator' },
-          req_params: { text, speaker,
-            audio_params: { format: 'mp3', sample_rate: 24000, bit_rate: 128000 } },
+          req_params: reqParams,
         },
         signal, timeoutMs, outputPath, allowPrivateEndpoint, lookup, readAudio,
       });

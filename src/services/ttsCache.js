@@ -15,9 +15,10 @@ function speechScopeHash(endpoint, credentials, voices, publicVoices, officialEn
   return createHash('sha256').update(JSON.stringify(scope)).digest('hex');
 }
 
-function buildCacheKey({ provider, model, voice, rate = '+0%', pitch = '+0Hz', text, scopeHash }) {
+function buildCacheKey({ provider, model, voice, rate = '+0%', pitch = '+0Hz', emotion = '', text, scopeHash }) {
   const fields = [provider, model, voice, rate, pitch, text].map(value => String(value).trim().normalize('NFC'));
   if (scopeHash) fields.push(scopeHash);
+  if (typeof emotion === 'string' && emotion.trim()) fields.push(emotion.trim().normalize('NFC'));
   return createHash('sha256').update(JSON.stringify(fields)).digest('hex');
 }
 

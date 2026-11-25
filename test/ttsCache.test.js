@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 const { buildCacheKey, createTtsCache } = require('../src/services/ttsCache');
 const { makeMp3 } = require('./helpers/mp3Fixtures');
 const { getMp3DurationSeconds } = require('../src/services/mp3Utils');
@@ -16,6 +17,17 @@ test('缓存键稳定且区分所有影响声音的字段', () => {
   for (const field of Object.keys(input)) {
     assert.notEqual(buildCacheKey({ ...input, [field]: input[field] + '2' }), key);
   }
+});
+
+test('情绪区分缓存，省略或填写空情绪均保留旧缓存键', () => {
+  const previousFields = [input.provider, input.model, input.voice, input.rate, input.pitch, input.text, 'scope'];
+  const oldKey = createHash('sha256').update(JSON.stringify(previousFields)).digest('hex');
+  const scoped = { ...input, scopeHash: 'scope' };
+  for (const emotion of [undefined, '', '  ', 1]) assert.equal(buildCacheKey({ ...scoped, emotion }), oldKey);
+  const curiousKey = buildCacheKey({ ...scoped, emotion: '好奇' });
+  assert.equal(buildCacheKey({ ...scoped, emotion: ' 好奇 ' }), curiousKey);
+  assert.notEqual(curiousKey, oldKey);
+  assert.notEqual(curiousKey, buildCacheKey({ ...scoped, emotion: '笑意' }));
 });
 
 test('缓存校验原始音频，原子复制，损坏时清除并允许重建', t => {
@@ -77,26 +89,29 @@ test('逐句合成优先复用工作目录，然后查缓存，且报告两种�
 
 test('每次合成选择的模型同时用于上游请求与缓存键，缺省音色来自当前服务商', async t => {
   const { synthesizeDialogueScript } = require('../src/services/ttsService');
-  const { getTtsProvider } = require('../src/services/ttsProvider');
+  const { createMinimaxProvider } = require('../src/services/minimaxTtsProvider');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tts-model-cache-'));
   t.after(() => fs.rmSync(root, { recursive: true }));
   const cache = createTtsCache(path.join(root, 'cache'));
   const calls = [];
   const provider = {
-    ...getTtsProvider('minimax'), synthesizeToFile({ outputPath, voice, adapterOptions }) {
-      calls.push([voice, adapterOptions.model]);
+    ...createMinimaxProvider({ minRequestIntervalMs: 0 }), synthesizeToFile({ outputPath, voice, emotion, adapterOptions }) {
+      calls.push([voice, adapterOptions.model, emotion]);
       const audio = makeMp3(5);
       fs.writeFileSync(outputPath, audio);
       return { bytes: audio.length, duration: 0.12 };
     },
   };
-  const models = ['speech-02-hd', 'speech-02-turbo', 'speech-02-hd'];
-  for (const [index, ttsModel] of models.entries()) {
-    const result = await synthesizeDialogueScript([{ speaker: '小晓', text: '相同台词' }], path.join(root, String(index)),
+  const cases = [
+    ['speech-02-hd', undefined, 0], ['speech-02-turbo', undefined, 0], ['speech-02-hd', undefined, 1],
+    ['speech-02-hd', '好奇', 0], ['speech-02-hd', '好奇', 1],
+  ];
+  for (const [index, [ttsModel, emotion, hits]] of cases.entries()) {
+    const result = await synthesizeDialogueScript([{ speaker: '小晓', text: '相同台词', emotion }], path.join(root, String(index)),
       undefined, { cache, provider, ttsModel });
-    assert.equal(result.cachedSegments, index === 2 ? 1 : 0);
+    assert.equal(result.cachedSegments, hits);
   }
-  assert.deepEqual(calls, models.slice(0, 2).map(m => [provider.defaultVoices.小晓, m]));
+  assert.deepEqual(calls, cases.filter(([, , hits]) => hits === 0).map(([model, emotion]) => [provider.defaultVoices.小晓, model, emotion]));
 });
 
 test('官方预置音色共享缓存，自定义服务只使用实际选中的认证方式生成摘要', () => {

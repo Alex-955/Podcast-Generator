@@ -8,8 +8,8 @@ const { getTtsProvider, resolveDefaultProviderId } = require('./ttsProvider');
 const { ProviderError, requestProvider, readJson, upstreamError, httpStatusError } = require('./providerHttp');
 const { analyzeMp3 } = require('./mp3Utils');
 
-function checkPublicModel(model, credentials) {
-  const secrets = [...ttsSecrets(credentials), credentials.baseURL, process.env.DEEPSEEK_API_KEY, process.env.LLM_BASE_URL];
+function checkPublicModel(model, credentials, sensitiveValues = []) {
+  const secrets = [...ttsSecrets(credentials), credentials.baseURL, process.env.DEEPSEEK_API_KEY, process.env.LLM_BASE_URL, ...sensitiveValues];
   if (!/^[\w.:-]+(?:\/[\w.:-]+)*$/.test(model) || redactSecrets(model, secrets) !== model) {
     throw new InputError('模型名称无效或包含敏感配置');
   }
@@ -94,4 +94,4 @@ async function testTtsConnection(payload, { getTtsProviderById = getTtsProvider 
   }
 }
 
-module.exports = { testLlmConnection, testTtsConnection };
+module.exports = { checkPublicModel, testLlmConnection, testTtsConnection };

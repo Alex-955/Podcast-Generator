@@ -275,12 +275,20 @@ function createTaskManager({
       fs.mkdirSync(workDir, { recursive: true });
       const result = await ttsSynthesizer(task.script.dialogue, workDir, task.voiceMapping, {
         provider: speech.provider, ttsModel: task.ttsModel, adapterOptions: speech.adapterOptions, cache, signal,
-        onProgress({ index, completedSegments, totalSegments, cachedSegments, speaker }) {
+        onProgress({ index, completedSegments, totalSegments, cachedSegments, speaker, retrying, attempt, maxAttempts, delayMs, rateLimited }) {
           signal.throwIfAborted();
           const action = completedSegments > index ? '已完成' : '正在合成';
+          const segment = `第 ${index + 1}/${totalSegments} 句`;
+          let message = `${action}${segment}（${speaker}）`;
+          if (retrying) {
+            const retry = `第 ${attempt}/${maxAttempts} 次`;
+            message = rateLimited
+              ? `${segment}触发频率限制，约 ${Math.max(1, Math.round(delayMs / 1000))} 秒后自动重试（${retry}）…`
+              : `${segment}合成波动，正在${retry}重试…`;
+          }
           Object.assign(task.progress, {
             completedSegments, totalSegments, cachedSegments, currentSpeaker: speaker,
-            message: `${action}第 ${index + 1}/${totalSegments} 句（${speaker}）`,
+            message,
           });
           save(task);
         },
