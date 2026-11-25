@@ -39,10 +39,8 @@ const AVAILABLE_VOLCENGINE_VOICES = [
 function permanentBusinessError(code, message) {
   if ([400, 401, 403, 404, 413, 422, 40402003, 45000001, 45000002, 45000010, 45001001, 45002001].includes(code)) return true;
   if (code === 45000000) {
-    const denied = /\b(?:permission\s+denied|(?:no|without|lack(?:s|ing)?)\s+permission|access\s+denied|auth(?:entication|orization)?\s+fail\w*|unauthori[sz]ed|forbidden|not\s+(?:granted|allowed|authorized|found|supported|enabled|activated)|unsupported|not\s+exist|invalid\s+(?:token|key|app|credential|parameter|param|resource|speaker|voice|argument|request))\b|权限不足|无权限|没有权限|未开通|未授权|鉴权失败|认证失败|不支持|不存在/i.test(message);
-    const oversized =
-      /\btoo\s+(?:large|long)\b|\btoo\s+many\s+(?:characters|tokens)\b|请求体过大|文本过大|文本过长|超长/i.test(message) ||
-      (/\b(?:body|payload|text|size|length)\b/i.test(message) && /\b(?:large|long|oversized|exceed\w*|limit\w*)\b/i.test(message));
+    const denied = /\b(?:permission\s+denied|(?:no|without|lack(?:s|ing)?|requires?)\s+permission|access\s+denied|auth(?:entication|orization)?\s+fail\w*|unauthori[sz]ed|forbidden|not\s+(?:granted|allowed|authorized|found|supported|enabled|activated)|unsupported|not\s+exist|invalid\s+(?:token|key|app|credential|parameter|param|resource|speaker|voice|argument|request))\b|权限不足|无权限|没有权限|未开通|未授权|鉴权失败|认证失败|不支持|不存在/i.test(message);
+    const oversized = /\b(?:too\s+(?:large|long)|too\s+many\s+(?:characters|tokens)|(?:body|payload|text|request)\s+(?:is\s+)?(?:too\s+)?(?:large|long|oversized)|(?:body|payload|text)\s+(?:size|length)\s+(?:limit\s+)?exceed\w*|(?:size|length)\s+exceed\w*)\b|请求体过大|文本过大|文本过长|超长/i.test(message);
     if (denied || oversized) return true;
 
     const throttled =
