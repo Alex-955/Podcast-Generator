@@ -37,6 +37,8 @@ npm start
 
 服务默认监听 `http://127.0.0.1:3000`。打开浏览器后，可在右上角 **「模型设置」** 中填入 API Key（仅存在当前浏览器 `localStorage`，不会写入服务端任务或成品 JSON），或通过服务端 `.env` 提供默认 Key。
 
+> 若不习惯使用终端，可在 macOS 运行一次 `bash scripts/build-mac-launcher.sh` 生成 **`启动 AI 妙听.app`**，以后在访达或程序坞直接双击即可在后台启动服务并弹出浏览器（再次双击可一键重启或停止服务）。`npm start` 与 `npm run dev` 默认启用了 `--use-bundled-ca`，避免部分 macOS Homebrew Node 环境因缺少 OpenSSL `cert.pem` 导致 HTTPS 证书校验失败，同时保留完整证书校验并兼容 `NODE_EXTRA_CA_CERTS`。
+
 ### 2. 开发热重载与离线回归测试
 
 ```bash
@@ -72,7 +74,7 @@ HOST=0.0.0.0 npm start
 | `DEEPSEEK_API_KEY` | 空 | 服务端默认兜底 API Key（仅当浏览器设置留空且未改接口地址时生效） |
 | `LLM_BASE_URL` | `https://api.deepseek.com` | 剧本模型 OpenAI 兼容接口地址 |
 | `LLM_MODEL` | `deepseek-flash` | 默认剧本生成模型名称 |
-| `ALLOW_INSECURE_TLS` | 未开启 | 仅限本地代理调试；设为 `1` 时跳过 TLS 证书校验（常规场景请改用 `NODE_EXTRA_CA_CERTS`） |
+| `ALLOW_INSECURE_TLS` | 未开启 | 仅限本地代理调试；设为 `1` 时跳过 TLS 证书校验（默认 `--use-bundled-ca` 已兼顾完整性，常规企业代理 CA 请优先用 `NODE_EXTRA_CA_CERTS`） |
 | `NODE_EXTRA_CA_CERTS` | 未设置 | Node 标准选项：指定额外受信 CA 根证书文件路径 |
 | `ALLOW_PRIVATE_FETCH` | 未开启 | 默认拒绝抓取本机及内网地址；设为 `1` 可放开本地源抓取 |
 | `CORS_ORIGIN` | 未开启 | 默认同源访问；需跨域调用时可填逗号分隔的来源白名单 |
