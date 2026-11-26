@@ -1,0 +1,59 @@
+# AI 妙听官方网站（website/）Nginx 静态托管配置示例
+# 使用前请将 server_name 与 root 路径替换为你的实际域名和部署目录
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name miaoting.example.com;
+
+    root /var/www/ai-podcast-generator/website;
+    index index.html;
+    charset utf-8;
+
+    # 安全响应头
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # 文本资源压缩
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types
+        text/plain
+        text/css
+        application/javascript
+        application/json
+        image/svg+xml;
+
+    # 入口页与配置/样片索引保持短期协商缓存，便于及时更新版本与公告
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+        try_files $uri =404;
+    }
+
+    location ~* ^/(?:scripts/site-config\.js|assets/data/samples\.json)$ {
+        add_header Cache-Control "public, max-age=300, must-revalidate";
+        try_files $uri =404;
+    }
+
+    # 样式、脚本与图片静态资源缓存
+    location ~* \.(?:css|js|png|jpg|jpeg|webp|svg|ico)$ {
+        expires 7d;
+        add_header Cache-Control "public, max-age=604800";
+        try_files $uri =404;
+    }
+
+    # 样片音频支持 Range 字节拖动跳转
+    location /assets/audio/ {
+        add_header Accept-Ranges bytes;
+        expires 7d;
+        add_header Cache-Control "public, max-age=604800";
+        try_files $uri =404;
+    }
+
+    # 主页面路由回退
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

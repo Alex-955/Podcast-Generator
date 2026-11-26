@@ -1,0 +1,160 @@
+{
+  "version": "0.1.0",
+  "episodes": {
+    "deep": {
+      "id": "deep",
+      "label": "深度主讲 · 7:3",
+      "title": "为什么长文与长截图听成双人对话，更容易记住？",
+      "summary": "小晓 70% 主讲拆解 + 阿泽 30% 精准追问 · 演示链接/长图提纯、口语读法规范化与句级断点缓存",
+      "audioUrl": "./assets/audio/sample-deep.mp3",
+      "fallbackDuration": 48,
+      "cues": [
+        {
+          "id": 1,
+          "speaker": "aze",
+          "speakerName": "阿泽",
+          "emotion": "好奇",
+          "startTime": 0,
+          "endTime": 4.6,
+          "text": "收藏夹里躺着几十篇行业长文，却总没整块时间读完，这是不是你的日常？"
+        },
+        {
+          "id": 2,
+          "speaker": "xiaoxiao",
+          "speakerName": "小晓",
+          "emotion": "拆解",
+          "startTime": 4.96,
+          "endTime": 13.0,
+          "text": "太真实了。其实把万字长文丢进 AI 妙听，无论贴公众号链接、正文还是长截图，它都会先提炼结构，再重构成我们俩的对话。"
+        },
+        {
+          "id": 3,
+          "speaker": "aze",
+          "speakerName": "阿泽",
+          "emotion": "追问",
+          "startTime": 13.36,
+          "endTime": 17.6,
+          "text": "但普通朗读听久了很容易走神，7:3 深度主讲到底特别在哪？"
+        },
+        {
+          "id": 4,
+          "speaker": "xiaoxiao",
+          "speakerName": "小晓",
+          "emotion": "深入",
+          "startTime": 17.96,
+          "endTime": 27.1,
+          "text": "核心在于主讲拆解加精准追问。我会用七成篇幅把技术脉络讲透，你在关键转折点顺势发问，把干涩的书面语转成带节奏的口语表达。"
+        },
+        {
+          "id": 5,
+          "speaker": "aze",
+          "speakerName": "阿泽",
+          "emotion": "求证",
+          "startTime": 27.46,
+          "endTime": 31.6,
+          "text": "比如碰到 2026 年、1.25x 或英文缩写，合成出来的语音会不会卡壳？"
+        },
+        {
+          "id": 6,
+          "speaker": "xiaoxiao",
+          "speakerName": "小晓",
+          "emotion": "笃定",
+          "startTime": 31.96,
+          "endTime": 41.2,
+          "text": "不会。内置口语读法规范化会自动把数字、符号和百分比翻成自然读法，句与句之间还留出约 0.36 秒的呼吸感停顿。"
+        },
+        {
+          "id": 7,
+          "speaker": "xiaoxiao",
+          "speakerName": "小晓",
+          "emotion": "收束",
+          "startTime": 41.56,
+          "endTime": 48.0,
+          "text": "更安心的是，每句合成完都会先落盘缓存；万一半路断网，恢复时直接跳过已完成句段，从断点继续。"
+        }
+      ]
+    },
+    "casual": {
+      "id": "casual",
+      "label": "轻松对谈 · 5:5",
+      "title": "把吃灰的科技随笔与长截图，变成通勤 5 分钟播客",
+      "summary": "阿泽 × 小晓 5:5 接力对谈 · 演示个人效率场景、纯本地密钥托管与双声道成片导出",
+      "audioUrl": "./assets/audio/sample-casual.mp3",
+      "fallbackDuration": 44,
+      "cues": [
+        {
+          "id": 1,
+          "speaker": "aze",
+          "speakerName": "阿泽",
+          "emotion": "轻快",
+          "startTime": 0,
+          "endTime": 4.9,
+          "text": "小晓，我昨晚把三篇关于个人工作流的随笔塞进妙听，早上洗漱时居然全听完了。"
+        },
+        {
+          "id": 2,
+          "speaker": "xiaoxiao",
+          "speakerName": "小晓",
+          "emotion": "笑意",
+          "startTime": 5.26,
+          "endTime": 10.4,
+          "text": "听起来你终于不用对着满屏截图发愁了！5:5 轻松对谈模式是不是特别适合通勤？"
+        },
+        {
+          "id": 3,
+          "speaker": "aze",
+          "speakerName": "阿泽",
+          "emotion": "共鸣",
+          "startTime": 10.76,
+          "endTime": 15.9,
+          "text": "对，节奏特别轻快。尤其我常在手机上截一长串聊天和干货图，以前根本懒得翻。"
+        },
+        {
+          "id": 4,
+          "speaker": "xiaoxiao",
+          "speakerName": "小晓",
+          "emotion": "接话",
+          "startTime": 16.26,
+          "endTime": 21.6,
+          "text": "现在直接把长截图拖进去，自动切片识字再润色成对谈，俩人一问一答比单人念稿有意思多了。"
+        },
+        {
+          "id": 5,
+          "speaker": "aze",
+          "speakerName": "阿泽",
+          "emotion": "安心",
+          "startTime": 21.96,
+          "endTime": 27.2,
+          "text": "而且我自己的 DeepSeek 和语音密钥都只留在本地浏览器里，任务记录里干干净净。"
+        },
+        {
+          "id": 6,
+          "speaker": "xiaoxiao",
+          "speakerName": "小晓",
+          "emotion": "补充",
+          "startTime": 27.56,
+          "endTime": 32.9,
+          "text": "没错，做出来的双声道 MP3 和 Markdown 逐字稿也能随时导出，想回头复习某一句直接点字幕。"
+        },
+        {
+          "id": 7,
+          "speaker": "aze",
+          "speakerName": "阿泽",
+          "emotion": "期待",
+          "startTime": 33.26,
+          "endTime": 38.5,
+          "text": "那下次遇到周末想读的科技周刊，我也先顺手转成一期 5:5 对谈。"
+        },
+        {
+          "id": 8,
+          "speaker": "xiaoxiao",
+          "speakerName": "小晓",
+          "emotion": "呼应",
+          "startTime": 38.86,
+          "endTime": 44.0,
+          "text": "说定了，戴上耳机点开 1.25 倍速，五分钟就能把一整篇长文章消化得明明白白。"
+        }
+      ]
+    }
+  }
+}

@@ -3,7 +3,7 @@ node_modules/
 .env.*
 !.env.example
 .DS_Store
-data/
+/data/
 /public/podcasts/
 /启动 AI 妙听.app/
 /AI 妙听.app/
