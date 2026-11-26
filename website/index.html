@@ -64,11 +64,13 @@
           <span class="pill-tag">BYOK 自带密钥 · 零数据库</span>
         </div>
 
-        <h1 class="hero-title">把长文与截图，变成<em>阿泽与小晓</em>的双人对话播客</h1>
+        <h1 class="hero-title">
+          把来不及看的长文，<br>
+          变成<span class="hero-underline-wrap">两位朋友的闲聊<svg class="hero-squiggle" viewBox="0 0 280 18" fill="none" aria-hidden="true"><path d="M4 12 C 74 4, 196 3, 276 11" stroke="currentColor" stroke-width="4.2" stroke-linecap="round"/></svg></span>
+        </h1>
 
         <p class="hero-subtitle">
-          粘贴网页 / 公众号链接、正文或手机长截图，几分钟在本机生成自然流畅的纯人声 MP3 与同步高亮字幕。
-          无云端账号、无第三方数据库，你的 API Key 仅留在本地浏览器。
+          粘贴网页 / 公众号文章或手机长截图，几分钟在本机生成<span class="hero-role-host">阿泽</span> × <span class="hero-role-guest">小晓</span>的双人对话播客（纯人声 MP3 与同步高亮字幕）。无云端账号，API Key 仅留在你的本地浏览器。
         </p>
 
         <div class="hero-actions">
@@ -118,68 +120,39 @@
         </div>
 
         <div class="stage-deck reveal" data-playing="false" data-speaker="none">
-          <div class="stage-top">
-            <div class="stage-status-row">
-              <span id="playerSourceBadge" class="source-badge">样片音频就绪</span>
+          <div class="stage-top-bar">
+            <div class="speaker-pills" aria-label="双主播声部状态">
+              <div id="speakerPillAze" class="speaker-pill" data-speaker="aze">
+                <span class="speaker-seal-sm">泽</span>
+                <span class="speaker-pill-text">
+                  <span class="speaker-pill-name">阿泽</span>
+                  <span class="speaker-pill-role">主持</span>
+                </span>
+                <span class="mini-wave" aria-hidden="true">
+                  <span></span><span></span><span></span><span></span>
+                </span>
+              </div>
 
-              <div class="speaker-pills" aria-label="双主播声部状态">
-                <div id="speakerPillAze" class="speaker-pill" data-speaker="aze">
-                  <span class="speaker-seal-sm">泽</span>
-                  <span class="speaker-pill-text">
-                    <span class="speaker-pill-name">阿泽</span>
-                    <span class="speaker-pill-role">主持</span>
-                  </span>
-                  <span class="mini-wave" aria-hidden="true">
-                    <span></span><span></span><span></span><span></span>
-                  </span>
-                </div>
-
-                <div id="speakerPillXiaoxiao" class="speaker-pill" data-speaker="xiaoxiao">
-                  <span class="speaker-seal-sm">晓</span>
-                  <span class="speaker-pill-text">
-                    <span class="speaker-pill-name">小晓</span>
-                    <span class="speaker-pill-role">嘉宾</span>
-                  </span>
-                  <span class="mini-wave" aria-hidden="true">
-                    <span></span><span></span><span></span><span></span>
-                  </span>
-                </div>
+              <div id="speakerPillXiaoxiao" class="speaker-pill" data-speaker="xiaoxiao">
+                <span class="speaker-seal-sm">晓</span>
+                <span class="speaker-pill-text">
+                  <span class="speaker-pill-name">小晓</span>
+                  <span class="speaker-pill-role">嘉宾</span>
+                </span>
+                <span class="mini-wave" aria-hidden="true">
+                  <span></span><span></span><span></span><span></span>
+                </span>
               </div>
             </div>
 
-            <div class="stage-ep-info">
-              <h3 id="playerEpTitle" class="stage-ep-title">正在载入样片节目…</h3>
-              <p id="playerEpSummary" class="stage-ep-summary">由阿泽与小晓双人接力拆解长文重点，带 0.36 秒句间自然停顿与同步逐句字幕。</p>
-            </div>
+            <span id="playerSourceBadge" class="source-badge is-demo">样片脚本预览 · 点击字幕即可试看同步节奏</span>
+          </div>
 
-            <div class="progress-row">
-              <span id="playerTimeCurrent" class="time-code">00:00</span>
-              <div
-                id="playerProgressTrack"
-                class="progress-track"
-                role="slider"
-                tabindex="0"
-                aria-label="样片播放进度"
-                aria-valuemin="0"
-                aria-valuemax="100"
-                aria-valuenow="0"
-              >
-                <div id="playerProgressFill" class="progress-fill"></div>
-                <div id="playerProgressThumb" class="progress-thumb"></div>
-              </div>
-              <span id="playerTimeDuration" class="time-code">00:48</span>
-            </div>
-
-            <div class="stage-controls">
-              <div class="stage-controls-left">
-                <button type="button" id="btnAmbient" class="btn-chip-control" aria-pressed="false" title="开启或关闭暖调微醺背景音乐">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M9 18V5l12-2v13"/>
-                    <circle cx="6" cy="18" r="3"/>
-                    <circle cx="18" cy="16" r="3"/>
-                  </svg>
-                  <span>微醺环境音</span>
-                </button>
+          <div class="stage-body">
+            <div class="stage-control-card">
+              <div class="stage-ep-info">
+                <h3 id="playerEpTitle" class="stage-ep-title">正在载入样片节目…</h3>
+                <p id="playerEpSummary" class="stage-ep-summary">由阿泽与小晓双人接力拆解长文重点，带 0.36 秒句间自然停顿与同步逐句字幕。</p>
               </div>
 
               <div class="stage-transport">
@@ -192,10 +165,10 @@
                 </button>
 
                 <button type="button" id="btnPlayPause" class="btn-play-main" title="播放或暂停" aria-label="播放或暂停">
-                  <svg class="icon-play" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <svg class="icon-play" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M7.5 5.25a.75.75 0 0 1 1.14-.64l10.5 6.75a.75.75 0 0 1 0 1.28l-10.5 6.75a.75.75 0 0 1-1.14-.64V5.25z"/>
                   </svg>
-                  <svg class="icon-pause" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <svg class="icon-pause" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <rect x="6.5" y="5" width="3.75" height="14" rx="1.2"/>
                     <rect x="13.75" y="5" width="3.75" height="14" rx="1.2"/>
                   </svg>
@@ -210,21 +183,47 @@
                 </button>
               </div>
 
-              <div class="stage-controls-right">
-                <button type="button" id="btnSpeed" class="btn-chip-control" title="切换播放倍速" aria-label="切换播放倍速">1.0x</button>
+              <div class="progress-row">
+                <span id="playerTimeCurrent" class="time-code">00:00</span>
+                <div
+                  id="playerProgressTrack"
+                  class="progress-track"
+                  role="slider"
+                  tabindex="0"
+                  aria-label="样片播放进度"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuenow="0"
+                >
+                  <div id="playerProgressFill" class="progress-fill"></div>
+                  <div id="playerProgressThumb" class="progress-thumb"></div>
+                </div>
+                <span id="playerTimeDuration" class="time-code">00:48</span>
               </div>
-            </div>
-          </div>
 
-          <div class="transcript-wrap">
-            <div class="transcript-head">
-              <h4 class="transcript-title">同步对话字幕</h4>
-              <div class="transcript-meta-right">
-                <span>点击任意句跳转 · 内部独立滚动</span>
-                <span id="transcriptCounter">0 / 0 句</span>
+              <div class="stage-controls">
+                <button type="button" id="btnSpeed" class="btn-chip-control" title="切换播放倍速" aria-label="切换播放倍速">1.0x</button>
+                <button type="button" id="btnAmbient" class="btn-chip-control" aria-pressed="false" title="开启或关闭暖调微醺背景音乐">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M9 18V5l12-2v13"/>
+                    <circle cx="6" cy="18" r="3"/>
+                    <circle cx="18" cy="16" r="3"/>
+                  </svg>
+                  <span>微醺环境音</span>
+                </button>
               </div>
             </div>
-            <div id="transcriptList" class="transcript-list" role="region" aria-label="双人对话同步字幕"></div>
+
+            <div class="transcript-wrap">
+              <div class="transcript-head">
+                <h4 class="transcript-title">同步对话字幕</h4>
+                <div class="transcript-meta-right">
+                  <span>点击任意句跳转 · 内部独立滚动</span>
+                  <span id="transcriptCounter">0 / 0 句</span>
+                </div>
+              </div>
+              <div id="transcriptList" class="transcript-list" role="region" aria-label="双人对话同步字幕"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -341,7 +340,7 @@
             <div>
               <span class="bento-tag">BYOK 自带密钥生态</span>
               <h3 class="bento-title">大模型与语音随你搭配，不绑死任何一家</h3>
-              <p class="bento-desc">支持主流 OpenAI 兼容剧本模型（含长图识字）与三套语音合成底座，点击下方芯片查看搭配建议：</p>
+              <p class="bento-desc">支持主流 OpenAI 兼容剧本模型（含长图识字）与三套语音合成底座，点选芯片查看搭配建议。</p>
             </div>
 
             <div class="byok-groups">
@@ -377,7 +376,7 @@
     </section>
 
     <!-- 3 步本机上手指南 #onboarding -->
-    <section class="section-block" id="onboarding" aria-labelledby="onboardingHeading">
+    <section class="section-block section-band" id="onboarding" aria-labelledby="onboardingHeading">
       <div class="container">
         <div class="section-header reveal">
           <div>
@@ -470,7 +469,7 @@
           <div>
             <span class="section-eyebrow">PRIVACY &amp; ROADMAP · 隐私边界与演进路线</span>
             <h2 id="roadmapHeading" class="section-title">纯本机可审计架构，每一步规划都透明写清</h2>
-            <p class="section-desc">所有个人密钥与生成成品都留在你自己的电脑里，我们也坦诚列出当前 v0.1 边界与未来客户端演进方向。</p>
+            <p class="section-desc">所有密钥与音频均留在你的电脑里，我们也坦诚列出当前 v0.1 边界与后续演进方向。</p>
           </div>
         </div>
 
@@ -520,7 +519,7 @@
             <h3>移动端与多端联动</h3>
             <ul class="roadmap-list">
               <li>Android 纯端侧离线版（支持后台与锁屏播放控制）</li>
-              <li>可选局域网同 Wi-Fi 手机随身听（连接桌面历史节目）</li>
+              <li>扩展更多 OpenAI 兼容语音供应商与自定义音频导出</li>
               <li>视桌面与安卓反馈再启动 iOS / 鸿蒙适配</li>
             </ul>
           </article>

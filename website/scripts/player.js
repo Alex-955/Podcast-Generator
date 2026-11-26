@@ -525,10 +525,10 @@
     if (!dom.sourceBadge) return;
     if (mode === 'audio') {
       dom.sourceBadge.classList.remove('is-demo');
-      dom.sourceBadge.textContent = '真实样片音频 · MP3';
+      dom.sourceBadge.textContent = '真实播客样片 · 纯人声输出';
     } else {
       dom.sourceBadge.classList.add('is-demo');
-      dom.sourceBadge.textContent = '样片占位演示 · 待替换真实 MP3';
+      dom.sourceBadge.textContent = '样片脚本预览 · 点击字幕即可试看同步节奏';
     }
   }
 

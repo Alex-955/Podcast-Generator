@@ -1,6 +1,10 @@
 :root {
-  /* 暖纸色调色板（与 AI 妙听桌面工作台保持一致） */
-  --bg-canvas: #F5F2EB;
+  /* 外白内暖调色板（通透纯白主画布衬暖纸放音台） */
+  --bg-canvas: #FFFFFF;
+  --bg-band: #FAFAF8;
+  --bg-card: #F7F6F2;
+  --bg-paper: #F5F2EB;
+  --bg-paper-inner: #FDFCF9;
   --bg-surface: #FDFCF9;
   --bg-subtle: #ECE7DC;
   --bg-subtle-hover: #E3DDD0;
@@ -9,21 +13,23 @@
   /* 墨色文字层级 */
   --ink-primary: #1A1916;
   --ink-secondary: #4D4941;
-  --ink-muted: #5C574E;
+  --ink-muted: #6C665D;
 
-  /* 极细发丝分割线 */
-  --hairline: rgba(26, 25, 22, 0.09);
-  --hairline-strong: rgba(26, 25, 22, 0.16);
+  /* 极细发丝分割线与立体底边 */
+  --hairline: rgba(26, 25, 22, 0.085);
+  --hairline-strong: rgba(26, 25, 22, 0.15);
+  --outline-edge: #D5CEC0;
 
   /* 品牌朱砂主色与双主播声部色 */
   --accent: #B03E24;
   --accent-hover: #96321B;
-  --accent-soft: rgba(176, 62, 36, 0.10);
+  --accent-edge: #7E2915;
+  --accent-soft: rgba(176, 62, 36, 0.09);
 
   --host: #1C5A73;
-  --host-soft: rgba(28, 90, 115, 0.10);
+  --host-soft: rgba(28, 90, 115, 0.09);
   --guest: #B03E24;
-  --guest-soft: rgba(176, 62, 36, 0.10);
+  --guest-soft: rgba(176, 62, 36, 0.09);
 
   /* 语义状态色 */
   --ok: #1B5E42;
@@ -39,8 +45,8 @@
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 
   /* 布局与间距 */
-  --container-max: 1160px;
-  --nav-height: 62px;
+  --container-max: 1080px;
+  --nav-height: 60px;
 
   /* 圆角规范 */
   --radius-sm: 8px;
