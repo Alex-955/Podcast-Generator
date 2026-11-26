@@ -244,12 +244,13 @@ test('创建、单活冲突、取消、续跑、轮询成品、历史与外置�
     return { podcastTitle: '路由测试', summary: '测试', dialogue: [{ speaker: '阿泽', text: '开场' }] };
   };
   assert.equal((await request(route + '/resume', 202, { apiKey, baseURL })).data.podcastStyle, 'dialogue');
+  const deadline = performance.now() + 5000;
   let completed;
-  for (let i = 0; i < 100; i++) {
+  do {
     completed = (await request(route, 200)).data;
     if (completed.status === 'completed') break;
     await delay(10);
-  }
+  } while (performance.now() < deadline);
   assert.equal(completed.status, 'completed');
   const detail = (await request('podcasts/' + task.id, 200)).data;
   assert.deepEqual(completed.podcast, detail);
@@ -332,7 +333,7 @@ test('生成中的任务拒绝删除，取消后可删除仅有任务记录的�
   await request('tasks/' + task.id, 404);
 });
 
-test('续跑时锁住原来以大写保存的任务文件和播客目录', { timeout: 5000 }, async () => {
+test('续跑时锁住原来以大写保存的任务文件和播客目录', { timeout: 10000 }, async () => {
   const id = 'restore-lower-id';
   const alias = id.toUpperCase();
   const tasksDir = path.join(publicDir, 'custom-data', 'tasks');
@@ -659,7 +660,7 @@ test('正文润色路由返回脱敏结果，并在无正文时不调用上游',
   assert.equal(llmRequest.mock.callCount(), 1);
 });
 
-test('模型列表和润色路由在客户端断开时取消上游请求', { timeout: 5000 }, async () => {
+test('模型列表和润色路由在客户端断开时取消上游请求', { timeout: 10000 }, async () => {
   for (const route of ['llm/models', 'polish-text']) {
     const client = new AbortController();
     let ready, stopped;

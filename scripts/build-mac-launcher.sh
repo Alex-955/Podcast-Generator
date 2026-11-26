@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-FINAL_APP_PATH="$PROJECT_DIR/启动 AI 妙听.app"
+FINAL_APP_PATH="$PROJECT_DIR/AI 妙听.app"
 FALLBACK_PROJECT_DIR="$PROJECT_DIR"
 
 if [ "$#" -gt 0 ]; then
@@ -21,7 +21,7 @@ fi
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
-APP_PATH="$TMP_DIR/启动 AI 妙听.app"
+APP_PATH="$TMP_DIR/AI 妙听.app"
 APPLESCRIPT_SRC="$TMP_DIR/launcher.applescript"
 
 # Finder uses the same portable launcher and Node/CA detection as the .command file.
@@ -32,26 +32,32 @@ on run
   set launcherPath to resolveLauncher()
   if launcherPath is "" then
     activate
-    display dialog "未能找到便携启动脚本。请将「启动 AI 妙听.app」放回项目根目录后再试。" buttons {"好"} default button "好" with icon stop with title "AI 妙听"
+    display dialog "未能找到便携启动脚本。请将「AI 妙听.app」放回项目根目录后再试。" buttons {"好"} default button "好" with icon stop with title "AI 妙听"
     return
   end if
 
   try
-    set actionChoice to "打开网页"
-    if isServerRunning(launcherPath) then
-      activate
-      set actionChoice to button returned of (display dialog "AI 妙听服务已在后台运行。" buttons {"停止服务", "重启服务", "打开网页"} default button "打开网页" with title "AI 妙听")
+    set {statusCode, detail} to getServerStatus(launcherPath)
+    activate
+    if statusCode is 0 then
+      set actionChoice to button returned of (display dialog (detail & return & return & "请选择操作：") buttons {"停止服务", "重启服务", "打开网页"} default button "打开网页" with title "AI 妙听")
+    else if statusCode is 2 then
+      set actionChoice to button returned of (display dialog (detail & return & return & "服务异常或未就绪，可直接停止或重启：") buttons {"退出", "停止服务", "重启服务"} default button "停止服务" with title "AI 妙听")
+    else
+      set actionChoice to button returned of (display dialog "AI 妙听服务当前未启动。" buttons {"退出", "启动服务"} default button "启动服务" with title "AI 妙听")
     end if
+    if actionChoice is "退出" then return
+
     if actionChoice is "停止服务" or actionChoice is "重启服务" then
       set stopOutput to runLauncher(launcherPath, "--stop")
-      if stopOutput contains "AI 妙听已停止" then
-        if actionChoice is "停止服务" then
-          display notification "后台服务已停止" with title "AI 妙听"
-          return
-        end if
-      else
+      if stopOutput does not contain "AI 妙听已停止" then
         activate
         display dialog stopOutput buttons {"好"} default button "好" with title "AI 妙听"
+        return
+      end if
+      if actionChoice is "停止服务" then
+        activate
+        display dialog "AI 妙听后台服务已停止。" buttons {"好"} default button "好" with title "AI 妙听"
         return
       end if
     end if
@@ -81,14 +87,15 @@ on findLauncher(dirPath)
   end try
 end findLauncher
 
-on isServerRunning(launcherPath)
+on getServerStatus(launcherPath)
   try
-    runLauncher(launcherPath, "--status")
-    return true
-  on error
-    return false
+    return {0, runLauncher(launcherPath, "--status")}
+  on error errorMessage number errorNumber
+    if errorNumber is 2 then return {2, errorMessage}
+    if errorNumber is 1 and errorMessage contains "AI 妙听未在运行" then return {1, ""}
+    error errorMessage number errorNumber
   end try
-end isServerRunning
+end getServerStatus
 
 on runLauncher(launcherPath, actionFlag)
   return do shell script "/bin/bash " & quoted form of launcherPath & " " & quoted form of actionFlag
@@ -149,6 +156,12 @@ if command -v /usr/libexec/PlistBuddy >/dev/null 2>&1; then
     /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$APP_PATH/Contents/Info.plist" >/dev/null 2>&1 || true
 fi
 
+if command -v codesign >/dev/null 2>&1; then
+  codesign --force --deep --sign - "$APP_PATH"
+  codesign --verify --deep --strict "$APP_PATH"
+fi
+
 rm -rf "$FINAL_APP_PATH"
 mv "$APP_PATH" "$FINAL_APP_PATH"
-echo "已生成免终端双击启动器：$FINAL_APP_PATH"
+rm -rf "$PROJECT_DIR/启动 AI 妙听.app"
+echo "已生成 AI 妙听服务控制应用：$FINAL_APP_PATH"

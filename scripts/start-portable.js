@@ -218,7 +218,7 @@ async function readPidRecord(file) {
   try {
     const record = JSON.parse(contents);
     if (!validPid(record?.pid) || record.script !== 'server.js' ||
-        !Number.isInteger(record.port) || record.port < 1 || record.port > 65535 ||
+        !Number.isInteger(record.port) || record.port < (record.instance ? 0 : 1) || record.port > 65535 ||
         !validHost(record.host) ||
         (record.instance !== undefined && !/^[0-9a-f-]{36}$/.test(record.instance))) return null;
     return record;
@@ -389,7 +389,13 @@ async function runningInstance(config, record, options) {
 
 async function statusPortable(options = {}) {
   const config = settings(options);
-  return runningInstance(config, await readPidRecord(config.pidFile), options);
+  const previous = await readPidRecord(config.pidFile);
+  const result = await runningInstance(config, previous, options);
+  if (!result.running && previous?.port &&
+      await isExpectedServerProcess(previous, { ...options, projectDir: config.projectDir })) {
+    return { running: false, unhealthy: true, host: previous.host, port: previous.port, pid: previous.pid };
+  }
+  return result;
 }
 
 function reportInstance(result, options, config) {
@@ -418,7 +424,10 @@ function launchServer(config, options, port, instance) {
   });
   const exited = new Promise(resolve => {
     child.once('exit', resolve);
-    child.once('error', () => resolve(1));
+    child.on('error', () => {
+      // A failed signal to a spawned child does not mean the child has exited.
+      if (!child.pid) resolve(1);
+    });
   });
   const listening = new Promise(resolve => child.once('message', resolve));
   const forwardSignal = () => child.kill();
@@ -433,6 +442,11 @@ function launchServer(config, options, port, instance) {
 async function awaitListening(server) {
   return Promise.race([server.listening, server.exited.then(() => null),
     delay(START_TIMEOUT_MS, null, { ref: false })]);
+}
+
+async function writePidRecord(pidFile, record) {
+  await fs.rm(pidFile, { force: true });
+  await fs.writeFile(pidFile, JSON.stringify(record) + '\n', { mode: 0o600, flag: 'wx' });
 }
 
 async function manageForeground(server, config, record) {
@@ -479,6 +493,10 @@ async function startPortable(options = {}) {
     for (;;) {
       const instance = randomUUID();
       const server = launchServer(config, options, candidate, instance);
+      const record = {
+        pid: server.child.pid, port: 0, host: config.host,
+        startedAt: new Date().toISOString(), script: 'server.js', instance,
+      };
       let started = false;
       try {
         const ready = await awaitListening(server);
@@ -488,15 +506,11 @@ async function startPortable(options = {}) {
           continue;
         }
         const port = ready?.port;
-        const health = port && await probeHealth(config.host, port, 2000);
+        if (Number.isInteger(port) && port > 0 && port <= 65535) record.port = port;
+        const health = record.port && await probeHealth(config.host, record.port, 2000);
         if (!health) throw new Error('AI 妙听启动失败或超时，可用 --foreground 查看启动输出');
 
-        const record = {
-          pid: server.child.pid, port, host: config.host,
-          startedAt: new Date().toISOString(), script: 'server.js', instance,
-        };
-        await fs.rm(config.pidFile, { force: true });
-        await fs.writeFile(config.pidFile, JSON.stringify(record) + '\n', { mode: 0o600, flag: 'wx' });
+        await writePidRecord(config.pidFile, record);
         if (options.foreground) foreground = { server, record };
         else server.child.unref();
         started = true;
@@ -504,7 +518,26 @@ async function startPortable(options = {}) {
       } finally {
         if (server.child.connected) server.child.disconnect();
         if (!started || !options.foreground) server.stopForwarding();
-        if (!started) server.child.kill();
+        if (!started && server.child.pid) {
+          const stillAlive = () => server.child.exitCode === null && server.child.signalCode === null &&
+            processExists(server.child.pid);
+          for (const signal of ['SIGTERM', 'SIGKILL']) {
+            if (!stillAlive()) break;
+            server.child.kill(signal);
+            await Promise.race([server.exited, delay(1500, undefined, { ref: false })]);
+          }
+          if (stillAlive()) {
+            const message = '启动失败且子进程未能正常退出，请检查残余进程后重试';
+            // Keep the owned PID verifiable for a later --stop, even before it has a port.
+            try {
+              await writePidRecord(config.pidFile, record);
+            } catch (cause) {
+              throw new Error(message, { cause });
+            }
+            server.child.unref();
+            throw new Error(message);
+          }
+        }
       }
     }
   });
@@ -532,10 +565,12 @@ async function stopPortable(options = {}) {
       await fs.rm(config.pidFile, { force: true });
       return { stopped: false, stale: true };
     }
-    const deadline = Date.now() + (process.platform === 'win32' ? 10000 : 2500);
-    while (await isExpectedServerProcess(record, processOptions)) {
-      if (Date.now() >= deadline) throw new Error('AI 妙听尚未停止，请稍后重试');
-      await delay(50);
+    const deadline = performance.now() + (process.platform === 'win32' ? 10000 : 2500);
+    // Windows may still report the PID after the termination request returns.
+    while (processExists(record.pid) || await isExpectedServerProcess(record, processOptions)) {
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) throw new Error('AI 妙听尚未停止，请稍后重试');
+      await delay(Math.min(50, remaining));
     }
     await fs.rm(config.pidFile, { force: true });
     return { stopped: true };
@@ -555,7 +590,10 @@ async function main() {
   } else {
     const result = await statusPortable(options);
     if (result.running) console.log(`AI 妙听正在运行：${localUrl(result.host, result.port)}`);
-    else {
+    else if (result.unhealthy) {
+      console.log(`AI 妙听进程仍在运行但健康检查未通过（PID ${result.pid}，端口 ${result.port}）`);
+      process.exitCode = 2;
+    } else {
       console.log('AI 妙听未在运行');
       process.exitCode = 1;
     }

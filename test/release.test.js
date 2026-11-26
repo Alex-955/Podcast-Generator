@@ -3,11 +3,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const fsPromises = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const { once } = require('node:events');
+const { setTimeout: delay } = require('node:timers/promises');
 const { gunzipSync } = require('node:zlib');
 const { buildRelease, runReleaseSecurityGate, parseArgs } = require('../scripts/build-release');
 const { version } = require('../package.json');
@@ -20,13 +22,29 @@ const SOURCE_FILES = [
 ];
 const PRIVATE_FILES = [
   '.env', '.env.local', '.git/config', '.DS_Store', 'server.log', 'data/server.pid', 'data/tasks/1.json',
-  'data/tts-cache/cache.mp3', 'public/podcasts/secret-ep/full_podcast.mp3', '启动 AI 妙听.app/Contents/sample',
+  'data/tts-cache/cache.mp3', 'public/podcasts/secret-ep/full_podcast.mp3',
+  'AI 妙听.app/Contents/sample', '启动 AI 妙听.app/Contents/sample',
   'test/private-fixture.js', 'src/private-notes.txt', 'public/private.html',
 ];
 
+async function removeDirWithBudget(target, { budgetMs = 8000, delayMs = 150 } = {}) {
+  const deadline = performance.now() + budgetMs;
+  for (;;) {
+    try {
+      await fsPromises.rm(target, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const remaining = deadline - performance.now();
+      if (remaining <= 0 || !['EBUSY', 'EPERM', 'ENOTEMPTY', 'EMFILE'].includes(error.code)) throw error;
+      await delay(Math.min(delayMs, remaining));
+      if (performance.now() >= deadline) throw error;
+    }
+  }
+}
+
 function scratch(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'podcast release '));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  t.after(() => removeDirWithBudget(directory));
   return directory;
 }
 
@@ -57,7 +75,7 @@ async function verifyStagedServer(stageDir, tmpDir, { nodePath = '' } = {}) {
       DATA_DIR: path.join(tmpDir, 'runtime-data'), PODCASTS_DIR: path.join(tmpDir, 'runtime-audio'),
     },
   });
-  const finished = once(server, 'exit');
+  const finished = once(server, 'close');
   let stdout = '';
   let stderr = '';
   server.stderr.setEncoding('utf8');
@@ -256,6 +274,8 @@ test('发行门禁识别禁运路径、个人主目录、私钥和 API 密钥，
   write(stageDir, 'data/notes.txt', 'unexpected private data');
   write(stageDir, '.env.example', '# EXAMPLE_SECRET=commented\nVOLCENGINE_TTS_ACCESS_KEY=abc\n');
   write(stageDir, 'public/podcasts/unexpected.mp3', Buffer.from([0xff, 0x00, 0x05]));
+  write(stageDir, 'AI 妙听.app/Contents/sample', 'local app fixture');
+  write(stageDir, '启动 AI 妙听.app/Contents/sample', 'legacy local app fixture');
   write(stageDir, 'src/path.js', 'const path = "/Users/alice";\n');
   write(stageDir, 'src/linuxHome.js', 'const home = "/home/alice";\n');
   write(stageDir, 'src/windowsHome.js', 'const home = "c:\\\\users\\\\alice";\n');
@@ -269,6 +289,9 @@ test('发行门禁识别禁运路径、个人主目录、私钥和 API 密钥，
   fs.unlinkSync(path.join(stageDir, 'LICENSE'));
 
   assert.throws(() => runReleaseSecurityGate(stageDir), error => {
+    for (const bundle of ['AI 妙听.app', '启动 AI 妙听.app']) {
+      assert.ok(error.issues.includes(bundle + ' 属于禁运路径'), bundle);
+    }
     for (const detail of ['.env 属于禁运路径', 'data/tasks 属于禁运路径', 'data/notes.txt 属于禁运路径',
       '.env.example:2 凭据字段 VOLCENGINE_TTS_ACCESS_KEY 必须为空', 'node_modules/pkg/key.pem:1 包含私钥头',
       'public/podcasts/unexpected.mp3 属于禁运路径', 'src/path.js:1 包含本机绝对路径',
@@ -287,6 +310,48 @@ test('发行门禁识别禁运路径、个人主目录、私钥和 API 密钥，
   const outDir = path.join(root, 'aborted');
   assert.throws(() => buildRelease({ sourceDir, outDir, format: 'both' }), /发行包安全门禁未通过/);
   assert.deepEqual(fs.readdirSync(outDir), []);
+});
+
+test('发行暂存目录首次 EBUSY 时重试并保留已发布的归档', t => {
+  const root = scratch(t);
+  const sourceDir = sourceFixture(root);
+  const outDir = path.join(fs.realpathSync.native(root), 'out');
+  const rmSync = fs.rmSync;
+  let attempts = 0;
+  t.mock.method(fs, 'rmSync', (target, options) => {
+    if (path.dirname(target) === outDir && path.basename(target).startsWith('.podcast-release-')) {
+      attempts++;
+      if (attempts === 1) throw Object.assign(new Error('offline fixture: busy'), { code: 'EBUSY' });
+    }
+    return rmSync(target, options);
+  });
+
+  const { stageDir, archives, checksumFile } = buildRelease({ sourceDir, outDir, format: 'both' });
+  assert.equal(attempts, 2);
+  const published = [stageDir, checksumFile, ...archives].map(file => path.basename(file));
+  assert.deepEqual(fs.readdirSync(outDir).sort(), published.sort());
+});
+
+test('发行暂存目录清理失败时保留安全门禁的原始错误', t => {
+  const root = scratch(t);
+  const sourceDir = sourceFixture(root);
+  const outDir = path.join(fs.realpathSync.native(root), 'out');
+  write(sourceDir, 'src/unsafe.js', '-----BEGIN PRIVATE KEY-----\n');
+  const rmSync = fs.rmSync;
+  const cleanup = t.mock.method(fs, 'rmSync', (target, options) => {
+    if (path.dirname(target) === outDir && path.basename(target).startsWith('.podcast-release-')) {
+      throw Object.assign(new Error('offline fixture: access denied'), { code: 'EACCES' });
+    }
+    return rmSync(target, options);
+  });
+
+  assert.throws(() => buildRelease({ sourceDir, outDir, format: 'dir' }), error => {
+    assert.match(error.message, /发行包安全门禁未通过/);
+    assert.ok(error.issues.includes('src/unsafe.js:1 包含私钥头'));
+    return true;
+  });
+  assert.equal(cleanup.mock.callCount(), 1);
+  assert.match(fs.readdirSync(outDir).join('\n'), /^\.podcast-release-\w+$/);
 });
 
 test('发行门禁拦截非 ASCII 主目录、dotenv 冒号语法和不合法 UTF-8 模板', t => {

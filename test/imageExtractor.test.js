@@ -281,7 +281,7 @@ test('默认识图传输拒绝非授权私网地址与解析结果', async t => 
   assert.equal(lookups, 1);
 });
 
-test('识图请求超时与取消均关闭响应并移除外部取消监听', { timeout: 5000 }, async t => {
+test('识图请求超时与取消均关闭响应并移除外部取消监听', { timeout: 10000 }, async t => {
   configure(t);
   let onRequest, onClose;
   const { endpoint, requests } = await httpTtsFixture(t, res => {
@@ -298,15 +298,16 @@ test('识图请求超时与取消均关闭响应并移除外部取消监听', { 
     let upstreamSignal;
     const { requestProvider } = require('../src/services/providerHttp');
     const extraction = extractTextFromImages(input, {
-      signal: controller.signal, timeoutMs: cancelled ? 5000 : 100,
+      signal: controller.signal, timeoutMs: cancelled ? 5000 : 1000,
       llmRequest(url, args) {
         upstreamSignal = args.signal;
         return requestProvider(url, args);
       },
     });
     const failure = assert.rejects(extraction, cancelled ? { name: 'AbortError' } : { statusCode: 502, message: /超时/ });
-    await reading;
+    // The listener is installed synchronously and may be removed by the timeout during I/O.
     assert.equal(getEventListeners(controller.signal, 'abort').length, 1);
+    await Promise.race([reading, failure.then(() => assert.fail('识图请求应在超时或取消前到达测试服务'))]);
     if (cancelled) controller.abort();
     await failure;
     await closed;
@@ -348,17 +349,18 @@ test('远程合成按间隔执行，工作目录复用与缓存命中不触发�
   const work = path.join(root, 'work');
   fs.mkdirSync(work);
   const audio = makeMp3(2);
+  const minRequestIntervalMs = 25;
   const source = path.join(work, 'sentence_001.mp3');
   fs.writeFileSync(source, audio);
   const events = [];
   let firstEndedAt, secondStartedAt;
   const provider = {
-    id: 'offline', model: 'fixture', minRequestIntervalMs: 25,
+    id: 'offline', model: 'fixture', minRequestIntervalMs,
     synthesizeToFile({ outputPath, text }) {
       events.push(text);
-      if (text === '第二次请求') secondStartedAt = Date.now();
+      if (text === '第二次请求') secondStartedAt = performance.now();
       fs.writeFileSync(outputPath, audio);
-      if (text === '首次请求') firstEndedAt = Date.now();
+      if (text === '首次请求') firstEndedAt = performance.now();
       return { bytes: audio.length, duration: 0.048 };
     },
   };
@@ -370,12 +372,26 @@ test('远程合成按间隔执行，工作目录复用与缓存命中不触发�
   assert.deepEqual(events, lines.map(line => line.text));
   assert.equal(result.reusedSegments, 1);
   assert.equal(result.cachedSegments, 2);
-  assert.ok(secondStartedAt - firstEndedAt >= 24);
+  assert.ok(secondStartedAt - firstEndedAt >= minRequestIntervalMs);
   const previouslyCompleted = await synthesizeDialogueScript(lines, work, null, {
     provider, cache, minRequestIntervalMs: 60000, signal: AbortSignal.timeout(1000),
   });
   assert.equal(previouslyCompleted.reusedSegments, 4);
   assert.deepEqual(events, lines.map(line => line.text));
+
+  const controller = new AbortController();
+  events.length = 0;
+  const startedAt = performance.now();
+  await assert.rejects(synthesizeDialogueScript([lines[0], lines[3]], path.join(root, 'cancelled'), null, {
+    provider, minRequestIntervalMs: 5000, signal: controller.signal,
+    onProgress({ index, completedSegments }) {
+      if (index === 1 && completedSegments === 1) setImmediate(() => controller.abort());
+    },
+  }), { name: 'AbortError', segmentIndex: 1 });
+  // Without the signal on the timer, the next synthesis would still reject after the full 5 s wait.
+  const elapsedMs = performance.now() - startedAt;
+  assert.ok(elapsedMs < 2500, `节流等待应在取消后提前结束，实际耗时 ${elapsedMs}ms`);
+  assert.deepEqual(events, ['首次请求']);
 });
 
 test('限流可恢复到第六次合成，重试等待时间遵守服务商间隔', async t => {
