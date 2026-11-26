@@ -8,7 +8,7 @@
   const AMBIENT_TARGET_GAIN = 0.125;
 
   const FALLBACK_SAMPLES = {
-    version: '0.1.0',
+    version: '0.2.0',
     episodes: {
       deep: {
         id: 'deep',

@@ -4,9 +4,9 @@
 server {
     listen 80;
     listen [::]:80;
-    server_name miaoting.example.com;
+    server_name podcast.ai955.xyz;
 
-    root /var/www/ai-podcast-generator/website;
+    root /www/wwwroot/podcast.ai955.xyz;
     index index.html;
     charset utf-8;
 
@@ -50,6 +50,14 @@ server {
         expires 7d;
         add_header Cache-Control "public, max-age=604800";
         try_files $uri =404;
+    }
+
+    # 便携安装包国内直连下载目录（强制附件下载并支持断点续传）
+    location /downloads/ {
+        alias /www/wwwroot/podcast-downloads/;
+        add_header Content-Disposition "attachment";
+        add_header X-Content-Type-Options "nosniff" always;
+        autoindex off;
     }
 
     # 主页面路由回退
