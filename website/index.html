@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>AI 妙听 · 双人对话播客生成器（v0.1 便携尝鲜版）</title>
+  <meta name="description" content="把网页长文、公众号文章和长图笔记，在本机一键变成阿泽与小晓的双人对话播客。密钥仅存本地浏览器，v0.1 便携尝鲜版（需 Node.js 22+）免费开源。">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="AI 妙听 · 双人对话播客生成器（v0.1 便携尝鲜版）">
+  <meta property="og:description" content="网页长文、文字与长截图一键变双人对话播客。纯 Node.js 本机运行、BYOK 密钥零落盘、支持断点续跑与同步字幕。">
+  <meta property="og:image" content="./assets/images/og-cover.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="AI 妙听 · 双人对话播客生成器">
+  <meta name="twitter:description" content="v0.1 便携尝鲜版开源下载 · 把长文变成阿泽与小晓的双人对话播客。">
+  <meta name="twitter:image" content="./assets/images/og-cover.png">
+  <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg">
+  <link rel="stylesheet" href="./styles/tokens.css">
+  <link rel="stylesheet" href="./styles/main.css">
+  <script defer src="./scripts/site-config.js"></script>
+  <script defer src="./scripts/player.js"></script>
+  <script defer src="./scripts/interactions.js"></script>
+  <script defer src="./scripts/main.js"></script>
+</head>
+<body>
+  <header class="topbar" id="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="#top" aria-label="AI 妙听首页">
+        <svg class="brand-mark" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+          <rect width="64" height="64" rx="16" fill="#ECE7DC"/>
+          <rect x="16" y="24" width="4.5" height="16" rx="2.25" fill="#1C5A73"/>
+          <rect x="25" y="16" width="4.5" height="32" rx="2.25" fill="#B03E24"/>
+          <rect x="34" y="20" width="4.5" height="24" rx="2.25" fill="#B03E24"/>
+          <rect x="43" y="26" width="4.5" height="12" rx="2.25" fill="#1C5A73"/>
+        </svg>
+        <span class="brand-title">AI 妙听</span>
+        <span class="version-badge" data-config-text="versionBadge">v0.1 便携尝鲜版</span>
+      </a>
+
+      <nav class="topbar-nav" aria-label="页面导航">
+        <a class="nav-link" href="#stage">试听样片</a>
+        <a class="nav-link" href="#features">核心特性</a>
+        <a class="nav-link" href="#onboarding">3 步启动</a>
+        <a class="nav-link" href="#roadmap">隐私与路线图</a>
+      </nav>
+
+      <div class="topbar-actions">
+        <button type="button" id="copySiteUrlBtn" class="btn btn-subtle btn-sm copy-site-url-btn">复制网址</button>
+        <a class="btn btn-ghost btn-sm" data-config-link="githubRepo" href="https://github.com/Alex-955/Podcast-Generator" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <button type="button" class="btn btn-primary btn-sm" data-open-download>下载试用</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- 首屏 Hero -->
+    <section class="hero">
+      <div class="container hero-shell">
+        <div class="hero-badges">
+          <span class="pill-tag is-accent">
+            <span class="pill-dot" aria-hidden="true"></span>
+            <span data-config-text="versionBadge">v0.1 便携尝鲜版</span>
+          </span>
+          <span class="pill-tag" data-require-node>需本机提前安装 Node.js 22+</span>
+          <span class="pill-tag">BYOK 自带密钥 · 零数据库</span>
+        </div>
+
+        <h1 class="hero-title">
+          把来不及看的长文，<br>
+          变成<span class="hero-underline-wrap">两位朋友的闲聊<svg class="hero-squiggle" viewBox="0 0 280 18" fill="none" aria-hidden="true"><path d="M4 12 C 74 4, 196 3, 276 11" stroke="currentColor" stroke-width="4.2" stroke-linecap="round"/></svg></span>
+        </h1>
+
+        <p class="hero-subtitle">
+          粘贴网页 / 公众号文章或手机长截图，几分钟在本机生成<span class="hero-role-host">阿泽</span> × <span class="hero-role-guest">小晓</span>的双人对话播客（纯人声 MP3 与同步高亮字幕）。无云端账号，API Key 仅留在你的本地浏览器。
+        </p>
+
+        <div class="hero-actions">
+          <div class="hero-os-group">
+            <button type="button" id="heroDownloadBtn" class="btn btn-primary btn-lg" data-open-download data-os="mac">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              <span id="heroDownloadLabel">下载 macOS 便携包（v0.1）</span>
+            </button>
+            <button type="button" id="heroSwitchOsBtn" class="btn btn-outline btn-lg">切到 Windows 版</button>
+          </div>
+
+          <button type="button" id="heroListenBtn" class="btn btn-subtle btn-lg">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M7.5 5.25a.75.75 0 0 1 1.14-.64l10.5 6.75a.75.75 0 0 1 0 1.28l-10.5 6.75a.75.75 0 0 1-1.14-.64V5.25z"/>
+            </svg>
+            <span>先听 45 秒样片</span>
+          </button>
+        </div>
+
+        <div class="hero-meta-bar">
+          <span data-require-node>跨平台便携压缩包（macOS / Windows 共用同一包，内置各自双击脚本 · 需提前安装 Node.js 22+）</span>
+          <a class="hero-meta-link" data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v0.1.0" target="_blank" rel="noopener noreferrer">GitHub Releases v0.1.0</a>
+          <button type="button" class="hero-meta-link" data-open-download data-highlight-sha="true">核对 SHA256 校验码</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 暖纸放音台 #stage -->
+    <section class="section-block" id="stage" aria-labelledby="stageHeading">
+      <div class="container">
+        <div class="section-header reveal">
+          <div>
+            <span class="section-eyebrow">ACOUSTIC STAGE · 样片试听台</span>
+            <h2 id="stageHeading" class="section-title">先听听「阿泽 × 小晓」的真实对话节奏</h2>
+            <p class="section-desc">支持 7:3 深度主讲与 5:5 轻松对谈两种模式；点击任意一句字幕，即可精确跳转并自动开播。</p>
+          </div>
+
+          <div class="segmented" data-segmented="stage-episode" role="tablist" aria-label="样片节目风格">
+            <div class="segmented-indicator" aria-hidden="true"></div>
+            <button type="button" class="segmented-btn is-active" data-value="deep" role="tab" aria-selected="true">深度主讲 · 7:3</button>
+            <button type="button" class="segmented-btn" data-value="casual" role="tab" aria-selected="false">轻松对谈 · 5:5</button>
+          </div>
+        </div>
+
+        <div class="stage-deck reveal" data-playing="false" data-speaker="none">
+          <div class="stage-top-bar">
+            <div class="speaker-pills" aria-label="双主播声部状态">
+              <div id="speakerPillAze" class="speaker-pill" data-speaker="aze">
+                <span class="speaker-seal-sm">泽</span>
+                <span class="speaker-pill-text">
+                  <span class="speaker-pill-name">阿泽</span>
+                  <span class="speaker-pill-role">主持</span>
+                </span>
+                <span class="mini-wave" aria-hidden="true">
+                  <span></span><span></span><span></span><span></span>
+                </span>
+              </div>
+
+              <div id="speakerPillXiaoxiao" class="speaker-pill" data-speaker="xiaoxiao">
+                <span class="speaker-seal-sm">晓</span>
+                <span class="speaker-pill-text">
+                  <span class="speaker-pill-name">小晓</span>
+                  <span class="speaker-pill-role">嘉宾</span>
+                </span>
+                <span class="mini-wave" aria-hidden="true">
+                  <span></span><span></span><span></span><span></span>
+                </span>
+              </div>
+            </div>
+
+            <span id="playerSourceBadge" class="source-badge">真实播客样片 · 纯人声输出</span>
+          </div>
+
+          <div class="stage-body">
+            <div class="stage-control-card">
+              <div class="stage-ep-info">
+                <h3 id="playerEpTitle" class="stage-ep-title">正在载入样片节目…</h3>
+                <p id="playerEpSummary" class="stage-ep-summary">由阿泽与小晓双人接力拆解长文重点，带 0.36 秒句间自然停顿与同步逐句字幕。</p>
+              </div>
+
+              <div class="stage-transport">
+                <button type="button" id="btnSkipBack" class="btn-transport" title="后退 10 秒" aria-label="后退 10 秒">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M4.2 12.2a7.8 7.8 0 1 0 2.5-5.7L4.4 8.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M4.2 4.3v4.4h4.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    <text x="12" y="15" text-anchor="middle" fill="currentColor" font-size="7.5" font-weight="700" font-family="sans-serif">10</text>
+                  </svg>
+                </button>
+
+                <button type="button" id="btnPlayPause" class="btn-play-main" title="播放或暂停" aria-label="播放或暂停">
+                  <svg class="icon-play" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M7.5 5.25a.75.75 0 0 1 1.14-.64l10.5 6.75a.75.75 0 0 1 0 1.28l-10.5 6.75a.75.75 0 0 1-1.14-.64V5.25z"/>
+                  </svg>
+                  <svg class="icon-pause" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <rect x="6.5" y="5" width="3.75" height="14" rx="1.2"/>
+                    <rect x="13.75" y="5" width="3.75" height="14" rx="1.2"/>
+                  </svg>
+                </button>
+
+                <button type="button" id="btnSkipForward" class="btn-transport" title="快进 10 秒" aria-label="快进 10 秒">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M19.8 12.2a7.8 7.8 0 1 1-2.5-5.7l2.3 2.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M19.8 4.3v4.4h-4.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    <text x="12" y="15" text-anchor="middle" fill="currentColor" font-size="7.5" font-weight="700" font-family="sans-serif">10</text>
+                  </svg>
+                </button>
+              </div>
+
+              <div class="progress-row">
+                <span id="playerTimeCurrent" class="time-code">00:00</span>
+                <div
+                  id="playerProgressTrack"
+                  class="progress-track"
+                  role="slider"
+                  tabindex="0"
+                  aria-label="样片播放进度"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuenow="0"
+                >
+                  <div id="playerProgressFill" class="progress-fill"></div>
+                  <div id="playerProgressThumb" class="progress-thumb"></div>
+                </div>
+                <span id="playerTimeDuration" class="time-code">00:47</span>
+              </div>
+
+              <div class="stage-controls">
+                <button type="button" id="btnSpeed" class="btn-chip-control" title="切换播放倍速" aria-label="切换播放倍速">1.0x</button>
+                <button type="button" id="btnAmbient" class="btn-chip-control" aria-pressed="false" title="开启或关闭暖调微醺背景音乐">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M9 18V5l12-2v13"/>
+                    <circle cx="6" cy="18" r="3"/>
+                    <circle cx="18" cy="16" r="3"/>
+                  </svg>
+                  <span>微醺环境音</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="transcript-wrap">
+              <div class="transcript-head">
+                <h4 class="transcript-title">同步对话字幕</h4>
+                <div class="transcript-meta-right">
+                  <span>点击任意句跳转 · 内部独立滚动</span>
+                  <span id="transcriptCounter">0 / 0 句</span>
+                </div>
+              </div>
+              <div id="transcriptList" class="transcript-list" role="region" aria-label="双人对话同步字幕"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bento 4 卡功能演练区 #features -->
+    <section class="section-block" id="features" aria-labelledby="featuresHeading">
+      <div class="container">
+        <div class="section-header reveal">
+          <div>
+            <span class="section-eyebrow">ARCHITECTURE &amp; CRAFT · 工程与听感细节</span>
+            <h2 id="featuresHeading" class="section-title">专为日常长文收听打磨的四处真实细节</h2>
+            <p class="section-desc">不堆砌云端概念，把断网不浪费额度、口语顺畅播报、工作台全貌与自带密钥生态直接做进交互里。</p>
+          </div>
+        </div>
+
+        <div class="bento-grid">
+          <!-- 卡 1（7栏）：断点续跑 5 胶囊模拟器 -->
+          <article class="bento-card bento-span-7 reveal">
+            <div>
+              <span class="bento-tag">单句缓存 · 4 阶段断点续跑</span>
+              <h3 class="bento-title">中途断网或换音色，已合成的句子零费用复用</h3>
+              <p class="bento-desc">每句 MP3 按文本、音色与模型哈希落盘缓存。即使第 3 句突发断网，恢复后前 2 句毫秒命中缓存，绝不重花 API 额度。</p>
+            </div>
+
+            <div id="simPills" class="sim-pills" aria-label="5 句合成流水线演示">
+              <div class="sim-pill" data-sim-index="0">
+                <span class="sim-pill-label">01 开场引入</span>
+                <span class="sim-pill-state">等待合成</span>
+              </div>
+              <div class="sim-pill" data-sim-index="1">
+                <span class="sim-pill-label">02 核心拆解</span>
+                <span class="sim-pill-state">等待合成</span>
+              </div>
+              <div class="sim-pill" data-sim-index="2">
+                <span class="sim-pill-label">03 案例对比</span>
+                <span class="sim-pill-state">等待合成</span>
+              </div>
+              <div class="sim-pill" data-sim-index="3">
+                <span class="sim-pill-label">04 误区辨析</span>
+                <span class="sim-pill-state">等待合成</span>
+              </div>
+              <div class="sim-pill" data-sim-index="4">
+                <span class="sim-pill-label">05 结语收束</span>
+                <span class="sim-pill-state">等待合成</span>
+              </div>
+            </div>
+
+            <div class="sim-status-bar">
+              <p id="simStatusText" class="sim-status-text">点击下方按钮，演练第 3 句突发断网后的缓存复用过程。</p>
+              <span id="simCacheBadge" class="sim-cache-badge">缓存复用 <strong id="simCacheCount">0</strong> 句</span>
+            </div>
+
+            <div class="sim-actions">
+              <button type="button" id="btnSimRun" class="btn btn-primary btn-sm">⚡ 模拟生成（第 3 句突发断网）</button>
+              <button type="button" id="btnSimReset" class="btn btn-subtle btn-sm hidden">重置演练</button>
+            </div>
+          </article>
+
+          <!-- 卡 2（5栏）：口语读法翻牌 -->
+          <article class="bento-card bento-span-5 reveal">
+            <div>
+              <span class="bento-tag">播音规范化 · 听读分离</span>
+              <h3 class="bento-title">耳朵听顺口语，字幕留精确原文</h3>
+              <p class="bento-desc">送入 TTS 前自动将年份、比例与长数字转为自然中文读法，页面字幕依然完整保留原始数字。</p>
+            </div>
+
+            <div id="spokenFlipCard" class="flip-card" role="button" tabindex="0" aria-pressed="false" aria-label="点击或按空格切换原文与播音口语读法对比">
+              <div class="flip-card-inner">
+                <div class="flip-face flip-face-front">
+                  <span class="flip-face-label">字幕原文 · 保留书面精准格式</span>
+                  <p class="flip-sample-quote">
+                    最早从 <span class="flip-token">1972 年</span> 到 <span class="flip-token">80 年代</span>，团队按 <span class="flip-token">7:3</span> 比例处理最高 <span class="flip-token">12,000 字</span>长文。
+                  </p>
+                  <span class="flip-hint">点击或按空格翻看播音读法 ↻</span>
+                </div>
+                <div class="flip-face flip-face-back">
+                  <span class="flip-face-label">TTS 口语读法 · 自动顺口转换</span>
+                  <p class="flip-sample-quote">
+                    最早从 <span class="flip-token">一九七二年</span> 到 <span class="flip-token">八零年代</span>，团队按 <span class="flip-token">七比三</span> 比例处理最高 <span class="flip-token">一万两千字</span>长文。
+                  </p>
+                  <span class="flip-hint">再次点击翻回字幕原文 ↺</span>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- 卡 3（5栏）：实景截图切换与放大弹窗 -->
+          <article class="bento-card bento-span-5 reveal">
+            <div class="bento-head">
+              <div>
+                <span class="bento-tag">实景界面预览</span>
+                <h3 class="bento-title">开箱即用的暖纸工作台</h3>
+              </div>
+
+              <div class="segmented" data-segmented="preview-view" role="tablist" aria-label="实景视图切换">
+                <div class="segmented-indicator" aria-hidden="true"></div>
+                <button type="button" class="segmented-btn is-active" data-value="desktop" role="tab" aria-selected="true">工作台</button>
+                <button type="button" class="segmented-btn" data-value="modal" role="tab" aria-selected="false">模型弹窗</button>
+              </div>
+            </div>
+
+            <button type="button" id="previewFrameBtn" class="preview-frame" aria-label="点击放大查看实景截图">
+              <img id="previewScreenshotImg" src="./assets/images/studio-desktop.png" alt="AI 妙听双人播客工作台实景截图" loading="lazy">
+              <span class="preview-zoom-pill">点击放大查看</span>
+              <div id="previewFallback" class="preview-fallback hidden">
+                暂未加载到截图资源，请查看仓库 <code>docs/images/</code> 目录。
+              </div>
+            </button>
+          </article>
+
+          <!-- 卡 4（7栏）：BYOK 芯片推荐墙 -->
+          <article class="bento-card bento-span-7 reveal">
+            <div>
+              <span class="bento-tag">BYOK 自带密钥生态</span>
+              <h3 class="bento-title">大模型与语音随你搭配，不绑死任何一家</h3>
+              <p class="bento-desc">支持主流 OpenAI 兼容剧本模型（含长图识字）与三套语音合成底座，点选芯片查看搭配建议。</p>
+            </div>
+
+            <div class="byok-groups">
+              <div class="byok-group">
+                <span class="byok-group-label">剧本与识图模型（OpenAI 兼容）</span>
+                <div class="byok-chip-row">
+                  <button type="button" class="byok-chip is-active" data-chip-group="llm" data-chip-id="deepseek" data-chip-tip="DeepSeek：逻辑清晰、性价比高，适合科技与深度长文拆解；填好 Key 后可一键拉取最新模型列表。">DeepSeek · 推荐</button>
+                  <button type="button" class="byok-chip" data-chip-group="llm" data-chip-id="kimi" data-chip-tip="Kimi API（platform.moonshot.cn）：长上下文信息梳理连贯，适合研报、书摘与超长文提炼。">Kimi API</button>
+                  <button type="button" class="byok-chip" data-chip-group="llm" data-chip-id="doubao" data-chip-tip="豆包 · 火山方舟：中文日常口语网感自然，双人闲聊较少念稿腔；支持推理接入点手动填写。">豆包 · 火山方舟</button>
+                  <button type="button" class="byok-chip" data-chip-group="llm" data-chip-id="qwen" data-chip-tip="通义千问（阿里云百炼）：结构化 JSON 输出稳定，亦支持 Qwen-VL 视觉识图。">通义千问</button>
+                  <button type="button" class="byok-chip" data-chip-group="llm" data-chip-id="mimo" data-chip-tip="小米 MiMo：响应速度快，支持标准 OpenAI 兼容接口接入。">小米 MiMo</button>
+                  <button type="button" class="byok-chip" data-chip-group="llm" data-chip-id="siliconflow" data-chip-tip="硅基流动：聚合主流开源模型，工作台内置关键词搜索框方便筛选勾选。">硅基流动</button>
+                  <button type="button" class="byok-chip" data-chip-group="llm" data-chip-id="custom" data-chip-tip="自定义兼容接口：支持 OpenRouter、One-API 或本机 Ollama 等任意 OpenAI 兼容端点。">自定义兼容接口</button>
+                </div>
+              </div>
+
+              <div class="byok-group">
+                <span class="byok-group-label">语音合成（TTS）</span>
+                <div class="byok-chip-row">
+                  <button type="button" class="byok-chip" data-chip-group="tts" data-chip-id="minimax" data-chip-tip="MiniMax Speech（speech-2.8-turbo）：仅需单个 API Key，中文停顿与情感自然度均衡，性价比出色。">MiniMax Speech</button>
+                  <button type="button" class="byok-chip" data-chip-group="tts" data-chip-id="volcengine" data-chip-tip="火山引擎 · 豆包语音 V3（seed-tts-2.0）：对话级高拟真双人音色，国内直连稳定，支持单 Key 或 AppID 鉴权。">火山豆包 V3</button>
+                  <button type="button" class="byok-chip" data-chip-group="tts" data-chip-id="edge" data-chip-tip="Microsoft Edge 语音：完全免密钥开箱试听；因非官方公开接口偶发限流，长期制播建议搭配 MiniMax 或火山豆包。">Edge 免费试听</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="byok-tip-box">
+              <p id="byokTipText" class="byok-tip-text">DeepSeek：逻辑清晰、性价比高，适合科技与深度长文拆解；填好 Key 后可一键拉取最新模型列表。</p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3 步本机上手指南 #onboarding -->
+    <section class="section-block section-band" id="onboarding" aria-labelledby="onboardingHeading">
+      <div class="container">
+        <div class="section-header reveal">
+          <div>
+            <span class="section-eyebrow">ONBOARDING · 3 步本机上手</span>
+            <h2 id="onboardingHeading" class="section-title">装一次 Node.js 22+，解压即可双击启动</h2>
+            <p class="section-desc" data-require-node>v0.1 便携尝鲜版内置全部 npm 依赖与双端双击脚本，无需克隆仓库或敲命令行，仅需提前在本机安装一次 Node.js 22+。</p>
+          </div>
+
+          <div class="segmented" data-segmented="onboarding-os" role="tablist" aria-label="选择你的电脑系统">
+            <div class="segmented-indicator" aria-hidden="true"></div>
+            <button type="button" class="segmented-btn is-active" data-value="mac" role="tab" aria-selected="true">macOS</button>
+            <button type="button" class="segmented-btn" data-value="win" role="tab" aria-selected="false">Windows</button>
+          </div>
+        </div>
+
+        <div class="steps-grid">
+          <article class="step-card reveal">
+            <span class="step-num-badge">1</span>
+            <h3 class="step-card-title">确认 Node.js 22+ 并解压便携包</h3>
+            <p class="step-card-desc">
+              前往 Node.js 官网安装 <strong>22 或更新版本</strong>（一路点下一步即可），随后下载并解压
+              <code>ai-podcast-generator-v0.1.0-portable.zip</code>。
+            </p>
+            <div class="step-inline-actions">
+              <button type="button" class="btn btn-primary btn-sm" data-open-download>打开下载弹窗</button>
+              <button type="button" class="btn btn-subtle btn-sm" data-open-download data-highlight-sha="true">核对 SHA256</button>
+            </div>
+          </article>
+
+          <article class="step-card reveal">
+            <span class="step-num-badge">2</span>
+            <h3 class="step-card-title">双击根目录启动脚本</h3>
+            <div data-os-panel="mac">
+              <p class="step-card-desc">
+                macOS 用户直接双击解压目录中的 <code>启动 AI 妙听.command</code>，服务将自动挑选空闲端口并弹出浏览器；用完双击 <code>停止 AI 妙听.command</code> 安全退出。
+              </p>
+            </div>
+            <div data-os-panel="win" class="hidden">
+              <p class="step-card-desc">
+                Windows 用户直接双击解压目录中的 <code>启动 AI 妙听.bat</code>，服务将自动挑选空闲端口并弹出浏览器；用完双击 <code>停止 AI 妙听.bat</code> 安全退出。
+              </p>
+            </div>
+          </article>
+
+          <article class="step-card reveal">
+            <span class="step-num-badge">3</span>
+            <h3 class="step-card-title">填入密钥，导入长文即刻开播</h3>
+            <p class="step-card-desc">
+              点击网页右上角「模型与语音」填入 API Key（语音可用免费 Edge 先试听），贴入文章链接、正文或长截图，几十秒即可边看同步字幕边收听。
+            </p>
+          </article>
+        </div>
+
+        <div class="safety-accordion reveal">
+          <button
+            type="button"
+            id="safetyAccordionBtn"
+            class="accordion-trigger"
+            aria-expanded="false"
+            aria-controls="safetyAccordionPanel"
+          >
+            <span>首次双击遇到 macOS / Windows 系统安全拦截弹窗怎么办？</span>
+            <svg class="accordion-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+
+          <div id="safetyAccordionPanel" class="accordion-panel">
+            <div class="accordion-inner">
+              <div class="accordion-body">
+                <div class="accordion-os-card">
+                  <h4>macOS：提示“来自身份不明开发者”</h4>
+                  <p>这是未签名本地脚本的常规提示。请<strong>右键点击</strong> <code>启动 AI 妙听.command</code> → 选「打开」；若仍被拦截，前往「系统设置 → 隐私与安全性」点击「仍要打开」，仅第一次需要确认。</p>
+                </div>
+                <div class="accordion-os-card">
+                  <h4>Windows：提示“Windows 已保护你的电脑”</h4>
+                  <p>因开源便携脚本未购买商业代码签名证书，SmartScreen 会首次提醒。点击弹窗里的<strong>「更多信息」→「仍要运行」</strong>即可正常启动，亦可先对照官网公布的 SHA256 校验压缩包完整性。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 隐私承诺与路线图 #roadmap -->
+    <section class="section-block" id="roadmap" aria-labelledby="roadmapHeading">
+      <div class="container">
+        <div class="section-header reveal">
+          <div>
+            <span class="section-eyebrow">PRIVACY &amp; ROADMAP · 隐私边界与演进路线</span>
+            <h2 id="roadmapHeading" class="section-title">纯本机可审计架构，每一步规划都透明写清</h2>
+            <p class="section-desc">所有密钥与音频均留在你的电脑里，我们也坦诚列出当前 v0.1 边界与后续演进方向。</p>
+          </div>
+        </div>
+
+        <div class="privacy-grid">
+          <div class="privacy-card reveal">
+            <h3>凭据零落盘</h3>
+            <p>API Key、AppID、Access Key 仅存在本机浏览器，绝不写入任务记录、播客 <code>meta.json</code> 或错误日志。</p>
+          </div>
+          <div class="privacy-card reveal">
+            <h3>成品完全归你</h3>
+            <p>合成的纯人声 MP3、单句缓存和对话字幕均存储在本地文件夹，不经过任何托管云服务中转。</p>
+          </div>
+          <div class="privacy-card reveal">
+            <h3>极简可审计</h3>
+            <p>纯 Node.js + Express 5 + 原生前端实现，无数据库、无 Redis、无外部 ffmpeg 二进制依赖。</p>
+          </div>
+          <div class="privacy-card reveal">
+            <h3>出厂安全门禁</h3>
+            <p>构建脚本与 GitHub Actions 强制拦截密钥与本机路径泄露，每次发版均随带 SHA256 校验值。</p>
+          </div>
+        </div>
+
+        <div class="roadmap-grid">
+          <article class="roadmap-node is-current reveal">
+            <span class="roadmap-badge">已上线 · 当前版本</span>
+            <h3>v0.1 便携尝鲜版</h3>
+            <ul class="roadmap-list">
+              <li>链接 / 正文 / 长截图导入与润色确认</li>
+              <li>7:3 深度主讲与 5:5 轻松对谈双节律</li>
+              <li>单句音频缓存 + 4 阶段断点续跑</li>
+              <li>跨平台便携启动包（需 Node.js 22+）</li>
+            </ul>
+          </article>
+
+          <article class="roadmap-node reveal">
+            <span class="roadmap-badge">下一阶段 · 规划中</span>
+            <h3>v1.0 桌面正式版</h3>
+            <ul class="roadmap-list">
+              <li>Windows <code>.exe</code> 与 macOS <code>.dmg</code> 原生安装包</li>
+              <li>内置运行时，真正做到免装 Node.js 双击即用</li>
+              <li>用户目录自动数据隔离与无感更新提醒</li>
+            </ul>
+          </article>
+
+          <article class="roadmap-node reveal">
+            <span class="roadmap-badge">后续探索（规划中）</span>
+            <h3>移动端与多端联动</h3>
+            <ul class="roadmap-list">
+              <li>Android 纯端侧离线版（支持后台与锁屏播放控制）</li>
+              <li>扩展更多 OpenAI 兼容语音供应商与自定义音频导出</li>
+              <li>视桌面与安卓反馈再启动 iOS / 鸿蒙适配</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 收口 CTA -->
+    <section class="section-block" aria-label="下载与开源仓库入口">
+      <div class="container">
+        <div class="closing-cta reveal">
+          <div>
+            <h2>把下一篇长文，留给通勤路上的双人电台</h2>
+            <p>MIT 开源免费 · <code>v0.1 便携尝鲜版</code>（需本机提前安装 Node.js 22+）</p>
+          </div>
+          <div class="closing-cta-actions">
+            <button type="button" class="btn btn-primary btn-lg" data-open-download>立即下载 v0.1 便携包</button>
+            <a class="btn btn-outline btn-lg" data-config-link="githubRepo" href="https://github.com/Alex-955/Podcast-Generator" target="_blank" rel="noopener noreferrer">查看 GitHub 源码</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div>
+        <strong>AI 妙听 · 双人对话播客生成器</strong>（<span data-config-text="versionBadge">v0.1 便携尝鲜版</span>）· MIT License · 需本机安装 Node.js 22+
+      </div>
+      <div class="footer-links">
+        <a data-config-link="githubRepo" href="https://github.com/Alex-955/Podcast-Generator" target="_blank" rel="noopener noreferrer">GitHub 仓库</a>
+        <a data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v0.1.0" target="_blank" rel="noopener noreferrer">Releases v0.1.0</a>
+        <a href="#onboarding">启动指南</a>
+        <a href="#roadmap">路线图</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- 下载与 SHA256 校验弹窗 -->
+  <div id="downloadModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="downloadModalTitle">
+    <div id="downloadModalBackdrop" class="modal-overlay" aria-hidden="true"></div>
+    <div class="modal-sheet">
+      <div class="modal-head">
+        <div>
+          <h2 id="downloadModalTitle" class="modal-title">下载 AI 妙听（v0.1 便携尝鲜版）</h2>
+          <p class="modal-subtitle">macOS 与 Windows 共用同一跨平台便携包，内附各自双击启动脚本</p>
+        </div>
+        <button type="button" id="downloadModalClose" class="icon-close-btn" aria-label="关闭下载弹窗">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="segmented" data-segmented="modal-os" role="tablist" aria-label="选择启动指引系统">
+        <div class="segmented-indicator" aria-hidden="true"></div>
+        <button type="button" class="segmented-btn is-active" data-value="mac" role="tab" aria-selected="true">macOS 指引</button>
+        <button type="button" class="segmented-btn" data-value="win" role="tab" aria-selected="false">Windows 指引</button>
+      </div>
+
+      <div id="modalNodeNotice" class="modal-notice" data-require-node>
+        提示：v0.1 便携尝鲜版需本机提前安装 <strong>Node.js 22 或更新版本</strong>（官网下载安装包一路点击下一步即可）。
+      </div>
+
+      <div class="modal-os-hint" data-modal-os-hint="mac">
+        <strong>macOS 启动方式：</strong>解压后双击根目录 <code>启动 AI 妙听.command</code>；若首次遇身份不明开发者提示，右键文件选「打开」一次即可。
+      </div>
+
+      <div class="modal-os-hint hidden" data-modal-os-hint="win">
+        <strong>Windows 启动方式：</strong>解压后双击根目录 <code>启动 AI 妙听.bat</code>；若首次遇 SmartScreen 提示，点击「更多信息 → 仍要运行」即可。
+      </div>
+
+      <div class="modal-file-row">
+        <span>发行文件名：</span>
+        <code id="modalFilename">ai-podcast-generator-v0.1.0-portable.zip</code>
+      </div>
+
+      <div class="modal-download-actions">
+        <a id="modalDirectDownloadBtn" class="btn btn-primary" href="https://github.com/Alex-955/Podcast-Generator/releases/download/v0.1.0/ai-podcast-generator-v0.1.0-portable.zip" download="ai-podcast-generator-v0.1.0-portable.zip">
+          直接下载便携包 (.zip)
+        </a>
+        <a id="modalGithubDownloadBtn" class="btn btn-outline" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v0.1.0" target="_blank" rel="noopener noreferrer">
+          前往 GitHub Releases
+        </a>
+      </div>
+
+      <div id="modalShaBox" class="sha-box">
+        <div class="sha-box-head">
+          <span>SHA256 完整性校验值</span>
+          <button type="button" id="btnCopySha" class="btn btn-subtle btn-sm">复制 SHA256</button>
+        </div>
+        <code id="modalShaCode" class="sha-code">cf6c8889d1b3dd3a74201c9258bb580abda206ff583cf09db2d0d5ee771f3222</code>
+      </div>
+    </div>
+  </div>
+
+  <!-- 实景截图放大弹窗 -->
+  <div id="lightboxModal" class="modal-backdrop modal-backdrop-dim hidden" role="dialog" aria-modal="true" aria-labelledby="lightboxCaption">
+    <div class="modal-sheet lightbox-sheet">
+      <div class="modal-head">
+        <p id="lightboxCaption" class="lightbox-caption">AI 妙听双人播客工作台实景截图</p>
+        <button type="button" id="lightboxClose" class="icon-close-btn" aria-label="关闭截图预览">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <img id="lightboxImg" class="lightbox-img" src="./assets/images/studio-desktop.png" alt="AI 妙听工作台放大截图">
+    </div>
+  </div>
+
+  <!-- 全局 Toast -->
+  <div id="siteToast" class="site-toast" role="status" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

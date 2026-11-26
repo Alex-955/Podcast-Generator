@@ -1,0 +1,106 @@
+{
+  "version": "0.1.0",
+  "episodes": {
+    "deep": {
+      "id": "deep",
+      "label": "深度主讲 · 7:3",
+      "title": "视频模型成本砍到十分之一：价格背后是「能不能试错」",
+      "summary": "节选自真实生成播客《MAGI-2 真能把视频模型的桌子掀了？》· 小晓 7:3 主讲算账拆解 + 阿泽精准追问",
+      "audioUrl": "./assets/audio/sample-deep.mp3",
+      "fallbackDuration": 47.664,
+      "cues": [
+        {
+          "id": 1,
+          "speaker": "aze",
+          "speakerName": "阿泽",
+          "emotion": "好奇",
+          "startTime": 0,
+          "endTime": 3.168,
+          "text": "那价格呢？这才是我最好奇的。"
+        },
+        {
+          "id": 2,
+          "speaker": "xiaoxiao",
+          "speakerName": "小晓",
+          "emotion": "拆解",
+          "startTime": 3.528,
+          "endTime": 14.544,
+          "text": "1080P 分辨率下，官方 API 刊例价只要 0.5 元每秒，不到 Seedance 2.5 同规格的十分之一。这个数字一出来，很多账都得重算了。"
+        },
+        {
+          "id": 3,
+          "speaker": "aze",
+          "speakerName": "阿泽",
+          "emotion": "追问",
+          "startTime": 14.904,
+          "endTime": 16.524,
+          "text": "重算到什么程度？"
+        },
+        {
+          "id": 4,
+          "speaker": "xiaoxiao",
+          "speakerName": "小晓",
+          "emotion": "深入",
+          "startTime": 16.884,
+          "endTime": 40.896,
+          "text": "闭源模型要拿到工业级顶尖画质，公开价约 4 元每秒，按行业普遍 3 到 5 次的重试率，一条可用镜头的单秒全链路成本就是 12 到 20 元，一分钟成片光生成就接近一千块。换成 0.5 元每秒之后，单秒成本降到 1.5 到 2.5 元，同样预算能试的创意数量，一下放大 8 到 10 倍。"
+        },
+        {
+          "id": 5,
+          "speaker": "aze",
+          "speakerName": "阿泽",
+          "emotion": "顿悟",
+          "startTime": 41.256,
+          "endTime": 47.664,
+          "text": "哦，这么一讲我就懂了——这差的不只是价格，是「能不能试错」的差别。"
+        }
+      ]
+    },
+    "casual": {
+      "id": "casual",
+      "label": "轻松对谈 · 5:5",
+      "title": "从支付战争到搜搜往事：为什么入口心智是砸不出来的？",
+      "summary": "节选自真实生成播客《4.19亿对3733万，腾讯打算从微信里「偷袭」豆包》· 阿泽 × 小晓 5:5 轻快对谈",
+      "audioUrl": "./assets/audio/sample-casual.mp3",
+      "fallbackDuration": 46.344,
+      "cues": [
+        {
+          "id": 1,
+          "speaker": "xiaoxiao",
+          "speakerName": "小晓",
+          "emotion": "联想",
+          "startTime": 0,
+          "endTime": 9.864,
+          "text": "这让我想到十年前那场支付战争。支付宝当年手握近八成份额，看着牢不可破，微信靠一个春节红包就撕开了口子。"
+        },
+        {
+          "id": 2,
+          "speaker": "aze",
+          "speakerName": "阿泽",
+          "emotion": "补充",
+          "startTime": 10.224,
+          "endTime": 22.512,
+          "text": "不过腾讯在搜索上栽过跟头。PC 时代百度垄断入口，腾讯砸了 20 个亿做搜搜 SOSO，QQ 工具栏、QQ 空间能放的位置全铺上了。"
+        },
+        {
+          "id": 3,
+          "speaker": "xiaoxiao",
+          "speakerName": "小晓",
+          "emotion": "接话",
+          "startTime": 22.872,
+          "endTime": 33.72,
+          "text": "结果用户聊完天要查资料，顺手打开的仍是百度。2013 年腾讯把搜搜注入搜狗，换 36.5% 的股份，基本等于公开认输。"
+        },
+        {
+          "id": 4,
+          "speaker": "aze",
+          "speakerName": "阿泽",
+          "emotion": "点题",
+          "startTime": 34.08,
+          "endTime": 46.344,
+          "text": "因为搜索是个正向循环生意，用户每次输入、点击、改词，都在喂算法。用的人越多结果越准，光靠导流追不上，入口心智是砸不出来的。"
+        }
+      ]
+    }
+  }
+}
