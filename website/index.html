@@ -3,16 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>AI 妙听 · 双人对话播客生成器（v0.1 便携尝鲜版）</title>
-  <meta name="description" content="把网页长文、公众号文章和长图笔记，在本机一键变成阿泽与小晓的双人对话播客。密钥仅存本地浏览器，v0.1 便携尝鲜版（需 Node.js 22+）免费开源。">
+  <title>AI 妙听 · 双人对话播客生成器（v0.2 便携尝鲜版）</title>
+  <meta name="description" content="把网页长文、公众号文章和长图笔记，在本机一键变成阿泽与小晓的双人对话播客。密钥仅存本地浏览器，v0.2 便携尝鲜版（需 Node.js 22+）免费开源。">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="AI 妙听 · 双人对话播客生成器（v0.1 便携尝鲜版）">
+  <meta property="og:url" content="https://podcast.ai955.xyz/">
+  <meta property="og:title" content="AI 妙听 · 双人对话播客生成器（v0.2 便携尝鲜版）">
   <meta property="og:description" content="网页长文、文字与长截图一键变双人对话播客。纯 Node.js 本机运行、BYOK 密钥零落盘、支持断点续跑与同步字幕。">
-  <meta property="og:image" content="./assets/images/og-cover.png">
+  <meta property="og:image" content="https://podcast.ai955.xyz/assets/images/og-cover.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="AI 妙听 · 双人对话播客生成器">
-  <meta name="twitter:description" content="v0.1 便携尝鲜版开源下载 · 把长文变成阿泽与小晓的双人对话播客。">
-  <meta name="twitter:image" content="./assets/images/og-cover.png">
+  <meta name="twitter:description" content="v0.2 便携尝鲜版开源下载 · 把长文变成阿泽与小晓的双人对话播客。">
+  <meta name="twitter:image" content="https://podcast.ai955.xyz/assets/images/og-cover.png">
   <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg">
   <link rel="stylesheet" href="./styles/tokens.css">
   <link rel="stylesheet" href="./styles/main.css">
@@ -33,7 +34,7 @@
           <rect x="43" y="26" width="4.5" height="12" rx="2.25" fill="#1C5A73"/>
         </svg>
         <span class="brand-title">AI 妙听</span>
-        <span class="version-badge" data-config-text="versionBadge">v0.1 便携尝鲜版</span>
+        <span class="version-badge" data-config-text="versionBadge">v0.2 便携尝鲜版</span>
       </a>
 
       <nav class="topbar-nav" aria-label="页面导航">
@@ -58,7 +59,7 @@
         <div class="hero-badges">
           <span class="pill-tag is-accent">
             <span class="pill-dot" aria-hidden="true"></span>
-            <span data-config-text="versionBadge">v0.1 便携尝鲜版</span>
+            <span data-config-text="versionBadge">v0.2 便携尝鲜版</span>
           </span>
           <span class="pill-tag" data-require-node>需本机提前安装 Node.js 22+</span>
           <span class="pill-tag">BYOK 自带密钥 · 零数据库</span>
@@ -81,7 +82,7 @@
                 <polyline points="7 10 12 15 17 10"/>
                 <line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
-              <span id="heroDownloadLabel">下载 macOS 便携包（v0.1）</span>
+              <span id="heroDownloadLabel">下载 macOS 便携包（v0.2）</span>
             </button>
             <button type="button" id="heroSwitchOsBtn" class="btn btn-outline btn-lg">切到 Windows 版</button>
           </div>
@@ -96,7 +97,7 @@
 
         <div class="hero-meta-bar">
           <span data-require-node>跨平台便携压缩包（macOS / Windows 共用同一包，内置各自双击脚本 · 需提前安装 Node.js 22+）</span>
-          <a class="hero-meta-link" data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v0.1.0" target="_blank" rel="noopener noreferrer">GitHub Releases v0.1.0</a>
+          <a class="hero-meta-link" data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v0.2.0" target="_blank" rel="noopener noreferrer">GitHub Releases v0.2.0</a>
           <button type="button" class="hero-meta-link" data-open-download data-highlight-sha="true">核对 SHA256 校验码</button>
         </div>
       </div>
@@ -382,7 +383,7 @@
           <div>
             <span class="section-eyebrow">ONBOARDING · 3 步本机上手</span>
             <h2 id="onboardingHeading" class="section-title">装一次 Node.js 22+，解压即可双击启动</h2>
-            <p class="section-desc" data-require-node>v0.1 便携尝鲜版内置全部 npm 依赖与双端双击脚本，无需克隆仓库或敲命令行，仅需提前在本机安装一次 Node.js 22+。</p>
+            <p class="section-desc" data-require-node>v0.2 便携尝鲜版内置全部 npm 依赖与启停合一双击脚本，无需克隆仓库或敲命令行，仅需提前在本机安装一次 Node.js 22+。</p>
           </div>
 
           <div class="segmented" data-segmented="onboarding-os" role="tablist" aria-label="选择你的电脑系统">
@@ -398,7 +399,7 @@
             <h3 class="step-card-title">确认 Node.js 22+ 并解压便携包</h3>
             <p class="step-card-desc">
               前往 Node.js 官网安装 <strong>22 或更新版本</strong>（一路点下一步即可），随后下载并解压
-              <code>ai-podcast-generator-v0.1.0-portable.zip</code>。
+              <code>ai-podcast-generator-v0.2.0-portable.zip</code>。
             </p>
             <div class="step-inline-actions">
               <button type="button" class="btn btn-primary btn-sm" data-open-download>打开下载弹窗</button>
@@ -411,12 +412,12 @@
             <h3 class="step-card-title">双击根目录启动脚本</h3>
             <div data-os-panel="mac">
               <p class="step-card-desc">
-                macOS 用户直接双击解压目录中的 <code>启动 AI 妙听.command</code>，服务将自动挑选空闲端口并弹出浏览器；用完双击 <code>停止 AI 妙听.command</code> 安全退出。
+                macOS 用户直接双击解压目录中的 <code>AI 妙听.command</code>，服务将自动挑选空闲端口并弹出浏览器；再次双击即可选择「打开网页 / 重启服务 / 停止服务」。
               </p>
             </div>
             <div data-os-panel="win" class="hidden">
               <p class="step-card-desc">
-                Windows 用户直接双击解压目录中的 <code>启动 AI 妙听.bat</code>，服务将自动挑选空闲端口并弹出浏览器；用完双击 <code>停止 AI 妙听.bat</code> 安全退出。
+                Windows 用户直接双击解压目录中的 <code>AI 妙听.bat</code>，服务将自动挑选空闲端口并弹出浏览器；再次双击即可按提示选择「停止服务」。
               </p>
             </div>
           </article>
@@ -449,7 +450,7 @@
               <div class="accordion-body">
                 <div class="accordion-os-card">
                   <h4>macOS：提示“来自身份不明开发者”</h4>
-                  <p>这是未签名本地脚本的常规提示。请<strong>右键点击</strong> <code>启动 AI 妙听.command</code> → 选「打开」；若仍被拦截，前往「系统设置 → 隐私与安全性」点击「仍要打开」，仅第一次需要确认。</p>
+                  <p>这是未签名本地脚本的常规提示。请<strong>右键点击</strong> <code>AI 妙听.command</code> → 选「打开」；若仍被拦截，前往「系统设置 → 隐私与安全性」点击「仍要打开」。启停已合二为一，仅第一次需要授权。</p>
                 </div>
                 <div class="accordion-os-card">
                   <h4>Windows：提示“Windows 已保护你的电脑”</h4>
@@ -469,7 +470,7 @@
           <div>
             <span class="section-eyebrow">PRIVACY &amp; ROADMAP · 隐私边界与演进路线</span>
             <h2 id="roadmapHeading" class="section-title">纯本机可审计架构，每一步规划都透明写清</h2>
-            <p class="section-desc">所有密钥与音频均留在你的电脑里，我们也坦诚列出当前 v0.1 边界与后续演进方向。</p>
+            <p class="section-desc">所有密钥与音频均留在你的电脑里，我们也坦诚列出当前 v0.2 边界与后续演进方向。</p>
           </div>
         </div>
 
@@ -495,12 +496,12 @@
         <div class="roadmap-grid">
           <article class="roadmap-node is-current reveal">
             <span class="roadmap-badge">已上线 · 当前版本</span>
-            <h3>v0.1 便携尝鲜版</h3>
+            <h3>v0.2 便携尝鲜版</h3>
             <ul class="roadmap-list">
-              <li>链接 / 正文 / 长截图导入与润色确认</li>
+              <li>链接 / 正文 / 长截图导入与润色、风格推荐</li>
               <li>7:3 深度主讲与 5:5 轻松对谈双节律</li>
-              <li>单句音频缓存 + 4 阶段断点续跑</li>
-              <li>跨平台便携启动包（需 Node.js 22+）</li>
+              <li>单句音频缓存 + 4 阶段断点续跑 + 年份口语优化</li>
+              <li>启停合一跨平台便携启动包（需 Node.js 22+）</li>
             </ul>
           </article>
 
@@ -533,10 +534,10 @@
         <div class="closing-cta reveal">
           <div>
             <h2>把下一篇长文，留给通勤路上的双人电台</h2>
-            <p>MIT 开源免费 · <code>v0.1 便携尝鲜版</code>（需本机提前安装 Node.js 22+）</p>
+            <p>MIT 开源免费 · <code>v0.2 便携尝鲜版</code>（需本机提前安装 Node.js 22+）</p>
           </div>
           <div class="closing-cta-actions">
-            <button type="button" class="btn btn-primary btn-lg" data-open-download>立即下载 v0.1 便携包</button>
+            <button type="button" class="btn btn-primary btn-lg" data-open-download>立即下载 v0.2 便携包</button>
             <a class="btn btn-outline btn-lg" data-config-link="githubRepo" href="https://github.com/Alex-955/Podcast-Generator" target="_blank" rel="noopener noreferrer">查看 GitHub 源码</a>
           </div>
         </div>
@@ -547,11 +548,11 @@
   <footer class="site-footer">
     <div class="container footer-inner">
       <div>
-        <strong>AI 妙听 · 双人对话播客生成器</strong>（<span data-config-text="versionBadge">v0.1 便携尝鲜版</span>）· MIT License · 需本机安装 Node.js 22+
+        <strong>AI 妙听 · 双人对话播客生成器</strong>（<span data-config-text="versionBadge">v0.2 便携尝鲜版</span>）· MIT License · 需本机安装 Node.js 22+
       </div>
       <div class="footer-links">
         <a data-config-link="githubRepo" href="https://github.com/Alex-955/Podcast-Generator" target="_blank" rel="noopener noreferrer">GitHub 仓库</a>
-        <a data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v0.1.0" target="_blank" rel="noopener noreferrer">Releases v0.1.0</a>
+        <a data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v0.2.0" target="_blank" rel="noopener noreferrer">Releases v0.2.0</a>
         <a href="#onboarding">启动指南</a>
         <a href="#roadmap">路线图</a>
       </div>
@@ -564,8 +565,8 @@
     <div class="modal-sheet">
       <div class="modal-head">
         <div>
-          <h2 id="downloadModalTitle" class="modal-title">下载 AI 妙听（v0.1 便携尝鲜版）</h2>
-          <p class="modal-subtitle">macOS 与 Windows 共用同一跨平台便携包，内附各自双击启动脚本</p>
+          <h2 id="downloadModalTitle" class="modal-title">下载 AI 妙听（v0.2 便携尝鲜版）</h2>
+          <p class="modal-subtitle">macOS 与 Windows 共用同一跨平台便携包，内附启停合一双击脚本</p>
         </div>
         <button type="button" id="downloadModalClose" class="icon-close-btn" aria-label="关闭下载弹窗">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
@@ -582,28 +583,28 @@
       </div>
 
       <div id="modalNodeNotice" class="modal-notice" data-require-node>
-        提示：v0.1 便携尝鲜版需本机提前安装 <strong>Node.js 22 或更新版本</strong>（官网下载安装包一路点击下一步即可）。
+        提示：v0.2 便携尝鲜版需本机提前安装 <strong>Node.js 22 或更新版本</strong>（官网下载安装包一路点击下一步即可）。
       </div>
 
       <div class="modal-os-hint" data-modal-os-hint="mac">
-        <strong>macOS 启动方式：</strong>解压后双击根目录 <code>启动 AI 妙听.command</code>；若首次遇身份不明开发者提示，右键文件选「打开」一次即可。
+        <strong>macOS 启动方式：</strong>解压后双击根目录 <code>AI 妙听.command</code>（启停合一）；若首次遇身份不明开发者提示，右键文件选「打开」一次即可。
       </div>
 
       <div class="modal-os-hint hidden" data-modal-os-hint="win">
-        <strong>Windows 启动方式：</strong>解压后双击根目录 <code>启动 AI 妙听.bat</code>；若首次遇 SmartScreen 提示，点击「更多信息 → 仍要运行」即可。
+        <strong>Windows 启动方式：</strong>解压后双击根目录 <code>AI 妙听.bat</code>（启停合一）；若首次遇 SmartScreen 提示，点击「更多信息 → 仍要运行」即可。
       </div>
 
       <div class="modal-file-row">
         <span>发行文件名：</span>
-        <code id="modalFilename">ai-podcast-generator-v0.1.0-portable.zip</code>
+        <code id="modalFilename">ai-podcast-generator-v0.2.0-portable.zip</code>
       </div>
 
       <div class="modal-download-actions">
-        <a id="modalDirectDownloadBtn" class="btn btn-primary" href="https://github.com/Alex-955/Podcast-Generator/releases/download/v0.1.0/ai-podcast-generator-v0.1.0-portable.zip" download="ai-podcast-generator-v0.1.0-portable.zip">
+        <a id="modalDirectDownloadBtn" class="btn btn-primary" href="/downloads/ai-podcast-generator-v0.2.0-portable.zip" download="ai-podcast-generator-v0.2.0-portable.zip">
           直接下载便携包 (.zip)
         </a>
-        <a id="modalGithubDownloadBtn" class="btn btn-outline" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v0.1.0" target="_blank" rel="noopener noreferrer">
-          前往 GitHub Releases
+        <a id="modalGithubDownloadBtn" class="btn btn-outline" href="https://github.com/Alex-955/Podcast-Generator/releases/download/v0.2.0/ai-podcast-generator-v0.2.0-portable.zip" target="_blank" rel="noopener noreferrer">
+          GitHub Releases 备用下载
         </a>
       </div>
 
@@ -612,7 +613,7 @@
           <span>SHA256 完整性校验值</span>
           <button type="button" id="btnCopySha" class="btn btn-subtle btn-sm">复制 SHA256</button>
         </div>
-        <code id="modalShaCode" class="sha-code">cf6c8889d1b3dd3a74201c9258bb580abda206ff583cf09db2d0d5ee771f3222</code>
+        <code id="modalShaCode" class="sha-code">3b7b8ddb627d8be55c2c9872e568a74f71c13f3015700ea29d5d4cc48ea0aab5</code>
       </div>
     </div>
   </div>

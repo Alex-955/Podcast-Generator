@@ -2,11 +2,11 @@
   'use strict';
 
   const FALLBACK_CONFIG = {
-    filename: 'ai-podcast-generator-v0.1.0-portable.zip',
-    directUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/download/v0.1.0/ai-podcast-generator-v0.1.0-portable.zip',
-    githubReleasesUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/tag/v0.1.0',
+    filename: 'ai-podcast-generator-v0.2.0-portable.zip',
+    directUrl: '/downloads/ai-podcast-generator-v0.2.0-portable.zip',
+    githubReleasesUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/tag/v0.2.0',
     githubRepoUrl: 'https://github.com/Alex-955/Podcast-Generator',
-    sha256: 'cf6c8889d1b3dd3a74201c9258bb580abda206ff583cf09db2d0d5ee771f3222',
+    sha256: '3b7b8ddb627d8be55c2c9872e568a74f71c13f3015700ea29d5d4cc48ea0aab5',
     requireNodeNotice: true,
   };
 
