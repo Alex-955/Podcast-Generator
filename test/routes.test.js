@@ -561,7 +561,7 @@ test('调用方主模型或独立识图 Key 缺少各自接口地址时返回 40
   const tasksDir = path.join(publicDir, 'custom-data', 'tasks');
   const filesBefore = fs.existsSync(tasksDir) ? fs.readdirSync(tasksDir) : [];
   const article = { mode: 'text', apiKey, content: '正文', images: ['data:image/png;base64,YQ=='] };
-  for (const route of ['llm/models', 'llm/test', 'polish-text', 'extract-image', 'tasks']) {
+  for (const route of ['llm/models', 'llm/test', 'polish-text', 'recommend-style', 'extract-image', 'tasks']) {
     const response = await request(route, 400, article);
     assert.equal(response.error, '填写自定义 API Key 时，请同时填写对应的接口地址（Base URL）');
   }
@@ -660,8 +660,30 @@ test('正文润色路由返回脱敏结果，并在无正文时不调用上游',
   assert.equal(llmRequest.mock.callCount(), 1);
 });
 
-test('模型列表和润色路由在客户端断开时取消上游请求', { timeout: 10000 }, async () => {
-  for (const route of ['llm/models', 'polish-text']) {
+test('推荐风格路由返回脱敏结果，无效输入或上游风格分别返回 400 和 502', async t => {
+  const baseURL = 'https://offline-model.example';
+  let style = 'dialogue';
+  llmRequest = t.mock.fn(async (url, options) => {
+    assert.equal(url, baseURL + '/v1/chat/completions');
+    const body = JSON.parse(options.body);
+    assert.equal(body.max_tokens, 160);
+    return response(completion(JSON.stringify({ style, reason: '适合聊天 ' + apiKey + ' /Users/private/file' })));
+  });
+  const body = { apiKey, baseURL, title: '原始标题', content: '这里是推荐测试用的正文' };
+  assert.deepEqual(await request('recommend-style', 200, body), {
+    success: true, data: { style: 'dialogue', reason: '适合聊天 *** ***' },
+  });
+  await request('recommend-style', 400, { ...body, content: '' });
+  assert.equal(llmRequest.mock.callCount(), 1);
+  style = apiKey;
+  assert.deepEqual(await request('recommend-style', 502, body), {
+    success: false, error: '风格推荐接口返回了无效风格',
+  });
+  assert.equal(llmRequest.mock.callCount(), 2);
+});
+
+test('模型列表、润色和推荐风格路由在客户端断开时取消上游请求', { timeout: 10000 }, async () => {
+  for (const route of ['llm/models', 'polish-text', 'recommend-style']) {
     const client = new AbortController();
     let ready, stopped;
     const started = new Promise(resolve => { ready = resolve; });

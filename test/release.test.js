@@ -16,16 +16,20 @@ const { version } = require('../package.json');
 
 const PROJECT = path.resolve(__dirname, '..');
 const SOURCE_FILES = [
-  'server.js', 'package.json', 'package-lock.json', 'README.md', 'ROADMAP.md', 'LICENSE', '.env.example', 'src',
-  'scripts/start-portable.js', 'scripts/build-mac-launcher.sh', 'scripts/launchers',
+  'server.js', 'package.json', 'package-lock.json', 'README.md', 'LICENSE', '.env.example', 'src',
+  'scripts/start-portable.js', 'scripts/build-mac-launcher.sh',
+  'scripts/launchers/macos.command', 'scripts/launchers/windows.bat',
   ...['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js'].map(file => 'public/' + file),
 ];
+const INTERNAL_FILES = ['ROADMAP.md', 'Plan.md', 'AGENTS.md', 'plan/draft.md', 'website/index.html'];
 const PRIVATE_FILES = [
   '.env', '.env.local', '.git/config', '.DS_Store', 'server.log', 'data/server.pid', 'data/tasks/1.json',
   'data/tts-cache/cache.mp3', 'public/podcasts/secret-ep/full_podcast.mp3',
   'AI 妙听.app/Contents/sample', '启动 AI 妙听.app/Contents/sample',
   'test/private-fixture.js', 'src/private-notes.txt', 'public/private.html',
+  ...INTERNAL_FILES,
 ];
+const ROOT_LAUNCHERS = ['AI 妙听.bat', 'AI 妙听.command'];
 
 async function removeDirWithBudget(target, { budgetMs = 8000, delayMs = 150 } = {}) {
   const deadline = performance.now() + budgetMs;
@@ -256,10 +260,10 @@ test('白名单从混有个人数据的源码生成干净目录，暂存服务�
   assert.deepEqual(fs.readdirSync(path.join(stageDir, 'public/podcasts')), ['.gitkeep']);
   assert.equal(fs.statSync(path.join(stageDir, 'public/podcasts/.gitkeep')).size, 0);
   assert.equal(fs.statSync(path.join(stageDir, 'data/.gitkeep')).size, 0);
-  for (const file of ['LICENSE', '.env.example', '启动 AI 妙听.bat', '停止 AI 妙听.bat',
-    '启动 AI 妙听.command', '停止 AI 妙听.command']) {
+  for (const file of ['LICENSE', '.env.example']) {
     assert.ok(fs.existsSync(path.join(stageDir, file)), file);
   }
+  assert.deepEqual(fs.readdirSync(stageDir).filter(file => /\.(bat|command)$/.test(file)).sort(), ROOT_LAUNCHERS);
   assert.equal(fs.existsSync(path.join(stageDir, 'node_modules')), false);
   await verifyStagedServer(stageDir, root, { nodePath: path.join(PROJECT, 'node_modules') });
 });
@@ -284,21 +288,22 @@ test('发行门禁识别禁运路径、个人主目录、私钥和 API 密钥，
   write(stageDir, 'src/key.js', 'const secret = "' + key + '";\n');
   write(stageDir, 'src/privateKey.js', '-----BEGIN OPENSSH PRIVATE KEY-----\n');
   write(stageDir, 'node_modules/pkg/key.pem', '-----BEGIN PRIVATE KEY-----\n');
-  write(stageDir, '启动 AI 妙听.bat', '@echo off\n');
-  write(stageDir, '停止 AI 妙听.command', '#!/bin/bash\r\n');
+  for (const file of INTERNAL_FILES) write(stageDir, file, 'offline internal fixture');
+  for (const file of ['AI 妙听.bat', 'scripts/launchers/windows.bat']) write(stageDir, file, '@echo off\n');
+  for (const file of ['AI 妙听.command', 'scripts/launchers/macos.command']) write(stageDir, file, '#!/bin/bash\r\n');
   fs.unlinkSync(path.join(stageDir, 'LICENSE'));
 
   assert.throws(() => runReleaseSecurityGate(stageDir), error => {
-    for (const bundle of ['AI 妙听.app', '启动 AI 妙听.app']) {
-      assert.ok(error.issues.includes(bundle + ' 属于禁运路径'), bundle);
+    for (const file of ['AI 妙听.app', '启动 AI 妙听.app', 'ROADMAP.md', 'Plan.md', 'AGENTS.md', 'plan', 'website']) {
+      assert.ok(error.issues.includes(file + ' 属于禁运路径'), file);
     }
     for (const detail of ['.env 属于禁运路径', 'data/tasks 属于禁运路径', 'data/notes.txt 属于禁运路径',
       '.env.example:2 凭据字段 VOLCENGINE_TTS_ACCESS_KEY 必须为空', 'node_modules/pkg/key.pem:1 包含私钥头',
       'public/podcasts/unexpected.mp3 属于禁运路径', 'src/path.js:1 包含本机绝对路径',
       'src/linuxHome.js:1 包含本机绝对路径', 'src/windowsHome.js:1 包含本机绝对路径',
       'src/windowsPath.js:1 包含本机绝对路径', 'src/key.js:1 包含疑似 API 密钥',
-      'src/privateKey.js:1 包含私钥头', '启动 AI 妙听.bat 必须使用 CRLF',
-      '停止 AI 妙听.command 必须使用 LF', '缺少必需文件：LICENSE']) {
+      'src/privateKey.js:1 包含私钥头', 'AI 妙听.bat 必须使用 CRLF', 'scripts/launchers/windows.bat 必须使用 CRLF',
+      'AI 妙听.command 必须使用 LF', 'scripts/launchers/macos.command 必须使用 LF', '缺少必需文件：LICENSE']) {
       assert.ok(error.issues.some(issue => issue.includes(detail)), detail);
     }
     assert.doesNotMatch(error.message, /alice|Offline User|sk-A{30}|=abc|routes\.js|EXAMPLE_SECRET/);
@@ -445,12 +450,11 @@ test('真实便携 ZIP 和 tar.gz 包含白名单目录、匹配 SHA-256 并带�
   }
   assert.ok(![...tar.keys()].some(name => name === prefix + '.env' ||
     name.startsWith(prefix + 'public/podcasts/secret') || name.startsWith(prefix + 'test/')));
-  const launchers = ['启动 AI 妙听.bat', '停止 AI 妙听.bat', '启动 AI 妙听.command', '停止 AI 妙听.command'];
-  for (const launcher of launchers) {
+  for (const launcher of [...ROOT_LAUNCHERS, 'scripts/launchers/windows.bat', 'scripts/launchers/macos.command']) {
     const mode = launcher.endsWith('.command') ? 0o755 : 0o644;
     assert.equal(zip.get(prefix + launcher), 0o100000 | mode, launcher);
     assert.equal(tar.get(prefix + launcher).mode, mode, launcher);
-    assert.equal(tar.get(prefix + launcher).pax, true, launcher);
+    if (ROOT_LAUNCHERS.includes(launcher)) assert.equal(tar.get(prefix + launcher).pax, true, launcher);
   }
   assert.equal(zip.get(prefix + 'scripts/build-mac-launcher.sh'), 0o100755);
   assert.equal(zip.get(prefix + 'server.js'), 0o100644);
@@ -463,7 +467,7 @@ test('真实便携 ZIP 和 tar.gz 包含白名单目录、匹配 SHA-256 并带�
       '    launchers = {name for name in zf.namelist() if name.count("/") == 1 and name.endswith((".bat", ".command"))}',
       '    assert launchers == set(sys.argv[2:])',
     ].join('\n');
-    const result = spawnSync('python3', ['-c', verify, archives[0], ...launchers.map(file => prefix + file)], {
+    const result = spawnSync('python3', ['-c', verify, archives[0], ...ROOT_LAUNCHERS.map(file => prefix + file)], {
       shell: false, windowsHide: true, encoding: 'utf8',
     });
     assert.ifError(result.error);

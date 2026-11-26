@@ -11,7 +11,7 @@ const audio = makeMp3(10);
 test('MiniMax 发送模型、音色、语速与认证头并原子写入 hex 音频', async t => {
   const { endpoint, outputPath, requests } = await httpTtsFixture(t, res =>
     res.end(JSON.stringify({ base_resp: { status_code: 0 }, data: { audio: audio.toString('hex') } })));
-  for (const [rate, speed] of [['+10%', 1.1], ['+500%', 2], ['-300%', 0.5]]) {
+  for (const [rate, speed] of [['-10%', 0.9], ['+0%', 1], ['+10%', 1.1], ['+500%', 2], ['-300%', 0.5]]) {
     const result = await minimaxProvider.synthesizeToFile({ text: '测试', rate, outputPath, adapterOptions: { endpoint, apiKey, model: 'speech-02-turbo' } });
     assert.deepEqual(result, { bytes: audio.length, duration: 0.24 });
     assert.deepEqual(fs.readFileSync(outputPath), audio);
@@ -27,6 +27,7 @@ test('MiniMax 使用新版默认模型与音色，情绪只发送受支持的值
   const { endpoint, outputPath, requests } = await httpTtsFixture(t, res =>
     res.end(JSON.stringify({ base_resp: { status_code: 0 }, data: { audio: audio.toString('hex') } })));
   assert.equal(minimaxProvider.model, 'speech-2.8-turbo');
+  assert.equal(minimaxProvider.toneVersion, 'tone-v3');
   assert.deepEqual(minimaxProvider.defaultVoices, { 阿泽: 'male-qn-jingying', 小晓: 'Chinese (Mandarin)_Warm_Bestie' });
   assert.equal(minimaxProvider.minRequestIntervalMs, 2600);
   assert.equal(minimaxProvider.getMinRequestIntervalMs({ endpoint: DEFAULT_MINIMAX_ENDPOINT }), 2600);
@@ -35,8 +36,9 @@ test('MiniMax 使用新版默认模型与音色，情绪只发送受支持的值
   assert.equal(createMinimaxProvider({ minRequestIntervalMs: 0 }).getMinRequestIntervalMs(), 0);
   for (const [emotion, expected] of [
     [' 笑意 ', 'happy'], ['开心', 'happy'], ['喜悦', 'happy'], ['欢乐', 'happy'],
-    ['震惊', 'neutral'], ['惊讶', 'neutral'], ['兴奋', 'neutral'], ['SURPRISED', 'neutral'],
-    ['低落', 'sad'], ['愤怒', 'angry'], ['紧张', 'fearful'], ['嫌弃', 'disgusted'], ['追问', 'neutral'],
+    ['兴奋', 'happy'], ['平静', 'neutral'], ['客观', 'neutral'],
+    ['低落', 'sad'], ['愤怒', 'angry'], ['紧张', 'fearful'], ['嫌弃', 'disgusted'],
+    ...'好奇 疑惑 追问 感慨 温暖 温和 认真 肯定 笃定 分析 总结 惊讶 震惊 SURPRISED'.split(' ').map(tag => [tag, undefined]),
     ['HAPPY', 'happy'], ['happy', 'happy'], ['', undefined], ['未知', undefined], [undefined, undefined],
   ]) {
     await minimaxProvider.synthesizeToFile({ text: '测试', emotion, outputPath, adapterOptions: { endpoint, apiKey } });
@@ -46,6 +48,17 @@ test('MiniMax 使用新版默认模型与音色，情绪只发送受支持的值
     assert.equal(Object.hasOwn(body.voice_setting, 'emotion'), expected !== undefined);
     assert.equal(body.voice_setting.emotion, expected);
   }
+});
+
+test('MiniMax 请求按台词有选择地发送多音词发音字典', async t => {
+  const { endpoint, outputPath, requests } = await httpTtsFixture(t, res =>
+    res.end(JSON.stringify({ base_resp: { status_code: 0 }, data: { audio: audio.toString('hex') } })));
+  const text = '我们重新处理，再让主角复述。';
+  await minimaxProvider.synthesizeToFile({ text, outputPath, adapterOptions: { endpoint, apiKey } });
+  assert.equal(requests[0].body.text, text);
+  assert.deepEqual(requests[0].body.pronunciation_dict, {
+    tone: ['重新/(chong2)(xin1)', '处理/(chu3)(li3)', '主角/(zhu3)(jue2)'],
+  });
 });
 
 test('MiniMax 拒绝错误状态、无效 JSON、损坏音频，保留已有文件', async t => {

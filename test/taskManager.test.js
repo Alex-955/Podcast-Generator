@@ -1200,7 +1200,7 @@ test('同一家服务换模型或换音色时清理工作目录，补凭据续�
   const checkpoint = path.join(dir, TTS_CHECKPOINT_FILENAME);
   const status = target => waitFor(() => manager.getTask(id), task => task.status === target);
   await status('failed');
-  assert.equal(JSON.parse(fs.readFileSync(checkpoint)).toneVersion, 'tone-v2');
+  assert.equal(JSON.parse(fs.readFileSync(checkpoint)).toneVersion, 'tone-v3');
   for (const [change, shouldClear] of [
     [{}, false],
     [{ model: 'speech-02-turbo' }, true],
@@ -1220,6 +1220,53 @@ test('同一家服务换模型或换音色时清理工作目录，补凭据续�
   assert.equal(done.progress.cachedSegments, 3);
   assert.equal(calls.length, 7);
   assert.equal(fs.existsSync(checkpoint), false);
+});
+
+test('新任务默认舒缓，旧任务未记录语速按标准续跑，切换语速才清理片段', async t => {
+  const calls = [];
+  const provider = { ...getTtsProvider('edge'), synthesizeToFile({ rate, outputPath }) {
+    calls.push(rate);
+    const audio = makeMp3(2);
+    fs.writeFileSync(outputPath, audio);
+    return { bytes: audio.length, duration: 0.048 };
+  } };
+  let canMerge = false;
+  const { manager, config } = setup(t, { ttsProvider: provider, audioMerger(...args) {
+    if (!canMerge) throw new Error('模拟合并中断');
+    return require('../src/services/audioMerger').concatenateAudioFiles(...args);
+  } });
+  const invalid = { statusCode: 400, message: /语速仅支持/ };
+  assert.throws(() => manager.createTask({ ...payload, tts: { speechSpeed: 'fast' } }), invalid);
+  const { id, speechSpeed } = manager.createTask(payload);
+  assert.equal(speechSpeed, 'relaxed');
+  const work = path.join(config.podcastsDir, id);
+  const recordPath = path.join(config.tasksDir, id + '.json');
+  const readRecord = () => JSON.parse(fs.readFileSync(recordPath));
+  const status = target => waitFor(() => manager.getTask(id), task => task.status === target);
+  await status('failed');
+  assert.equal(readRecord().speechSpeed, 'relaxed');
+  assert.deepEqual(calls, Array(3).fill('-8%'));
+  assert.throws(() => manager.resumeTask(id, { tts: { speechSpeed: null } }), invalid);
+  assert.equal(fs.readdirSync(work).length, 3);
+
+  assert.equal(manager.resumeTask(id, { tts: { speechSpeed: 'standard' } }).speechSpeed, 'standard');
+  assert.deepEqual(fs.readdirSync(work), []);
+  await status('failed');
+  assert.deepEqual(calls, [...Array(3).fill('-8%'), ...Array(3).fill('+0%')]);
+  const legacyRecord = readRecord();
+  delete legacyRecord.speechSpeed;
+  fs.writeFileSync(recordPath, JSON.stringify(legacyRecord));
+  assert.equal(manager.getTask(id).speechSpeed, 'standard');
+  canMerge = true;
+  assert.equal(manager.resumeTask(id).speechSpeed, 'standard');
+  assert.equal(fs.readdirSync(work).length, 3);
+  const done = await status('completed');
+  assert.equal(calls.length, 6);
+  assert.equal(done.progress.cachedSegments, 3);
+  for (const result of [done, readRecord(), manager.getPodcast(id), manager.listPodcasts().items[0],
+    JSON.parse(fs.readFileSync(path.join(work, 'meta.json')))]) {
+    assert.equal(result.speechSpeed, 'standard');
+  }
 });
 
 test('触发限流时实时保存重试进度，恢复合成后完成任务', async t => {

@@ -19,6 +19,8 @@ const { version } = require('../package.json');
 
 const PROJECT = path.resolve(__dirname, '..');
 const LAUNCHER = path.join(PROJECT, 'scripts/start-portable.js');
+const MAC_COMMAND = 'scripts/launchers/macos.command';
+const WINDOWS_BATCH = 'scripts/launchers/windows.bat';
 const exec = promisify(execFile);
 
 async function removeDirWithBudget(target, { budgetMs = 8000, delayMs = 150 } = {}) {
@@ -450,23 +452,129 @@ test('活进程持有的锁超龄后仍不可回收，超时提示实际数据�
   }
 });
 
-test('四个原生启动器换行与权限，三份 Shell 脚本语法检查', () => {
+function nativeLauncherFixture(t) {
+  const windows = process.platform === 'win32';
+  const source = windows ? WINDOWS_BATCH : MAC_COMMAND;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'podcast native launcher '));
+  t.after(() => removeDirWithBudget(root));
+  const nested = path.join(root, source);
+  const rootLauncher = path.join(root, 'AI 妙听' + path.extname(source));
+  const bin = path.join(root, 'bin');
+  const log = path.join(root, 'launcher.log');
+  const expressManifest = path.join(root, 'node_modules/express/package.json');
+  fs.mkdirSync(path.dirname(nested), { recursive: true });
+  fs.mkdirSync(bin);
+  fs.copyFileSync(path.join(PROJECT, source), nested);
+  fs.copyFileSync(path.join(PROJECT, source), rootLauncher);
+  const recorder = [
+    'const fs = require("node:fs");',
+    'const args = process.argv.slice(2);',
+    'fs.appendFileSync(process.env.LAUNCHER_TEST_LOG, JSON.stringify(args) + "\\n");',
+  ].join('\n');
+  fs.writeFileSync(path.join(root, 'scripts/start-portable.js'), recorder + '\n' + [
+    'if (args.includes("--status")) process.exitCode = Number(process.env.LAUNCHER_TEST_STATUS);',
+    'else if (args.includes("--stop")) process.exitCode = Number(process.env.LAUNCHER_TEST_STOP);',
+  ].join('\n'));
+  const npm = recorder + '\n' + [
+    'fs.mkdirSync("node_modules/express", { recursive: true });',
+    'fs.writeFileSync("node_modules/express/package.json", "{}");',
+  ].join('\n');
+  if (windows) {
+    fs.writeFileSync(path.join(bin, 'npm.js'), npm);
+    fs.writeFileSync(path.join(bin, 'npm.cmd'), '@echo off\r\nnode "%~dp0npm.js" %*\r\n');
+  } else {
+    fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+    fs.writeFileSync(path.join(bin, 'npm'), '#!/usr/bin/env node\n' + npm, { mode: 0o755 });
+  }
+  return function run(args, { status = 0, stop = 0, input = '', packaged = false, withDeps = false } = {}) {
+    fs.writeFileSync(log, '');
+    if (withDeps) {
+      fs.mkdirSync(path.dirname(expressManifest), { recursive: true });
+      fs.writeFileSync(expressManifest, '{}');
+    } else {
+      fs.rmSync(expressManifest, { force: true });
+    }
+    const filename = packaged ? rootLauncher : nested;
+    const program = windows ? 'cmd.exe' : '/bin/bash';
+    const invocation = windows
+      ? ['/d', '/s', '/c', `"${[filename, ...args].map(arg => `"${arg}"`).join(' ')}"`]
+      : [filename, ...args];
+    const result = spawnSync(program, invocation, {
+      cwd: bin, shell: false, encoding: 'utf8', timeout: 5000, windowsVerbatimArguments: windows,
+      input: windows ? input.replace(/\n/g, '\r\n') : input,
+      env: {
+        ...process.env, CI: 'true',
+        PATH: [bin, path.dirname(process.execPath), process.env.PATH].join(path.delimiter),
+        LAUNCHER_TEST_LOG: log, LAUNCHER_TEST_STATUS: String(status), LAUNCHER_TEST_STOP: String(stop),
+      },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.signal, null);
+    const calls = fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+    return { ...result, calls };
+  };
+}
+
+test('统一启动器原样转发 CLI 参数，状态和停止跳过依赖安装与交互', t => {
+  const run = nativeLauncherFixture(t);
+  for (const status of [0, 1, 2]) {
+    const args = ['--data-dir', 'isolated state', '--status'];
+    const result = run(args, { status, packaged: true });
+    assert.equal(result.status, status, result.stderr);
+    assert.deepEqual(result.calls, [args]);
+    assert.doesNotMatch(result.stdout, /请选择操作/);
+  }
+  const stopped = run(['--stop'], { stop: 7 });
+  assert.equal(stopped.status, 7, stopped.stderr);
+  assert.deepEqual(stopped.calls, [['--stop']]);
+  assert.doesNotMatch(stopped.stdout, /请选择操作/);
+
+  const args = ['--open', '--lan', '--podcasts-dir', 'isolated audio'];
+  const opened = run(args);
+  assert.equal(opened.status, 0, opened.stderr);
+  assert.deepEqual(opened.calls, [['install', '--omit=dev'], args]);
+  assert.doesNotMatch(opened.stdout, /请选择操作/);
+});
+
+test('统一启动器无参数时按服务状态启动、打开网页、停止或重启', t => {
+  const run = nativeLauncherFixture(t);
+  const scenarios = [
+    { status: 1, packaged: true, calls: [['--status'], ['install', '--omit=dev'], ['--open']] },
+    { status: 1, withDeps: true, calls: [['--status'], ['--open']] },
+    { status: 0, input: '\n', withDeps: true, calls: [['--status'], ['--open']] },
+    { status: 0, input: '2\n', calls: [['--status'], ['--stop']] },
+    { status: 0, input: '3\n', withDeps: true, calls: [['--status'], ['--stop'], ['--open']] },
+    { status: 2, input: '1\n', calls: [['--status']] },
+    { status: 2, input: '2\n', calls: [['--status'], ['--stop']] },
+    { status: 2, input: '3\n', calls: [['--status'], ['--stop'], ['install', '--omit=dev'], ['--open']] },
+    { status: 2, input: '3\n', stop: 7, calls: [['--status'], ['--stop']] },
+    { status: 0, input: '"&echo MENU_INJECTION_MARKER&rem "\n', calls: [['--status']] },
+  ];
+  for (const scenario of scenarios) {
+    const result = run([], scenario);
+    assert.equal(result.status, scenario.stop ?? 0, result.stderr);
+    assert.deepEqual(result.calls, scenario.calls, JSON.stringify(scenario));
+    if (scenario.status === 0) assert.match(result.stdout, /\[1\] 打开网页/);
+    else assert.doesNotMatch(result.stdout, /\[1\]/);
+    if (scenario.status === 2) assert.match(result.stdout, /\[3\] 重启服务/);
+    assert.doesNotMatch(result.stdout, /MENU_INJECTION_MARKER/);
+  }
+});
+
+test('两个原生启动器换行与权限，Shell 语法及 macOS 应用查找路径检查', () => {
   const windowsBash = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'bin', 'bash.exe');
   const bash = process.platform === 'win32' && fs.existsSync(windowsBash) ? windowsBash : 'bash';
-  const files = ['scripts/build-mac-launcher.sh'];
-  for (const action of ['start', 'stop']) {
-    const bat = fs.readFileSync(path.join(PROJECT, 'scripts/launchers/' + action + '-windows.bat'), 'utf8');
-    assert.ok(bat.startsWith('@echo off\r\nchcp 65001 >nul\r\n'));
-    assert.doesNotMatch(bat.replace(/\r\n/g, ''), /[\r\n]/);
-    const command = 'scripts/launchers/' + action + '-macos.command';
-    const filename = path.join(PROJECT, command);
-    const shell = fs.readFileSync(filename, 'utf8');
-    assert.match(shell, /^#!\/bin\/bash\n/);
-    assert.doesNotMatch(shell, /\r/);
-    if (process.platform !== 'win32') assert.equal(fs.statSync(filename).mode & 0o777, 0o755);
-    files.push(command);
-  }
-  for (const file of files) {
+  const builder = 'scripts/build-mac-launcher.sh';
+  const bat = fs.readFileSync(path.join(PROJECT, WINDOWS_BATCH), 'utf8');
+  assert.ok(bat.startsWith('@echo off\r\nchcp 65001 >nul\r\n'));
+  assert.doesNotMatch(bat.replace(/\r\n/g, ''), /[\r\n]/);
+  const filename = path.join(PROJECT, MAC_COMMAND);
+  const shell = fs.readFileSync(filename, 'utf8');
+  assert.match(shell, /^#!\/bin\/bash\n/);
+  assert.doesNotMatch(shell, /\r/);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(filename).mode & 0o777, 0o755);
+  assert.match(fs.readFileSync(path.join(PROJECT, builder), 'utf8'), /dirPath & "\/scripts\/launchers\/macos\.command"/);
+  for (const file of [builder, MAC_COMMAND]) {
     const result = spawnSync(bash, ['-n', file], { cwd: PROJECT, shell: false, encoding: 'utf8' });
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stderr);

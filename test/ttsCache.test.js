@@ -8,6 +8,7 @@ const { buildCacheKey, createTtsCache, speechScopeHash } = require('../src/servi
 const { normalizeSpeechText, synthesizeSentence, synthesizeDialogueScript, DEFAULT_VOICES, TTS_CHECKPOINT_FILENAME } = require('../src/services/ttsService');
 const { makeMp3 } = require('./helpers/mp3Fixtures');
 const { getMp3DurationSeconds } = require('../src/services/mp3Utils');
+const { resolveSpeechRate } = require('../src/services/ttsProvider');
 
 const input = { provider: 'edge', model: 'v1', voice: 'voice', rate: '+0%', pitch: '+0Hz', text: '早上好' };
 const key = buildCacheKey(input);
@@ -17,6 +18,34 @@ test('缓存键稳定且区分所有影响声音的字段', () => {
   assert.equal(buildCacheKey({ ...input, text: ' 早上好 ' }), key);
   for (const field of Object.keys(input)) {
     assert.notEqual(buildCacheKey({ ...input, [field]: input[field] + '2' }), key);
+  }
+});
+
+test('各厂商的任务语速进入原生请求和缓存键，显式台词速率优先', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tts-rate-cache-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const cache = createTtsCache(path.join(root, 'cache'));
+  const audio = makeMp3(2);
+  const dialogue = [{ speaker: '阿泽', text: '常见的 1080p 视频' }, { speaker: '阿泽', text: '特别的台词', rate: '+8%' }];
+  for (const [id, expectedRelaxedRate] of [['edge', '-8%'], ['minimax', '-10%'], ['volcengine', '-10%']]) {
+    const calls = [];
+    const provider = { id, model: 'test', defaultVoices: DEFAULT_VOICES, synthesizeToFile({ text, rate, outputPath }) {
+      calls.push([text, rate]);
+      fs.writeFileSync(outputPath, audio);
+      return { bytes: audio.length, duration: 0.048 };
+    } };
+    for (const [index, [speed, hits]] of [['relaxed', 0], ['standard', 1], ['relaxed', 2], ['standard', 2]].entries()) {
+      const rate = resolveSpeechRate(id, speed);
+      const workDir = path.join(root, id, String(index));
+      const result = await synthesizeDialogueScript(dialogue, workDir, null, { provider, rate, cache });
+      assert.equal(result.cachedSegments, hits);
+      assert.deepEqual(result.dialogue.map(line => line.text), dialogue.map(line => line.text));
+      const key = buildCacheKey({ provider: id, model: 'test', voice: DEFAULT_VOICES.阿泽, rate, text: '常见的 一千零八十P 视频' });
+      assert.equal(fs.existsSync(cache.getPath(key)), true);
+    }
+    assert.deepEqual(calls, [
+      ['常见的 一千零八十P 视频', expectedRelaxedRate], ['特别的台词', '+8%'], ['常见的 一千零八十P 视频', '+0%'],
+    ]);
   }
 });
 
@@ -204,7 +233,7 @@ test('新版语气绕过旧缓存和断点，匹配分段键后才复用新版�
     const credentials = { apiKey: 'offline-voice-key' };
     const legacyScope = speechScopeHash(endpoint, credentials, [voice], provider.availableVoices, endpoint);
     const currentScope = provider.getScopeHash([voice], credentials);
-    assert.equal(provider.toneVersion, 'tone-v2');
+    assert.equal(provider.toneVersion, provider.id === 'minimax' ? 'tone-v3' : 'tone-v2');
     assert.notEqual(currentScope, legacyScope);
     const oldKey = buildCacheKey({ ...settings, scopeHash: legacyScope });
     const newKey = buildCacheKey({ ...settings, scopeHash: currentScope, toneVersion: provider.toneVersion });
@@ -225,12 +254,12 @@ test('新版语气绕过旧缓存和断点，匹配分段键后才复用新版�
     assert.deepEqual(fs.readFileSync(segment), newAudio);
     assert.deepEqual(fs.readFileSync(cache.getPath(oldKey)), oldAudio);
     assert.deepEqual(fs.readFileSync(cache.getPath(newKey)), newAudio);
-    assert.deepEqual(JSON.parse(fs.readFileSync(checkpointFile)), { toneVersion: 'tone-v2', segments: { 0: newKey } });
+    assert.deepEqual(JSON.parse(fs.readFileSync(checkpointFile)), { toneVersion: provider.toneVersion, segments: { 0: newKey } });
 
     const resumeWithoutCache = () => synthesizeDialogueScript(dialogue, workDir, null, { provider, adapterOptions: credentials });
     assert.equal((await resumeWithoutCache()).reusedSegments, 1);
     fs.writeFileSync(segment, oldAudio);
-    fs.writeFileSync(checkpointFile, JSON.stringify({ toneVersion: 'tone-v2', segments: { 0: oldKey } }));
+    fs.writeFileSync(checkpointFile, JSON.stringify({ toneVersion: provider.toneVersion, segments: { 0: oldKey } }));
     assert.equal((await resumeWithoutCache()).reusedSegments, 0);
     assert.deepEqual(fs.readFileSync(segment), newAudio);
     assert.deepEqual(calls, [[settings.text, settings.emotion], [settings.text, settings.emotion]]);
