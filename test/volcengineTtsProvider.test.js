@@ -32,6 +32,18 @@ test('豆包按认证模式发送请求，解码跨包、多行与结尾残行',
   assert.notEqual(requests[0].headers['x-api-request-id'], requests[1].headers['x-api-request-id']);
 });
 
+test('豆包使用原生语速，零值省略，并将自定义速率限制在 -50 到 100', async t => {
+  const { endpoint, outputPath, requests } = await httpTtsFixture(t, res =>
+    res.end(JSON.stringify({ code: 20000000, data: audio.toString('base64') })));
+  for (const [rate, expected] of [['-10%', -10], ['+0%', undefined], [undefined, undefined], ['invalid', undefined],
+    ['-900%', -50], ['+900%', 100]]) {
+    await provider.synthesizeToFile({ text: '台词', rate, outputPath, adapterOptions: { endpoint, apiKey } });
+    const params = requests.at(-1).body.req_params.audio_params;
+    assert.equal(params.speech_rate, expected);
+    assert.equal(Object.hasOwn(params, 'speech_rate'), expected !== undefined);
+  }
+});
+
 test('豆包 NDJSON 即使已有音频也拒绝错误行、损坏数据及 HTTP 错误', async t => {
   let line, status;
   const { endpoint, outputPath } = await httpTtsFixture(t, res => { res.statusCode = status; res.end(line); });

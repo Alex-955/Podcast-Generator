@@ -3,10 +3,11 @@ const { InputError } = require('./validation');
 const { TtsCancelledError } = require('./edgeTtsAdapter');
 const { readJson, upstreamError } = require('./providerHttp');
 const { synthesizeHttp } = require('./httpTts');
+const { extractMinimaxPronunciationDict } = require('./speechNormalize');
 
 const DEFAULT_MINIMAX_ENDPOINT = 'https://api.minimaxi.com/v1/t2a_v2';
 const DEFAULT_MINIMAX_MODEL = 'speech-2.8-turbo';
-const TONE_RULE_VERSION = 'tone-v2';
+const TONE_RULE_VERSION = 'tone-v3';
 const DEFAULT_MINIMAX_VOICES = { 阿泽: 'male-qn-jingying', 小晓: 'Chinese (Mandarin)_Warm_Bestie' };
 const AVAILABLE_MINIMAX_VOICES = [
   { id: 'male-qn-jingying', name: '精英青年（沉稳自然·阿泽推荐）', gender: 'male' },
@@ -23,12 +24,12 @@ const AVAILABLE_MINIMAX_VOICES = [
 ];
 
 const EMOTIONS = new Map(Object.entries({
-  happy: 'happy 笑意 开心 喜悦 欢乐',
+  happy: 'happy 笑意 开心 喜悦 欢乐 兴奋',
+  neutral: 'neutral 平静 客观',
   sad: 'sad 悲伤 伤感 难过 低落',
   angry: 'angry 生气 愤怒 气愤',
   fearful: 'fearful 害怕 恐惧 紧张',
   disgusted: 'disgusted 厌恶 嫌弃',
-  neutral: 'neutral 平静 温和 认真 好奇 疑惑 追问 感慨 温暖 肯定 笃定 分析 客观 总结 兴奋 惊讶 震惊 surprised',
 }).flatMap(([value, aliases]) => aliases.split(' ').map(tag => [tag, value])));
 
 async function readAudio(response, limit) {
@@ -76,6 +77,7 @@ function createMinimaxProvider(options = {}) {
       const voiceSetting = { voice_id: voice || DEFAULT_MINIMAX_VOICES.阿泽, speed, vol: 1, pitch: 0 };
       const mappedEmotion = typeof emotion === 'string' && EMOTIONS.get(emotion.trim().toLowerCase());
       if (mappedEmotion) voiceSetting.emotion = mappedEmotion;
+      const tones = extractMinimaxPronunciationDict(text);
       return synthesizeHttp({
         name: 'MiniMax', endpoint: endpoint || DEFAULT_MINIMAX_ENDPOINT,
         headers: { Authorization: `Bearer ${apiKey}` },
@@ -83,6 +85,7 @@ function createMinimaxProvider(options = {}) {
           model: model || DEFAULT_MINIMAX_MODEL, text, stream: false,
           voice_setting: voiceSetting,
           audio_setting: { sample_rate: 32000, bitrate: 128000, format: 'mp3', channel: 1 },
+          ...(tones.length > 0 && { pronunciation_dict: { tone: tones } }),
           output_format: 'hex',
         },
         signal, timeoutMs, outputPath, readAudio, allowPrivateEndpoint, lookup,

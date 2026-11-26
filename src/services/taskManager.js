@@ -8,7 +8,8 @@ const { synthesizeDialogueScript, DEFAULT_VOICES, TTS_CHECKPOINT_FILENAME } = re
 const { getCredentials, llmSecrets, validateLlmSettings } = require('./llmCredentials');
 const { redactProviderDetail } = require('./providerHttp');
 const { getTtsCredentials, resolveVoiceMapping } = require('./ttsCredentials');
-const { getTtsProvider, DEFAULT_PROVIDER_ID } = require('./ttsProvider');
+const { getTtsProvider, DEFAULT_PROVIDER_ID, resolveSpeechRate } = require('./ttsProvider');
+const { SPEECH_SPEEDS, normalizeSpeechSpeed } = require('./speechNormalize');
 const { createTtsCache } = require('./ttsCache');
 const { concatenateAudioFiles } = require('./audioMerger');
 const { InputError, validateScriptRequest, ttsSecrets } = require('./validation');
@@ -200,11 +201,12 @@ function publicSentences(id, sentences, sensitive) {
 function publicTtsSummary(meta, sensitive) {
   const ttsProvider = publicIdentifier(meta.ttsProvider, SAFE_ID, sensitive);
   const ttsModel = publicIdentifier(meta.ttsModel, /^[a-zA-Z0-9_.:-]{1,120}$/, sensitive);
+  const speechSpeed = SPEECH_SPEEDS.includes(meta.speechSpeed) ? meta.speechSpeed : 'standard';
   const voiceMapping = Object.fromEntries(Object.keys(DEFAULT_VOICES)
     .map(role => [role, publicIdentifier(meta.voiceMapping?.[role], /^[a-zA-Z0-9_() .:-]{1,120}$/, sensitive)])
     .filter(([, voice]) => voice?.trim()));
   return {
-    ...(ttsProvider && { ttsProvider }), ...(ttsModel && { ttsModel }),
+    ...(ttsProvider && { ttsProvider }), ...(ttsModel && { ttsModel }), speechSpeed,
     ...(Object.keys(voiceMapping).length && { voiceMapping }),
   };
 }
@@ -221,6 +223,8 @@ function createTaskManager({
   function resolveSpeech(payload, creds, task) {
     const tts = payload.tts ?? {};
     if (typeof tts !== 'object' || Array.isArray(tts)) throw new InputError('语音配置格式无效');
+    const previousSpeed = task && normalizeSpeechSpeed(task.speechSpeed, 'standard');
+    const speechSpeed = normalizeSpeechSpeed(tts.speechSpeed, previousSpeed ?? 'relaxed');
     const previousId = task && (task.ttsProvider || DEFAULT_PROVIDER_ID);
     const id = tts.provider ?? previousId ?? (process.env.TTS_PROVIDER?.trim() || ttsProvider?.id || DEFAULT_PROVIDER_ID);
     let provider;
@@ -238,7 +242,7 @@ function createTaskManager({
     }
     const voiceMapping = resolveVoiceMapping(provider, adapterOptions.model, tts.voiceMapping ?? payload.voiceMapping ?? inherited);
     const scopeHash = provider.getScopeHash?.(Object.values(voiceMapping), adapterOptions);
-    const settings = { ttsProvider: provider.id, ttsModel: adapterOptions.model, voiceMapping };
+    const settings = { ttsProvider: provider.id, ttsModel: adapterOptions.model, voiceMapping, speechSpeed };
     const llmSensitive = llmSecrets(payload, creds, { includeDefaultBase: false });
     const secrets = [...llmSensitive,
       ...ttsSecrets(tts), adapterOptions.apiKey, adapterOptions.accessKey, adapterOptions.appId, adapterOptions.endpoint]
@@ -246,9 +250,10 @@ function createTaskManager({
     if (containsSecrets(secrets, settings, payload.title, payload.content, payload.url, task?.sourceContent, task?.input, task?.script)) {
       throw new InputError('输入内容包含敏感凭据，已拦截并中止保存');
     }
-    const changed = task && (!sameProvider || task.ttsScopeHash !== scopeHash || (task.ttsModel || provider.model) !== settings.ttsModel ||
+    const changed = task && (!sameProvider || previousSpeed !== speechSpeed ||
+      task.ttsScopeHash !== scopeHash || (task.ttsModel || provider.model) !== settings.ttsModel ||
       Object.keys(voiceMapping).some(name => (previousMapping?.[name] || defaults[name]) !== voiceMapping[name]));
-    return { provider, adapterOptions, secrets, settings, changed, scopeHash };
+    return { provider, adapterOptions, secrets, settings, changed, scopeHash, rate: resolveSpeechRate(provider.id, speechSpeed) };
   }
 
   function save(task) {
@@ -332,9 +337,9 @@ function createTaskManager({
       if (!entry.isDirectory() || !SAFE_ID.test(entry.name)) continue;
       try {
         const { id, podcastTitle, summary, podcastStyle, sourceType, createAt, totalDuration, sentences, fullAudioUrl,
-          ttsProvider, ttsModel, voiceMapping } = getPodcast(entry.name);
+          ttsProvider, ttsModel, voiceMapping, speechSpeed } = getPodcast(entry.name);
         items.push({ id, podcastTitle, summary, podcastStyle, sourceType, createAt, totalDuration, sentenceCount: sentences.length, fullAudioUrl,
-          ...(ttsProvider && { ttsProvider }), ...(ttsModel && { ttsModel }), ...(voiceMapping && { voiceMapping }) });
+          ...(ttsProvider && { ttsProvider }), ...(ttsModel && { ttsModel }), ...(voiceMapping && { voiceMapping }), speechSpeed });
       } catch (error) {
         if (error.statusCode !== 404) throw error;
       }
@@ -456,7 +461,7 @@ function createTaskManager({
       enter('tts');
       fs.mkdirSync(workDir, { recursive: true });
       const result = await ttsSynthesizer(task.script.dialogue, workDir, task.voiceMapping, {
-        provider: speech.provider, ttsModel: task.ttsModel, adapterOptions: speech.adapterOptions, cache, signal,
+        provider: speech.provider, ttsModel: task.ttsModel, adapterOptions: speech.adapterOptions, rate: speech.rate, cache, signal,
         onProgress({ index, completedSegments, totalSegments, cachedSegments, speaker, retrying, attempt, maxAttempts, delayMs, rateLimited }) {
           signal.throwIfAborted();
           const action = completedSegments > index ? '已完成' : '正在合成';

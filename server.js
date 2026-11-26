@@ -13,6 +13,7 @@ const { extractArticle } = require('./src/services/extractor');
 const { extractTextFromImages } = require('./src/services/imageExtractor');
 const { fetchLlmModels } = require('./src/services/llmModels');
 const { polishArticleText } = require('./src/services/textPolisher');
+const { recommendPodcastStyle } = require('./src/services/styleRecommender');
 const { createTaskManager } = require('./src/services/taskManager');
 const { InputError, redactSecrets, ttsSecrets } = require('./src/services/validation');
 
@@ -93,6 +94,7 @@ function createApp(options = {}) {
   });
   app.post('/api/llm/models', cancelOnDisconnect(fetchLlmModels));
   app.post('/api/polish-text', cancelOnDisconnect(polishArticleText));
+  app.post('/api/recommend-style', cancelOnDisconnect(recommendPodcastStyle));
   app.post('/api/tts/test', async (req, res) => {
     res.json({ success: true, data: await testTtsConnection(req.body || {}, options) });
   });

@@ -78,7 +78,7 @@ on resolveLauncher()
 end resolveLauncher
 
 on findLauncher(dirPath)
-  set launcherPath to dirPath & "/scripts/launchers/start-macos.command"
+  set launcherPath to dirPath & "/scripts/launchers/macos.command"
   try
     do shell script "test -f " & quoted form of launcherPath
     return launcherPath

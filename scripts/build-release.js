@@ -9,15 +9,13 @@ const dotenv = require('dotenv');
 
 const SOURCE_DIR = path.resolve(__dirname, '..');
 const FORMATS = ['zip', 'tar.gz', 'both', 'dir'];
-const ROOT_FILES = ['server.js', 'package.json', 'package-lock.json', 'README.md', 'ROADMAP.md', 'LICENSE', '.env.example'];
+const ROOT_FILES = ['server.js', 'package.json', 'package-lock.json', 'README.md', 'LICENSE', '.env.example'];
 const PUBLIC_FILES = ['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js'].map(file => 'public/' + file);
 const SCRIPTS = ['scripts/start-portable.js', 'scripts/build-mac-launcher.sh'];
 const PLACEHOLDERS = ['public/podcasts/.gitkeep', 'data/.gitkeep'];
 const LAUNCHERS = {
-  'start-windows.bat': '启动 AI 妙听.bat',
-  'stop-windows.bat': '停止 AI 妙听.bat',
-  'start-macos.command': '启动 AI 妙听.command',
-  'stop-macos.command': '停止 AI 妙听.command',
+  'macos.command': 'AI 妙听.command',
+  'windows.bat': 'AI 妙听.bat',
 };
 const LAUNCHER_FILES = Object.entries(LAUNCHERS).flatMap(([source, target]) => ['scripts/launchers/' + source, target]);
 const REQUIRED_FILES = [...ROOT_FILES, ...PUBLIC_FILES, ...SCRIPTS, ...PLACEHOLDERS, ...LAUNCHER_FILES];
@@ -206,7 +204,9 @@ function forbiddenPath(relative) {
   const lower = relative.toLowerCase();
   const name = path.posix.basename(lower);
   return (name.startsWith('.env') && relative !== '.env.example') ||
-    ['.git', '.ds_store', '启动 ai 妙听.app', 'ai 妙听.app'].includes(name) || /\.(?:log|pid)$/.test(name) ||
+    ['.git', '.ds_store', '启动 ai 妙听.app', 'ai 妙听.app', 'roadmap.md', 'plan.md', 'agents.md'].includes(name) ||
+    /\.(?:log|pid)$/.test(name) || lower === 'plan' || lower.startsWith('plan/') ||
+    lower === 'website' || lower.startsWith('website/') ||
     lower === 'test' || (lower.startsWith('data/') && relative !== 'data/.gitkeep') ||
     (lower.startsWith('public/podcasts/') && relative !== 'public/podcasts/.gitkeep');
 }

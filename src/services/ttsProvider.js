@@ -21,7 +21,12 @@ const AVAILABLE_VOICES = [
 const AVAILABLE_VOICE_IDS = AVAILABLE_VOICES.map((v) => v.id);
 
 const DEFAULT_PROVIDER_ID = 'edge';
+const RELAXED_RATES = new Map([['edge', '-8%'], ['minimax', '-10%'], ['volcengine', '-10%']]);
 const providers = new Map();
+
+function resolveSpeechRate(providerId, speechSpeed) {
+  return (speechSpeed === 'relaxed' && RELAXED_RATES.get(providerId)) || '+0%';
+}
 
 function registerTtsProvider(provider) {
   if (
@@ -95,6 +100,7 @@ function getPublicTtsProviders() {
 
 module.exports = {
   resolveDefaultProviderId, resolveDefaultModel, getPublicProviderInfo, getPublicTtsProviders,
+  resolveSpeechRate,
   DEFAULT_VOICES,
   AVAILABLE_VOICES,
   AVAILABLE_VOICE_IDS,

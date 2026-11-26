@@ -22,7 +22,7 @@ const SAMPLE_RATES = {
 };
 
 /** 句间自然停顿（秒）。ttsService 的时间轴与此常量保持一致 */
-const SENTENCE_GAP_SECONDS = 0.35;
+const SENTENCE_GAP_SECONDS = 0.42;
 
 /** 移除 ID3v2 头部（若存在） */
 function stripID3(buffer) {

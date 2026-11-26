@@ -150,7 +150,7 @@ function createVolcengineProvider(options = {}) {
       const endpoint = credentials.endpoint || DEFAULT_VOLCENGINE_ENDPOINT;
       return speechScopeHash(endpoint, credentials, voices, AVAILABLE_VOLCENGINE_VOICES, DEFAULT_VOLCENGINE_ENDPOINT, TONE_RULE_VERSION);
     },
-    async synthesizeToFile({ text, voice, emotion, outputPath, signal, adapterOptions }) {
+    async synthesizeToFile({ text, voice, rate, emotion, outputPath, signal, adapterOptions }) {
       if (signal?.aborted) throw new TtsCancelledError();
       const { apiKey, appId, accessKey, resourceId, endpoint, timeoutMs, allowPrivateEndpoint, lookup } = { ...options, ...adapterOptions };
       if (!apiKey?.trim() && !(appId?.trim() && accessKey?.trim())) {
@@ -159,7 +159,11 @@ function createVolcengineProvider(options = {}) {
       const speaker = voice || defaultVolcengineVoices(resourceId).阿泽;
       const resource = resourceId || DEFAULT_VOLCENGINE_RESOURCE_ID;
       validateVolcengineVoice(resource, speaker);
-      const reqParams = { text, speaker, audio_params: { format: 'mp3', sample_rate: 24000, bit_rate: 128000 } };
+      const percent = /^([+-]?\d+(?:\.\d+)?)%$/.exec(rate);
+      const speechRate = percent ? Math.max(-50, Math.min(100, Math.round(Number(percent[1])))) : 0;
+      const audioParams = { format: 'mp3', sample_rate: 24000, bit_rate: 128000 };
+      if (speechRate) audioParams.speech_rate = speechRate;
+      const reqParams = { text, speaker, audio_params: audioParams };
       const cleanEmotion = typeof emotion === 'string' && emotion.trim();
       if (cleanEmotion && V2_RESOURCE.test(resource) && !V1_SPEAKER.test(speaker.toLowerCase())) {
         const cue = DIRECTOR_CUES.get(cleanEmotion) || `用自然生动的${cleanEmotion}播客聊天语气，音量保持清晰平稳`;

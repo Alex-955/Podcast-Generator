@@ -174,8 +174,14 @@
           <div id="confirmStyleRow" class="confirm-style-row">
             <span class="confirm-style-label">节目风格</span>
             <div id="confirmStyleGroup" class="style-pill-group" role="radiogroup" aria-label="播客表达风格">
-              <button type="button" class="style-pill is-active" data-podcast-style="deep_dive" role="radio" aria-checked="true" title="小晓 7:3 深度主讲 + 阿泽精准追问 · 贴近 AI 妙听">深度主讲</button>
-              <button type="button" class="style-pill" data-podcast-style="dialogue" role="radio" aria-checked="false" title="阿泽与小晓 5:5 轻快接力对谈">轻松对谈</button>
+              <button type="button" class="style-pill is-active" data-podcast-style="deep_dive" role="radio" aria-checked="true" title="小晓 7:3 深度主讲 + 阿泽精准追问 · 贴近 AI 妙听">
+                <span>深度主讲</span>
+                <span class="style-ai-tag hidden" data-style-ai-tag="deep_dive">AI 推荐</span>
+              </button>
+              <button type="button" class="style-pill" data-podcast-style="dialogue" role="radio" aria-checked="false" title="阿泽与小晓 5:5 轻快接力对谈">
+                <span>轻松对谈</span>
+                <span class="style-ai-tag hidden" data-style-ai-tag="dialogue">AI 推荐</span>
+              </button>
             </div>
             <span id="confirmStyleDesc" class="confirm-style-desc">7:3 主讲拆解 + 主持追问 · 贴近 AI 妙听</span>
           </div>
@@ -187,7 +193,7 @@
                 <polyline points="6 9 12 15 18 9"></polyline>
               </svg>
             </button>
-            <button type="button" id="btnPolishDraft" class="btn btn-subtle btn-sm">
+            <button type="button" id="btnPolishDraft" class="btn btn-subtle btn-sm" title="自动清理首尾作者编辑/版权声明，并分段并发纠错">
               <span>AI 纠错润色</span>
             </button>
           </div>
@@ -685,6 +691,17 @@
                     <select id="settingEdgeVoiceGuest" class="field-select"></select>
                   </div>
                 </div>
+              </div>
+
+              <div class="form-field tts-speed-field">
+                <div class="label-with-toggle">
+                  <span class="form-label">播报语速</span>
+                  <div class="auth-mode-switch" role="radiogroup" aria-label="播报语速">
+                    <button type="button" class="auth-mode-btn is-active" data-tts-speed="relaxed" role="radio" aria-checked="true">从容聊天（推荐）</button>
+                    <button type="button" class="auth-mode-btn" data-tts-speed="standard" role="radio" aria-checked="false">标准明快</button>
+                  </div>
+                </div>
+                <p id="ttsSpeedHint" class="form-help">在语音合成阶段原生控速，保持原声音质不失真；默认从容聊天更贴近朋友松弛对话。</p>
               </div>
 
               <p id="ttsProviderGuide" class="provider-guide"></p>

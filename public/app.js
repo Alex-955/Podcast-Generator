@@ -191,6 +191,7 @@
 
   const DEFAULT_TTS_CONFIG = {
     provider: '',
+    speechSpeed: 'relaxed',
     minimax: {
       apiKey: '',
       model: 'speech-2.8-turbo',
@@ -252,6 +253,9 @@
     modalLlmKeyEndpoint: '',
     modalVisionKeyEndpoint: '',
     modalTtsProvider: 'edge',
+    modalTtsSpeed: 'relaxed',
+    modalTtsSpeedChanged: false,
+    ttsSpeedOverrideTaskId: null,
     modalVolcAuthMode: 'apiKey',
     uiInputTab: 'url',
     podcastStyle: readStorage(STORAGE_KEYS.podcastStyle) === 'dialogue' ? 'dialogue' : 'deep_dive',
@@ -260,7 +264,9 @@
     extractingImages: false,
     extractAbortController: null,
     extractTimer: null,
+    draftSeq: 0,
     confirmedDraft: null,
+    styleRecommendAbortController: null,
     polishingDraft: false,
     polishAbortController: null,
     polishTimer: null,
@@ -346,6 +352,7 @@
 
     settingEdgeVoiceHost: document.getElementById('settingEdgeVoiceHost'),
     settingEdgeVoiceGuest: document.getElementById('settingEdgeVoiceGuest'),
+    ttsSpeedButtons: document.querySelectorAll('[data-tts-speed]'),
     ttsProviderGuide: document.getElementById('ttsProviderGuide'),
     btnTestTts: document.getElementById('btnTestTts'),
     ttsTestStatus: document.getElementById('ttsTestStatus'),
@@ -390,6 +397,7 @@
     confirmTitle: document.getElementById('confirmTitle'),
     confirmExcerpt: document.getElementById('confirmExcerpt'),
     confirmStyleButtons: document.querySelectorAll('[data-podcast-style]'),
+    confirmStyleAiTags: document.querySelectorAll('[data-style-ai-tag]'),
     confirmStyleDesc: document.getElementById('confirmStyleDesc'),
     btnToggleFullPreview: document.getElementById('btnToggleFullPreview'),
     btnPolishDraft: document.getElementById('btnPolishDraft'),
@@ -508,6 +516,7 @@
     }
     const base = {
       provider: typeof parsed?.provider === 'string' ? parsed.provider : DEFAULT_TTS_CONFIG.provider,
+      speechSpeed: ['relaxed', 'standard'].includes(parsed?.speechSpeed) ? parsed.speechSpeed : DEFAULT_TTS_CONFIG.speechSpeed,
       minimax: { ...DEFAULT_TTS_CONFIG.minimax, ...(parsed?.minimax && typeof parsed.minimax === 'object' ? parsed.minimax : {}) },
       volcengine: { ...DEFAULT_TTS_CONFIG.volcengine, ...(parsed?.volcengine && typeof parsed.volcengine === 'object' ? parsed.volcengine : {}) },
       edge: { ...DEFAULT_TTS_CONFIG.edge, ...(parsed?.edge && typeof parsed.edge === 'object' ? parsed.edge : {}) },
@@ -613,6 +622,10 @@
   }
 
   function invalidateConfirmedDraft() {
+    if (state.styleRecommendAbortController) {
+      state.styleRecommendAbortController.abort();
+      state.styleRecommendAbortController = null;
+    }
     if (state.polishAbortController) {
       state.polishAbortController.abort();
       state.polishAbortController = null;
@@ -689,13 +702,84 @@
 
   function updatePodcastStyleUI() {
     const style = state.podcastStyle === 'dialogue' ? 'dialogue' : 'deep_dive';
+    const draft = state.confirmedDraft;
+    const rec = draft?.styleRecommendation;
     dom.confirmStyleButtons?.forEach((btn) => {
       const active = btn.dataset.podcastStyle === style;
       btn.classList.toggle('is-active', active);
       btn.setAttribute('aria-checked', String(active));
     });
+    dom.confirmStyleAiTags?.forEach((tag) => {
+      tag.classList.toggle('hidden', !rec || tag.dataset.styleAiTag !== rec.style);
+    });
     if (dom.confirmStyleDesc) {
-      dom.confirmStyleDesc.textContent = PODCAST_STYLE_DESCS[style] || PODCAST_STYLE_DESCS.deep_dive;
+      if (rec) {
+        const recLabel = PODCAST_STYLE_LABELS[rec.style] || rec.style;
+        const isOnRec = style === rec.style;
+        dom.confirmStyleDesc.classList.toggle('is-recommended', isOnRec);
+        if (isOnRec) {
+          dom.confirmStyleDesc.textContent = rec.reason
+            ? `AI 推荐 · ${recLabel}：${rec.reason}`
+            : `AI 推荐 · ${recLabel}`;
+        } else {
+          dom.confirmStyleDesc.textContent = `${PODCAST_STYLE_DESCS[style] || PODCAST_STYLE_DESCS.deep_dive}（AI 推荐${recLabel}）`;
+        }
+      } else {
+        dom.confirmStyleDesc.classList.remove('is-recommended');
+        const baseDesc = PODCAST_STYLE_DESCS[style] || PODCAST_STYLE_DESCS.deep_dive;
+        dom.confirmStyleDesc.textContent = draft?.styleRecommendLoading
+          ? `${baseDesc} · AI 正在判断更适合的风格…`
+          : baseDesc;
+      }
+    }
+  }
+
+  async function requestStyleRecommendation(draft) {
+    if (!draft || !draft.content?.trim()) return;
+    const draftId = draft.draftId;
+    if (state.styleRecommendAbortController) {
+      state.styleRecommendAbortController.abort();
+    }
+    const controller = new AbortController();
+    state.styleRecommendAbortController = controller;
+    draft.styleRecommendLoading = true;
+    updatePodcastStyleUI();
+
+    try {
+      const data = await apiJson('/api/recommend-style', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          title: draft.title || '',
+          content: draft.content,
+          ...buildCredsPayload(),
+        }),
+      });
+      const current = state.confirmedDraft;
+      if (!current || current.draftId !== draftId) return;
+      current.styleRecommendLoading = false;
+      const recStyle = data?.style === 'dialogue' ? 'dialogue' : data?.style === 'deep_dive' ? 'deep_dive' : '';
+      if (recStyle) {
+        current.styleRecommendation = {
+          style: recStyle,
+          reason: typeof data.reason === 'string' ? data.reason : '',
+        };
+        if (!current.userPickedStyle) {
+          state.podcastStyle = recStyle;
+        }
+      }
+      updatePodcastStyleUI();
+    } catch {
+      const current = state.confirmedDraft;
+      if (current && current.draftId === draftId) {
+        current.styleRecommendLoading = false;
+        updatePodcastStyleUI();
+      }
+    } finally {
+      if (state.styleRecommendAbortController === controller) {
+        state.styleRecommendAbortController = null;
+      }
     }
   }
 
@@ -745,9 +829,9 @@
     if (dom.polishProgressBar) dom.polishProgressBar.classList.remove('hidden');
     const pct = Math.min(88, Math.round(16 + 72 * (1 - Math.exp(-elapsedSeconds / 6))));
     if (dom.polishProgressFill) dom.polishProgressFill.style.width = `${pct}%`;
-    let stage = '正在扫描错别字与同音误识（局部极速校对）…';
-    if (elapsedSeconds >= 10) stage = '正文较长，模型仍在细校修订项，请稍候…';
-    else if (elapsedSeconds >= 4) stage = '正在结合上下文精准定位修改片段…';
+    let stage = '正在扫描错别字并清理首尾杂讯…';
+    if (elapsedSeconds >= 8) stage = '正文较长，正分段并发精细校对，请稍候…';
+    else if (elapsedSeconds >= 3) stage = '正在结合上下文清理署名声明与修正片段…';
     dom.polishBannerText.textContent = `${stage} · 已耗时 ${Math.floor(elapsedSeconds)}s`;
     if (!dom.polishBannerActions.querySelector('[data-polish-cancel]')) {
       dom.polishBannerActions.textContent = '';
@@ -878,7 +962,13 @@
     }
   }
 
-  function renderConfirmationCard(draft) {
+  function renderConfirmationCard(draft, { recommendStyle = false } = {}) {
+    if (recommendStyle) {
+      state.podcastStyle = readStorage(STORAGE_KEYS.podcastStyle) === 'dialogue' ? 'dialogue' : 'deep_dive';
+    }
+    if (recommendStyle || !draft.draftId) {
+      draft.draftId = ++state.draftSeq;
+    }
     state.confirmedDraft = draft;
     state.fullPreviewExpanded = false;
 
@@ -901,6 +991,9 @@
     const busy = hasActiveRunningTask();
     dom.btnStartGenerate.disabled = busy;
     dom.btnStartGenerate.querySelector('span').textContent = busy ? '当前已有任务生成中' : '开始生成双人播客';
+    if (recommendStyle) {
+      requestStyleRecommendation(draft);
+    }
   }
 
   function updateExcerptView() {
@@ -994,7 +1087,7 @@
         content: data.content,
         length: data.length,
         truncated: Boolean(data.truncated),
-      });
+      }, { recommendStyle: true });
     } catch (err) {
       showParseError(err.message || '抓取文章失败，建议切换到「直接贴正文」粘贴文章内容', dom.inputUrl);
     } finally {
@@ -1031,7 +1124,7 @@
       content,
       length: content.length,
       truncated,
-    });
+    }, { recommendStyle: true });
   }
 
   function buildVisionPayload(source = state.visionConfig) {
@@ -1270,7 +1363,7 @@
         truncated: Boolean(data.truncated),
         hasIssues: Boolean(data.hasIssues),
         issueHint: data.issueHint || '',
-      });
+      }, { recommendStyle: true });
       showToast(data.hasIssues
         ? `已识别 ${data.length.toLocaleString('zh-CN')} 字（用时 ${elapsedSec}s · 检测到疑似错字，可点「AI 纠错润色」）`
         : `已从截图识别 ${data.length.toLocaleString('zh-CN')} 字（用时 ${elapsedSec}s），请核对后生成播客`);
@@ -1320,9 +1413,11 @@
   function buildTtsPayload(source = state.ttsConfig, providerOverride) {
     const cfg = source || state.ttsConfig;
     const provider = providerOverride || resolveEffectiveTtsProviderId();
+    const speechSpeed = cfg.speechSpeed === 'standard' ? 'standard' : 'relaxed';
     if (provider === 'minimax') {
       const out = {
         provider: 'minimax',
+        speechSpeed,
         model: cfg.minimax.model || DEFAULT_TTS_CONFIG.minimax.model,
         voiceMapping: {
           阿泽: cfg.minimax.voiceHost || DEFAULT_TTS_CONFIG.minimax.voiceHost,
@@ -1338,6 +1433,7 @@
       const defaults = getVolcDefaultVoices(resourceId);
       const out = {
         provider: 'volcengine',
+        speechSpeed,
         resourceId,
         model: resourceId,
         voiceMapping: {
@@ -1356,6 +1452,7 @@
     }
     return {
       provider: 'edge',
+      speechSpeed,
       voiceMapping: {
         阿泽: cfg.edge.voiceHost || DEFAULT_TTS_CONFIG.edge.voiceHost,
         小晓: cfg.edge.voiceGuest || DEFAULT_TTS_CONFIG.edge.voiceGuest,
@@ -1396,6 +1493,7 @@
       });
 
       invalidateConfirmedDraft();
+      state.ttsSpeedOverrideTaskId = null;
       setActiveTask(task);
       if (window.innerWidth <= 900) {
         dom.progressSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1692,14 +1790,19 @@
 
   async function handleResumeTask(taskId) {
     try {
+      const ttsPayload = buildTtsPayload();
+      if (state.ttsSpeedOverrideTaskId !== taskId) {
+        delete ttsPayload.speechSpeed;
+      }
       const task = await apiJson(`/api/tasks/${encodeURIComponent(taskId)}/resume`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...buildCredsPayload(),
-          tts: buildTtsPayload(),
+          tts: ttsPayload,
         }),
       });
+      state.ttsSpeedOverrideTaskId = null;
       setActiveTask(task);
       startPolling();
       showToast('已从断点恢复生成');
@@ -2670,6 +2773,15 @@
     setTestStatus(dom.ttsTestStatus, '', '');
   }
 
+  function selectTtsSpeedInModal(speed) {
+    state.modalTtsSpeed = speed === 'standard' ? 'standard' : 'relaxed';
+    dom.ttsSpeedButtons?.forEach((btn) => {
+      const active = btn.dataset.ttsSpeed === state.modalTtsSpeed;
+      btn.classList.toggle('is-active', active);
+      btn.setAttribute('aria-checked', String(active));
+    });
+  }
+
   function selectVolcAuthModeInModal(mode) {
     state.modalVolcAuthMode = mode === 'appIdAccessKey' ? 'appIdAccessKey' : 'apiKey';
     dom.volcAuthButtons.forEach((btn) => {
@@ -2738,6 +2850,7 @@
     const defaultsVolc = getVolcDefaultVoices(resourceId);
     return {
       provider: state.modalTtsProvider,
+      speechSpeed: state.modalTtsSpeed === 'standard' ? 'standard' : 'relaxed',
       minimax: {
         apiKey: dom.settingMinimaxKey.value.trim(),
         model: dom.settingMinimaxModel.value || defaultsMinimax.model,
@@ -2926,6 +3039,8 @@
     hydrateTtsControlsFromCatalog();
     selectVolcAuthModeInModal(state.ttsConfig.volcengine.authMode);
     selectTtsProviderInModal(resolveEffectiveTtsProviderId());
+    state.modalTtsSpeedChanged = false;
+    selectTtsSpeedInModal(state.ttsConfig.speechSpeed || 'relaxed');
 
     dom.settingsModal.classList.remove('hidden');
     switchSettingsTab(initialTab === 'tts' ? 'tts' : 'llm', { immediateIndicator: true });
@@ -2994,6 +3109,12 @@
     };
     state.modalVisionKeyEndpoint = visionApiKey ? normalizeEndpointForBinding(visionBaseURL) : '';
     state.ttsConfig = tts;
+    if (!state.activeTask?.id) {
+      state.ttsSpeedOverrideTaskId = null;
+    } else if (state.modalTtsSpeedChanged) {
+      state.ttsSpeedOverrideTaskId = state.activeTask.id;
+    }
+    state.modalTtsSpeedChanged = false;
 
     writeStorage(STORAGE_KEYS.apiKey, state.apiKey);
     writeStorage(STORAGE_KEYS.baseURL, state.baseURL);
@@ -3096,6 +3217,9 @@
     dom.confirmStyleButtons?.forEach((btn) => {
       btn.addEventListener('click', () => {
         const nextStyle = btn.dataset.podcastStyle === 'dialogue' ? 'dialogue' : 'deep_dive';
+        if (state.confirmedDraft) {
+          state.confirmedDraft.userPickedStyle = true;
+        }
         state.podcastStyle = nextStyle;
         writeStorage(STORAGE_KEYS.podcastStyle, nextStyle);
         updatePodcastStyleUI();
@@ -3329,6 +3453,12 @@
 
     dom.ttsProviderButtons.forEach((btn) => {
       btn.addEventListener('click', () => selectTtsProviderInModal(btn.dataset.ttsProvider));
+    });
+    dom.ttsSpeedButtons?.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.modalTtsSpeedChanged = true;
+        selectTtsSpeedInModal(btn.dataset.ttsSpeed);
+      });
     });
     dom.volcAuthButtons.forEach((btn) => {
       btn.addEventListener('click', () => selectVolcAuthModeInModal(btn.dataset.volcAuth));

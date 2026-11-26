@@ -1,6 +1,6 @@
 'use strict';
 /**
- * B0-5 时间轴回归：gap 帧量化（0.35s → 0.36s）与时间轴口径一致。
+ * B0-5 时间轴回归：gap 帧量化（0.42s → 0.432s）与时间轴口径一致。
  * B0-5 验收：20 段时 totalDuration 与「逐段时长 + 逐段 gap」之和 0 漂移；
  * 3 / 20 / 100 段均单调且无漂移。
  */
@@ -37,31 +37,31 @@ function setupEntries(t, frameCounts, options) {
   };
 }
 
-test('B0-5：0.35s gap 量化为 15 帧 / 0.36s，时间轴与合并器同口径', t => {
+test('B0-5：0.42s gap 量化为 18 帧 / 0.432s，时间轴与合并器同口径', t => {
   const { entries } = setupEntries(t, [50, 25, 125]); // 1.2s / 0.6s / 3.0s
   const timeline = buildSentenceTimeline(entries);
 
   assert.strictEqual(timeline.measurement, 'mp3-frame-count');
-  assert.strictEqual(timeline.sentenceGapFrames, 15); // ceil(0.35*24000/576)
-  approx(timeline.sentenceGap, 0.36);
-  // 修复目标：不再按 0.35s 累计造成漂移
-  assert.ok(Math.abs(timeline.sentenceGap - 0.35) > 0.005);
+  assert.strictEqual(timeline.sentenceGapFrames, 18); // ceil(0.42*24000/576)
+  approx(timeline.sentenceGap, 0.432);
+  // 修复目标：不再按 0.42s 累计造成漂移
+  assert.ok(Math.abs(timeline.sentenceGap - 0.42) > 0.005);
 
   const [s0, s1, s2] = timeline.sentences;
   approx(s0.startTime, 0);
   approx(s0.endTime, 1.2);
-  approx(s1.startTime, 1.56); // 1.2 + 0.36
-  approx(s1.endTime, 2.16);
-  approx(s2.startTime, 2.52); // 2.16 + 0.36
-  approx(s2.endTime, 5.52);
-  approx(timeline.totalDuration, 5.52);
+  approx(s1.startTime, 1.632); // 1.2 + 0.432
+  approx(s1.endTime, 2.232);
+  approx(s2.startTime, 2.664); // 2.232 + 0.432
+  approx(s2.endTime, 5.664);
+  approx(timeline.totalDuration, 5.664);
 
   // 静音帧生成（audioMerger 使用）与时间轴 gap 用同一个 computeGap 结果
   const format = scanMp3Format(fs.readFileSync(entries[0].filePath));
   const gap = computeGap(format, SENTENCE_GAP_SECONDS);
-  assert.strictEqual(gap.frameCount, 15);
+  assert.strictEqual(gap.frameCount, 18);
   const silence = buildSilenceFrames(format, SENTENCE_GAP_SECONDS);
-  assert.strictEqual(silence.length, 15 * FRAME_SIZE_24K);
+  assert.strictEqual(silence.length, 18 * FRAME_SIZE_24K);
 });
 
 test('B0-5：20 段时间轴单调无漂移', t => {
@@ -69,11 +69,11 @@ test('B0-5：20 段时间轴单调无漂移', t => {
   const timeline = buildSentenceTimeline(entries);
 
   assert.strictEqual(timeline.sentences.length, 20);
-  approx(timeline.sentenceGap, 0.36);
+  approx(timeline.sentenceGap, 0.432);
 
   let sumDurations = 0;
   timeline.sentences.forEach((sentence, i) => {
-    approx(sentence.startTime, i * (0.24 + 0.36));
+    approx(sentence.startTime, i * (0.24 + 0.432));
     approx(sentence.endTime, sentence.startTime + 0.24);
     approx(sentence.duration, 0.24);
     if (i > 0) {
@@ -84,7 +84,7 @@ test('B0-5：20 段时间轴单调无漂移', t => {
 
   // 验收口径：总时长 = 逐段时长之和 + 逐段 gap 之和，0 漂移
   approx(timeline.totalDuration, sumDurations + 19 * timeline.sentenceGap);
-  approx(timeline.totalDuration, 20 * 0.24 + 19 * 0.36);
+  approx(timeline.totalDuration, 20 * 0.24 + 19 * 0.432);
 });
 
 test('B0-5：100 段时间轴单调无漂移', t => {
@@ -143,7 +143,7 @@ test('多段带 ID3v2 头、ID3v1 尾的音频拼接后可逐帧解析，字幕�
   const file = path.join(dir, 'full_podcast.mp3');
   concatenateAudioFiles(entries.map(entry => entry.filePath), file);
   const combined = fs.readFileSync(file);
-  const expectedFrames = 10 + 15 + 20 + 2 * 15;
+  const expectedFrames = 10 + 15 + 20 + 2 * 18;
   assert.strictEqual(isValidMp3(combined), true);
   assert.strictEqual(analyzeMp3(combined).frameCount, expectedFrames);
   assert.strictEqual(combined.length, expectedFrames * FRAME_SIZE_24K);

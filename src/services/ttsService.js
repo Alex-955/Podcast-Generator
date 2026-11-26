@@ -15,34 +15,10 @@ const {
 } = require('./mp3Utils');
 
 const { InputError } = require('./validation');
+const { normalizeSpeechText } = require('./speechNormalize');
 
 const MAX_SYNTHESIS_ATTEMPTS = 3;
 const TTS_CHECKPOINT_FILENAME = '.tts-checkpoint.json';
-const CALENDAR_YEAR = /^(?:1[1-9]\d{2}|20\d{2})$/;
-const CHINESE_DIGITS = '零一二三四五六七八九';
-const URL_OR_YEAR = /(https?:\/\/[^\s"'<>()（）《》【】，。！？；：、]+)|(?<![A-Za-z0-9._/])(?:(\d+(?:\.\d+)?)\s*([-~～—–至到])\s*)?(\d+)\s*(年代?)/gi;
-const STRICT_DURATION_PREFIX = /(?:历时|长达|持续|跨越|经过|相隔|距今|已有|超过|不到|不足|将近|满|整整|一共|共计|总共|累计|短短|为期)\s*$/;
-const APPROXIMATE_PREFIX = /(?:大约|约|近|前后)\s*$/;
-const DURATION_SUFFIX = /^(?:的?(?:历史|时间|之久|岁月|沧桑|光阴|历程)|多|余|间)/;
-
-function normalizeSpeechText(text) {
-  if (typeof text !== 'string') throw new Error('合成文本必须是非空字符串');
-  const readDigits = number => number.replace(/\d/g, digit => CHINESE_DIGITS[Number(digit)]);
-  return text.replace(URL_OR_YEAR, (match, url, start, separator, end, unit, offset) => {
-    if (url) return match;
-    if (unit === '年') {
-      const prefix = text.slice(0, offset);
-      if (STRICT_DURATION_PREFIX.test(prefix) ||
-          (APPROXIMATE_PREFIX.test(prefix) && DURATION_SUFFIX.test(text.slice(offset + match.length)))) return match;
-    }
-    if (start) {
-      if (!CALENDAR_YEAR.test(start) || !CALENDAR_YEAR.test(end)) return match;
-      return `${readDigits(start)}${separator === '至' ? '至' : '到'}${readDigits(end)}${unit}`;
-    }
-    if (CALENDAR_YEAR.test(end) || (unit === '年代' && /^[1-9]0$/.test(end))) return `${readDigits(end)}${unit}`;
-    return match;
-  });
-}
 
 function readSpeechCheckpoint(file, toneVersion) {
   try {
@@ -240,7 +216,7 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping, opt
   let reusedSegments = 0;
   let lastRequestEndAt = null;
   for (const [index, line] of dialogueList.entries()) {
-    const { speaker, text, rate = '+0%', pitch = '+0Hz', emotion } = line;
+    const { speaker, text, rate = options.rate ?? '+0%', pitch = '+0Hz', emotion } = line;
     const voice = voices[speaker] || defaultVoices[speaker] || Object.values(defaultVoices)[0];
     const fileName = sentenceFileName(index);
     const outputPath = path.join(workDir, fileName);
