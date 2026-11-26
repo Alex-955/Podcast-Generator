@@ -15,7 +15,7 @@
         label: '深度主讲 · 7:3',
         title: '赢球不叫暂停：为什么维持现状有时候反而是好选择？',
         summary: '节选自真实生成播客《步子太大扯到裆：为什么90%的心脏病人出院后照旧熬夜》· 小晓 7:3 深度拆解 + 阿泽比喻接话',
-        audioUrl: './assets/audio/sample-deep.mp3',
+        audioUrl: './assets/audio/sample-deep-v2.mp3',
         fallbackDuration: 46.944,
         cues: [
           {
