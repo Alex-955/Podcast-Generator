@@ -1,6 +1,6 @@
 {
   "name": "ai-podcast-generator",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "AI 妙听播客生成器 - 将长文与公众号文章一键重构为沉浸式双人对话播客",
   "main": "server.js",
   "scripts": {
