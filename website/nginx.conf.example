@@ -1,10 +1,10 @@
-# AI 妙听官方网站（website/）Nginx 静态托管配置示例
+# 拾声集（InkCast）官方网站（website/）Nginx 静态托管配置示例
 # 使用前请将 server_name 与 root 路径替换为你的实际域名和部署目录
 
 server {
     listen 80;
     listen [::]:80;
-    server_name miaoting.example.com;
+    server_name inkcast.example.com;
 
     root /var/www/ai-podcast-generator/website;
     index index.html;

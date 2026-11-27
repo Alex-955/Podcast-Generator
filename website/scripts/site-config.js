@@ -5,15 +5,16 @@
   var GITHUB_RELEASES = GITHUB_REPO + '/releases/tag/v1.0.0';
   var RELEASE_DOWNLOAD_BASE = GITHUB_REPO + '/releases/download/v1.0.0/';
 
-  var MAC_ARM64_FILE = 'AI-Miaoting-v1.0.0-mac-arm64.dmg';
-  var MAC_X64_FILE = 'AI-Miaoting-v1.0.0-mac-x64.dmg';
-  var WIN_X64_FILE = 'AI-Miaoting-v1.0.0-win-x64-setup.exe';
-  var PORTABLE_ZIP_FILE = 'ai-podcast-generator-v1.0.0-portable.zip';
-  var PORTABLE_TAR_FILE = 'ai-podcast-generator-v1.0.0-portable.tar.gz';
+  var MAC_ARM64_FILE = 'InkCast-v1.0.0-mac-arm64.dmg';
+  var MAC_X64_FILE = 'InkCast-v1.0.0-mac-x64.dmg';
+  var WIN_X64_FILE = 'InkCast-v1.0.0-win-x64-setup.exe';
+  var PORTABLE_ZIP_FILE = 'InkCast-v1.0.0-portable.zip';
+  var PORTABLE_TAR_FILE = 'InkCast-v1.0.0-portable.tar.gz';
   var SHA256SUMS_FILE = 'SHA256SUMS.txt';
 
   var SITE_CONFIG = {
-    brandName: 'AI 妙听',
+    brandName: '拾声集',
+    brandEn: 'InkCast',
     brandSub: '双人对话播客生成器',
     versionBadge: 'v1.0 桌面正式版',
     versionTag: 'v1.0.0',
@@ -46,8 +47,8 @@
         githubAssetUrl: RELEASE_DOWNLOAD_BASE + MAC_X64_FILE,
         secondaryLabel: '下载 Intel 芯片 (.dmg)',
         githubReleasesUrl: GITHUB_RELEASES,
-        sha256: 'shasum -a 256 AI-Miaoting-v1.0.0-mac-*.dmg',
-        shaCommand: 'shasum -a 256 AI-Miaoting-v1.0.0-mac-*.dmg',
+        sha256: 'shasum -a 256 InkCast-v1.0.0-mac-*.dmg',
+        shaCommand: 'shasum -a 256 InkCast-v1.0.0-mac-*.dmg',
         intelFilename: MAC_X64_FILE,
         intelUrl: RELEASE_DOWNLOAD_BASE + MAC_X64_FILE
       },
@@ -62,8 +63,8 @@
         githubAssetUrl: GITHUB_RELEASES,
         secondaryLabel: '前往 GitHub Releases v1.0.0',
         githubReleasesUrl: GITHUB_RELEASES,
-        sha256: 'certutil -hashfile AI-Miaoting-v1.0.0-win-x64-setup.exe SHA256',
-        shaCommand: 'certutil -hashfile AI-Miaoting-v1.0.0-win-x64-setup.exe SHA256'
+        sha256: 'certutil -hashfile InkCast-v1.0.0-win-x64-setup.exe SHA256',
+        shaCommand: 'certutil -hashfile InkCast-v1.0.0-win-x64-setup.exe SHA256'
       },
       portable: {
         zipFilename: PORTABLE_ZIP_FILE,

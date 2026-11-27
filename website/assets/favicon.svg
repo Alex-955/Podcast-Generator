@@ -1,7 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <rect width="64" height="64" rx="16" fill="#F5F2EB"/>
-  <rect x="16" y="24" width="4.5" height="16" rx="2.25" fill="#1C5A73"/>
-  <rect x="25" y="16" width="4.5" height="32" rx="2.25" fill="#B03E24"/>
-  <rect x="34" y="20" width="4.5" height="24" rx="2.25" fill="#B03E24"/>
-  <rect x="43" y="26" width="4.5" height="12" rx="2.25" fill="#1C5A73"/>
+  <rect width="64" height="64" rx="16" fill="#A73A21"/>
+  <rect x="17" y="21" width="4" height="10" rx="2" fill="#F7F2E8"/>
+  <rect x="23.5" y="16" width="4" height="16" rx="2" fill="#F7F2E8"/>
+  <rect x="30" y="12" width="4" height="22" rx="2" fill="#F7F2E8"/>
+  <rect x="36.5" y="16" width="4" height="16" rx="2" fill="#F7F2E8"/>
+  <rect x="43" y="21" width="4" height="10" rx="2" fill="#F7F2E8"/>
+  <path d="M13 43C18 39 26 40 32 47C38 40 46 39 51 43L48 35C42 33 36 35 32 41C28 35 22 33 16 35L13 43Z" fill="#F7F2E8"/>
+  <path d="M12 49C18 45 26 46 32 52C38 46 46 45 52 49L50 45C45 42 37 43 32 49C27 43 19 42 14 45L12 49Z" fill="#E6D5BE"/>
 </svg>

@@ -55,21 +55,21 @@
 
   function bootstrap() {
     // 1. 绑定 site-config.js 中的文案、链接与环境提示
-    if (global.MiaotingConfig && typeof global.MiaotingConfig.init === 'function') {
-      global.MiaotingConfig.init();
+    if (global.InkCastConfig && typeof global.InkCastConfig.init === 'function') {
+      global.InkCastConfig.init();
     }
-    if (global.MiaotingInteractions && typeof global.MiaotingInteractions.bindConfig === 'function') {
-      global.MiaotingInteractions.bindConfig();
+    if (global.InkCastInteractions && typeof global.InkCastInteractions.bindConfig === 'function') {
+      global.InkCastInteractions.bindConfig();
     }
 
     // 2. 初始化全站微交互、OS 三处联动、模拟器与弹窗
-    if (global.MiaotingInteractions && typeof global.MiaotingInteractions.init === 'function') {
-      global.MiaotingInteractions.init();
+    if (global.InkCastInteractions && typeof global.InkCastInteractions.init === 'function') {
+      global.InkCastInteractions.init();
     }
 
     // 3. 初始化暖纸放音台引擎
-    if (global.MiaotingPlayer && typeof global.MiaotingPlayer.init === 'function') {
-      global.MiaotingPlayer.init();
+    if (global.InkCastPlayer && typeof global.InkCastPlayer.init === 'function') {
+      global.InkCastPlayer.init();
     }
 
     // 4. 顶栏吸顶投影与滚动入场

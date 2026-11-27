@@ -961,7 +961,7 @@
     state.activeCueIndex = -1;
     state.mode = 'demo';
 
-    if (dom.epTitle) dom.epTitle.textContent = ep?.title || 'AI 妙听样片';
+    if (dom.epTitle) dom.epTitle.textContent = ep?.title || '拾声集样片';
     if (dom.epSummary) dom.epSummary.textContent = ep?.summary || '';
 
     updateSourceBadge('demo');
@@ -1207,9 +1207,9 @@
         selectEpisode(nextId);
       }
     };
-    document.addEventListener('miaoting:episode-change', handleEpisodeEvent);
+    document.addEventListener('inkcast:episode-change', handleEpisodeEvent);
     if (dom.episodeSeg) {
-      dom.episodeSeg.addEventListener('miaoting:episode-change', handleEpisodeEvent);
+      dom.episodeSeg.addEventListener('inkcast:episode-change', handleEpisodeEvent);
       dom.episodeSeg.addEventListener('click', (e) => {
         const btn = e.target?.closest?.('.segmented-btn[data-value]');
         if (!btn) return;
@@ -1262,7 +1262,7 @@
     }
   }
 
-  window.MiaotingPlayer = {
+  window.InkCastPlayer = {
     init,
     playFromStart,
     pause,

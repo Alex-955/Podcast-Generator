@@ -2,23 +2,23 @@
   'use strict';
 
   const FALLBACK_CONFIG = {
-    filename: 'AI-Miaoting-v1.0.0-mac-arm64.dmg',
-    directUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/AI-Miaoting-v1.0.0-mac-arm64.dmg',
+    filename: 'InkCast-v1.0.0-mac-arm64.dmg',
+    directUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/InkCast-v1.0.0-mac-arm64.dmg',
     githubReleasesUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.0',
     githubRepoUrl: 'https://github.com/Alex-955/Podcast-Generator',
-    sha256: 'shasum -a 256 AI-Miaoting-v1.0.0-mac-*.dmg',
+    sha256: 'shasum -a 256 InkCast-v1.0.0-mac-*.dmg',
     requireNodeNotice: false,
   };
 
   const PREVIEW_ASSETS = {
     desktop: {
       src: './assets/images/studio-desktop.png',
-      alt: 'AI 妙听双栏桌面工作台实景截图',
+      alt: '拾声集（InkCast）双栏桌面工作台实景截图',
       caption: '双栏桌面工作台 · 导入文稿、确认预览与同步放音同屏完成',
     },
     modal: {
       src: './assets/images/settings-modal.png',
-      alt: 'AI 妙听模型与语音配置弹窗实景截图',
+      alt: '拾声集（InkCast）模型与语音配置弹窗实景截图',
       caption: '模型与语音配置 · 自带 Key 直连主流大模型与双主播语音',
     },
   };
@@ -202,7 +202,7 @@
         setSegmentedActive(container, value, { immediate: false });
 
         container.dispatchEvent(
-          new CustomEvent('miaoting:segmented-change', {
+          new CustomEvent('inkcast:segmented-change', {
             bubbles: true,
             detail: { name: segName, value },
           })
@@ -210,7 +210,7 @@
 
         if (segName === 'stage-episode') {
           container.dispatchEvent(
-            new CustomEvent('miaoting:episode-change', {
+            new CustomEvent('inkcast:episode-change', {
               bubbles: true,
               detail: { episode: value, value },
             })
@@ -597,7 +597,7 @@
 
     state.lightboxRestoreFocusEl = triggerEl || document.activeElement;
     lightboxImg.src = previewImg.currentSrc || previewImg.getAttribute('src') || '';
-    lightboxImg.alt = previewImg.alt || 'AI 妙听界面实景放大预览';
+    lightboxImg.alt = previewImg.alt || '拾声集（InkCast）界面实景放大预览';
     if (lightboxCaption) {
       lightboxCaption.textContent = previewImg.dataset.caption || previewImg.alt || '';
     }
@@ -942,8 +942,8 @@
     if (!btn) return;
 
     btn.addEventListener('click', () => {
-      if (global.MiaotingPlayer && typeof global.MiaotingPlayer.unlockAudioInGesture === 'function') {
-        global.MiaotingPlayer.unlockAudioInGesture();
+      if (global.InkCastPlayer && typeof global.InkCastPlayer.unlockAudioInGesture === 'function') {
+        global.InkCastPlayer.unlockAudioInGesture();
       }
       const stage = document.getElementById('stage');
       if (stage && typeof stage.scrollIntoView === 'function') {
@@ -953,8 +953,8 @@
         });
       }
       global.setTimeout(() => {
-        if (global.MiaotingPlayer && typeof global.MiaotingPlayer.playFromStart === 'function') {
-          global.MiaotingPlayer.playFromStart();
+        if (global.InkCastPlayer && typeof global.InkCastPlayer.playFromStart === 'function') {
+          global.InkCastPlayer.playFromStart();
         }
       }, 360);
     });
@@ -976,7 +976,7 @@
     initHeroListenCta();
   }
 
-  global.MiaotingInteractions = {
+  global.InkCastInteractions = {
     init,
     bindConfig,
     setOs,
