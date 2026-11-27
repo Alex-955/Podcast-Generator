@@ -373,7 +373,9 @@ function verifyNsis(target) {
     const pluginFiles = ['System.dll', 'StdUtils.dll', 'nsDialogs.dll', 'nsExec.dll',
       'nsProcess.dll', 'Nsis7z.dll', 'UAC.dll', 'WinShell.dll', 'LangDLL.dll', 'StartMenu.dll',
       'modern-header.bmp', 'modern-wizard.bmp', 'installerHeaderico.ico'];
-    const outerFiles = ['Uninstall ' + product + '.exe', 'uninstallerIcon.ico', '$PLUGINSDIR/' + payloads[0],
+    const uninstaller = 'Uninstall ' + product + '.exe';
+    // 7-Zip can preserve the literal SetOutPath $R0 used after payload extraction.
+    const outerFiles = [uninstaller, '$R0/' + uninstaller, 'uninstallerIcon.ico', '$PLUGINSDIR/' + payloads[0],
       ...pluginFiles.map(name => '$PLUGINSDIR/' + name.toLowerCase())];
     auditRuntime(outer, runtimeLayout(outerFiles), {
       normalize: name => name.startsWith('$PLUGINSDIR/') ? '$PLUGINSDIR/' + path.posix.basename(name).toLowerCase() : name,

@@ -212,17 +212,22 @@ test('NSIS 即使外层含合法资源也必须有内层归档', t => {
 test('NSIS 检查外层插件、内层运行时及 locales 中的所有条目', t => {
   const { exe, outer, inner } = nsisFixture(t);
   write(outer, '$PLUGINSDIR/app-64.7z', 'fixture payload');
+  write(outer, '$R0/Uninstall AI 妙听.exe', 'fixture uninstaller');
   write(inner, 'electron_wer.dll', 'fixture runtime');
   write(inner, 'dxcompiler.dll', 'fixture runtime');
   write(inner, 'locales/zh-CN.pak', 'fixture locale');
   assert.deepEqual(verifyTarget(exe), [applicationFiles.size]);
   for (const [dir, name] of [[outer, 'stray.txt'], [outer, '$PLUGINSDIR/private.dll'],
+    [outer, '$R0/stray.exe'],
     [inner, 'stray.dll'], [inner, 'stray.txt'], [inner, 'stray.js'], [inner, '.env'],
     [inner, 'dxil.dll'], [inner, 'libEGL.dll'], [inner, 'libGLESv2.dll'], [inner, 'locales/private.txt']]) {
     write(dir, name, 'extra');
     assert.throws(() => verifyTarget(exe), { message: '运行时含白名单以外的条目或链接：' + name });
     fs.unlinkSync(path.join(dir, name));
   }
+  fs.mkdirSync(path.join(outer, '$R0/nested'));
+  assert.throws(() => verifyTarget(exe), { message: '运行时含白名单以外的条目或链接：$R0/nested' });
+  fs.rmdirSync(path.join(outer, '$R0/nested'));
   fs.renameSync(path.join(outer, '$PLUGINSDIR/app-64.7z'), path.join(outer, '$PLUGINSDIR/app-arm64.7z'));
   const x64Exe = path.join(path.dirname(exe), 'AI-Miaoting-v1.0.0-win-x64-setup.exe');
   fs.renameSync(exe, x64Exe);
