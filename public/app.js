@@ -264,6 +264,7 @@
     modalTtsSpeed: 'relaxed',
     modalTtsSpeedChanged: false,
     ttsSpeedOverrideTaskId: null,
+    ttsSettingsOverrideTaskId: null,
     modalVolcAuthMode: 'apiKey',
     uiInputTab: 'url',
     podcastStyle: normalizePodcastStyleClient(readStorage(STORAGE_KEYS.podcastStyle)),
@@ -305,6 +306,7 @@
     scriptEdit: {
       active: false,
       podcastId: null,
+      baseVersion: null,
       original: [],
       draft: [],
       submitting: false,
@@ -1532,6 +1534,7 @@
 
       invalidateConfirmedDraft();
       state.ttsSpeedOverrideTaskId = null;
+      state.ttsSettingsOverrideTaskId = null;
       setActiveTask(task);
       if (window.innerWidth <= 900) {
         dom.progressSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1835,19 +1838,26 @@
 
   async function handleResumeTask(taskId) {
     try {
-      const ttsPayload = buildTtsPayload();
-      if (state.ttsSpeedOverrideTaskId !== taskId) {
-        delete ttsPayload.speechSpeed;
+      const isResynthesize = Boolean(state.activeTask?.id === taskId && state.activeTask?.targetPodcastId);
+      let ttsPayload;
+      if (isResynthesize && state.ttsSettingsOverrideTaskId !== taskId) {
+        ttsPayload = buildResynthesizeTtsPayload(state.activeTask);
+      } else {
+        ttsPayload = buildTtsPayload();
+        if (state.ttsSpeedOverrideTaskId !== taskId) {
+          delete ttsPayload.speechSpeed;
+        }
       }
+      const body = isResynthesize
+        ? { tts: ttsPayload }
+        : { ...buildCredsPayload(), tts: ttsPayload };
       const task = await apiJson(`/api/tasks/${encodeURIComponent(taskId)}/resume`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...buildCredsPayload(),
-          tts: ttsPayload,
-        }),
+        body: JSON.stringify(body),
       });
       state.ttsSpeedOverrideTaskId = null;
+      state.ttsSettingsOverrideTaskId = null;
       setActiveTask(task);
       startPolling();
       showToast('已从断点恢复生成');
@@ -2352,7 +2362,7 @@
       dom.scriptEditorStatus.textContent = parts.length ? parts.join(' · ') : '已调整台词顺序';
       if (dom.scriptEditorCacheHint) {
         if (stats.reusedCount > 0) {
-          dom.scriptEditorCacheHint.textContent = `其余 ${stats.reusedCount} 句秒级复用缓存`;
+          dom.scriptEditorCacheHint.textContent = `预计 ${stats.reusedCount} 句秒级复用缓存`;
           dom.scriptEditorCacheHint.classList.remove('hidden');
         } else {
           dom.scriptEditorCacheHint.classList.add('hidden');
@@ -2510,6 +2520,7 @@
     state.scriptEdit = {
       active: true,
       podcastId: podcast.id,
+      baseVersion: typeof podcast.audioVersion === 'string' ? podcast.audioVersion : null,
       original,
       draft: original.map((item) => ({ ...item })),
       submitting: false,
@@ -2525,6 +2536,7 @@
     state.scriptEdit = {
       active: false,
       podcastId: null,
+      baseVersion: null,
       original: [],
       draft: [],
       submitting: false,
@@ -2602,6 +2614,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          baseVersion: state.scriptEdit.baseVersion,
           dialogue,
           tts: buildResynthesizeTtsPayload(podcast),
         }),
@@ -2609,18 +2622,22 @@
 
       exitScriptEditMode({ rerender: true });
       state.ttsSpeedOverrideTaskId = null;
+      state.ttsSettingsOverrideTaskId = null;
       setActiveTask(task);
       if (window.innerWidth <= 900) {
         dom.progressSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
       startPolling();
       showToast(stats.reusedCount > 0
-        ? `已开始微调重合成（约 ${stats.reusedCount} 句将复用缓存）`
+        ? `已开始微调重合成（预计 ${stats.reusedCount} 句将复用缓存）`
         : '已开始重新合成播客音频');
     } catch (err) {
       state.scriptEdit.submitting = false;
       updateScriptEditAvailability();
       handleCredentialOrTaskError(err);
+      if (err.status === 409 && err.code === 'PODCAST_VERSION_CONFLICT') {
+        handleSelectHistory(podcast.id);
+      }
     }
   }
 
@@ -3677,8 +3694,12 @@
     state.ttsConfig = tts;
     if (!state.activeTask?.id) {
       state.ttsSpeedOverrideTaskId = null;
-    } else if (state.modalTtsSpeedChanged) {
-      state.ttsSpeedOverrideTaskId = state.activeTask.id;
+      state.ttsSettingsOverrideTaskId = null;
+    } else {
+      state.ttsSettingsOverrideTaskId = state.activeTask.id;
+      if (state.modalTtsSpeedChanged) {
+        state.ttsSpeedOverrideTaskId = state.activeTask.id;
+      }
     }
     state.modalTtsSpeedChanged = false;
 

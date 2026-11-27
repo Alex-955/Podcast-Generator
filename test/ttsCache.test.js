@@ -451,3 +451,16 @@ test('prune 只清理超过一小时且身份未变的顶层原子写临时文�
   assert.ok(lstat(temp(6)).isSymbolicLink());
   assert.ok(lstat(temp(5)).isDirectory());
 });
+
+test('归档账号摘要始终区分端点和实际认证凭据', () => {
+  const { speechAccountHash } = require('../src/services/ttsCache');
+  const endpoint = 'https://tts.example/';
+  const hash = options => speechAccountHash({ endpoint, ...options });
+  assert.equal(hash({ apiKey: 'A' }), hash({ endpoint: 'https://tts.example', apiKey: ' A ', appId: 'unused', accessKey: 'unused' }));
+  assert.notEqual(hash({ apiKey: 'A' }), hash({ apiKey: 'B' }));
+  assert.notEqual(hash({ apiKey: 'A' }), hash({ apiKey: 'A', endpoint: endpoint + 'other' }));
+  const pair = { appId: 'app', accessKey: 'key' };
+  assert.notEqual(hash(pair), hash({ ...pair, appId: 'second' }));
+  assert.notEqual(hash(pair), hash({ ...pair, accessKey: 'other' }));
+  assert.equal(hash({ appId: 'app' }), undefined);
+});

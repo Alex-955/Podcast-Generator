@@ -1617,3 +1617,136 @@ test('不安全的音频版本不进入详情或历史 URL，日期按公开字�
     assert.equal(manager.listPodcasts().items[0].fullAudioUrl, detail.fullAudioUrl);
   }
 });
+
+test('元数据写入和回滚均失败时阻断访问，恢复后不会撤销后续成品', async t => {
+  const { manager, config, root } = setup(t, { ttsProvider: await localProvider(t) });
+  const { id } = manager.createTask(payload);
+  await waitFor(() => manager.getTask(id), task => task.status === 'completed');
+  const target = path.join(config.podcastsDir, id);
+  const extra = path.join(target, 'sentence_099.mp3');
+  fs.writeFileSync(extra, makeMp3(7));
+  const snapshot = () => Object.fromEntries(fs.readdirSync(target, { withFileTypes: true })
+    .filter(entry => entry.isFile()).map(({ name }) => [name, fs.readFileSync(path.join(target, name))]));
+  const original = snapshot();
+  let fault = true;
+  const rename = fs.renameSync;
+  t.mock.method(fs, 'renameSync', (from, to) => {
+    if (fault && (to === path.join(target, 'meta.json') || path.basename(from) === '.restore')) {
+      throw new Error('模拟发布和回滚写盘故障');
+    }
+    return rename(from, to);
+  });
+  const edit = { baseVersion: null, dialogue: [{ speaker: '小晓', text: '新的台词' }] };
+  const a = manager.resynthesizePodcast(id, edit);
+  await waitFor(() => manager.getTask(a.id), task => task.status === 'failed');
+  const transaction = path.join(target, '.tmp-publish-' + a.id);
+  const info = JSON.parse(fs.readFileSync(path.join(transaction, 'prepared')));
+  assert.deepEqual(info, { taskId: a.id, previousVersion: null, targetVersion: info.targetVersion, dialogueCount: 1 });
+  assert.match(info.targetVersion, /^[a-f0-9]{32}$/);
+  assert.equal(fs.existsSync(extra), false);
+  for (const operation of [() => manager.resynthesizePodcast(id, edit), () => manager.getPodcast(id),
+    () => manager.deletePodcast(id), () => manager.resumeTask(a.id)]) {
+    assert.throws(operation, { statusCode: 503, code: 'PODCAST_RECOVERY_FAILED' });
+    assert.equal(fs.existsSync(path.join(transaction, 'prepared')), true);
+  }
+  const staleBackup = path.join(root, 'stale-backup');
+  fs.cpSync(transaction, staleBackup, { recursive: true });
+  fault = false;
+  assert.deepEqual(manager.getPodcast(id).sentences.map(line => line.text), dialogue.map(line => line.text));
+  assert.deepEqual(snapshot(), original);
+  assert.equal(fs.existsSync(transaction), false);
+  const b = manager.resynthesizePodcast(id, edit);
+  const done = await waitFor(() => manager.getTask(b.id), task => task.status === 'completed');
+  assert.equal(fs.existsSync(extra), false);
+  const committed = snapshot();
+  assert.throws(() => manager.resumeTask(a.id), { statusCode: 409, code: 'PODCAST_VERSION_CONFLICT' });
+  // Even an old prepared backup discovered after B committed cannot undo B.
+  fs.cpSync(staleBackup, transaction, { recursive: true });
+  const restarted = createTaskManager(config);
+  assert.deepEqual(restarted.getPodcast(id), done.podcast);
+  assert.deepEqual(snapshot(), committed);
+  assert.equal(fs.existsSync(transaction), false);
+});
+
+test('合成期间目标版本发生变化，发布前再次校验并保留磁盘成品', async t => {
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  let hold = false;
+  const { manager, config } = setup(t, { ttsProvider: await localProvider(t),
+    async audioMerger(...args) {
+      if (hold) {
+        entered.resolve();
+        await release.promise;
+      }
+      return require('../src/services/audioMerger').concatenateAudioFiles(...args);
+    },
+  });
+  const { id } = manager.createTask(payload);
+  await waitFor(() => manager.getTask(id), task => task.status === 'completed');
+  const target = path.join(config.podcastsDir, id);
+  const file = path.join(target, 'meta.json');
+  const meta = JSON.parse(fs.readFileSync(file));
+  hold = true;
+  const edit = manager.resynthesizePodcast(id, { baseVersion: null, dialogue: dialogue.slice(0, 1) });
+  await entered.promise;
+  meta.audioVersion = 'newer-version';
+  fs.writeFileSync(file, JSON.stringify(meta));
+  const snapshot = () => fs.readdirSync(target).map(name => [name, fs.readFileSync(path.join(target, name))]);
+  const before = snapshot();
+  release.resolve();
+  const failed = await waitFor(() => manager.getTask(edit.id), task => task.status === 'failed');
+  assert.match(failed.error.message, /播客已更新/);
+  assert.throws(() => manager.resumeTask(edit.id), { statusCode: 409, code: 'PODCAST_VERSION_CONFLICT' });
+  assert.deepEqual(snapshot(), before);
+});
+
+for (const scenario of ['换账号', '同账号', '缺少旧账号证明']) {
+  test('MiniMax 官方音色清空缓存后按成品账号复用，归档不回写缓存：' + scenario, async t => {
+    const same = scenario === '同账号';
+    const lines = Array.from({ length: same ? 10 : 2 }, (_, index) => ({ speaker: '阿泽', text: '原句' + index }));
+    const a = 'offline-account-alpha';
+    const b = 'offline-account-bravo';
+    const calls = [];
+    const ttsProvider = { ...createMinimaxProvider({ minRequestIntervalMs: 0 }),
+      synthesizeToFile({ outputPath, text, adapterOptions }) {
+        calls.push([adapterOptions.apiKey, text]);
+        const audio = makeMp3(adapterOptions.apiKey === a ? 3 : 5);
+        fs.writeFileSync(outputPath, audio);
+        return { bytes: audio.length, duration: 1 };
+      },
+    };
+    const { manager, config } = setup(t, { ttsProvider, scriptGenerator: () => ({ ...script, dialogue: lines }) });
+    const completed = id => waitFor(() => manager.getTask(id), task => task.status === 'completed');
+    const tts = apiKey => ({ provider: 'minimax', apiKey });
+    const { id } = manager.createTask({ ...payload, tts: tts(a) });
+    await completed(id);
+    const recordFile = taskId => path.join(config.tasksDir, taskId + '.json');
+    const record = JSON.parse(fs.readFileSync(recordFile(id)));
+    assert.match(record.ttsAccountHash, /^[a-f0-9]{64}$/);
+    if (scenario === '缺少旧账号证明') {
+      delete record.ttsAccountHash;
+      fs.writeFileSync(recordFile(id), JSON.stringify(record));
+    }
+    const verifyEdit = async (key, expectedCalls) => {
+      fs.rmSync(config.cacheDir, { recursive: true });
+      calls.length = 0;
+      lines[0] = { ...lines[0], text: lines[0].text + '改' };
+      const edit = manager.resynthesizePodcast(id, { dialogue: lines, tts: tts(key) });
+      const done = await completed(edit.id);
+      assert.deepEqual(calls, lines.slice(0, expectedCalls).map(line => [key, line.text]));
+      assert.equal(fs.readdirSync(config.cacheDir).length, expectedCalls);
+      const privateRecord = fs.readFileSync(recordFile(edit.id), 'utf8');
+      for (const credential of [a, b]) assert.ok(!privateRecord.includes(credential));
+      const hash = JSON.parse(privateRecord).ttsAccountHash;
+      const dir = path.join(config.podcastsDir, id);
+      for (const value of [JSON.stringify(done), JSON.stringify(manager.getPodcast(id)), fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')]) {
+        for (const hidden of [hash, 'ttsAccountHash', a, b]) assert.ok(!value.includes(hidden));
+      }
+      assert.deepEqual(fs.readFileSync(path.join(dir, 'sentence_001.mp3')), makeMp3(key === a ? 3 : 5));
+    };
+    const key = scenario === '换账号' ? b : a;
+    await verifyEdit(key, same ? 1 : lines.length);
+    // The current edited version has its own proof, including when B replaced A.
+    await verifyEdit(key, 1);
+  });
+}

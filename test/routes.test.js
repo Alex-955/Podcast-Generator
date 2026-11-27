@@ -807,7 +807,7 @@ test('本地模型服务经实际 HTTP 传输完成 /models 及最小对话探�
   assert.equal(calls.length, 0);
 });
 
-test('微调接口只合成改写的一句，清空缓存后也能补种旧成品并保持帧时间轴', async t => {
+test('微调接口只合成改写的一句，清空缓存后复用归档并保持帧时间轴', async t => {
   const lines = Array.from({ length: 10 }, (_, i) => ({
     speaker: i % 2 ? '小晓' : '阿泽', text: '交锋台词' + i, emotion: '认真',
   }));
@@ -854,7 +854,7 @@ test('微调接口只合成改写的一句，清空缓存后也能补种旧成�
     gate = Promise.withResolvers();
     let queued;
     try {
-      queued = (await request(route, 202, { dialogue: edits, tts })).data;
+      queued = (await request(route, 202, { dialogue: edits, baseVersion: previous.audioVersion ?? null, tts })).data;
       await request('podcasts/' + id, 409, undefined, 'DELETE');
       const hidden = '/podcasts/.resynth-' + queued.id + '/sentence_000.mp3';
       assert.equal((await fetch(base + hidden)).status, 404);
@@ -895,15 +895,42 @@ test('微调接口只合成改写的一句，清空缓存后也能补种旧成�
       assert.equal(sentence.startTime, index ? detail.sentences[index - 1].endTime + detail.sentenceGap : 0);
     }
     assert.equal(fs.existsSync(path.join(publicDir, 'external-audio', '.resynth-' + queued.id)), false);
+    const stale = await request(route, 409, { dialogue: lines, baseVersion: previous.audioVersion ?? null });
+    assert.equal(stale.code, 'PODCAST_VERSION_CONFLICT');
+    assert.deepEqual((await request('podcasts/' + id, 200)).data, detail);
+    assert.deepEqual(fs.readFileSync(path.join(dir, 'full_podcast.mp3')), full);
+    assert.equal(JSON.parse(checkpoint).baseVersion, previous.audioVersion ?? null);
+    const cache = path.join(publicDir, 'custom-data', 'tts-cache');
+    assert.equal(fs.readdirSync(cache).length, legacy ? 1 : 2);
     previous = detail;
   }
   for (const dialogue of [[], Array(301).fill(lines[0]), [{ speaker: '第三人', text: '正文' }],
     [{ speaker: '阿泽', text: ' ' }], [{ speaker: '小晓', text: '文'.repeat(2001) }]]) {
     await request(route, 400, { dialogue });
   }
+  for (const baseVersion of [false, 0, {}, [], '', ' invalid ', 'v'.repeat(33)]) {
+    assert.equal((await request(route, 400, { dialogue: lines, baseVersion })).error, '无效的播客版本号');
+  }
   await request(route, 400, { dialogue: [{ speaker: '阿泽', text: apiKey }], tts: { apiKey } });
   await request('podcasts/missing/resynthesize', 404, { dialogue: lines });
   await request('podcasts/..%2Fprivate/resynthesize', 400, { dialogue: lines });
+});
+
+test('直接播放音频同样阻断未能恢复的发布事务', async () => {
+  const dir = path.join(publicDir, 'external-audio', 'partial-publication');
+  const transaction = path.join(dir, '.tmp-publish-missing');
+  fs.mkdirSync(transaction, { recursive: true });
+  fs.writeFileSync(path.join(transaction, 'prepared'), JSON.stringify({
+    taskId: 'missing', previousVersion: null, targetVersion: 'target', dialogueCount: 1,
+  }));
+  fs.writeFileSync(path.join(dir, 'full_podcast.mp3'), makeMp3(2));
+  try {
+    const response = await fetch(base + '/podcasts/partial-publication/full_podcast.mp3');
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).code, 'PODCAST_RECOVERY_FAILED');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('局域网微调及其续跑、取消都验证管理令牌', async t => {

@@ -247,7 +247,14 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping, opt
       } else {
         let cached = cache?.get(key, outputPath);
         if (cache && !cached.hit && options.archivedSegment) {
-          cached = cache.seed(key, options.archivedSegment(line, key), outputPath);
+          const archived = options.archivedSegment(line, key);
+          if (archived && fs.lstatSync(archived, { throwIfNoEntry: false })?.isFile()) {
+            const audio = fs.readFileSync(archived);
+            if (isValidMp3(audio)) {
+              atomicWrite(outputPath, audio);
+              cached = { hit: true, bytes: audio.length };
+            }
+          }
         }
         if (cached?.hit) {
           cachedSegments++;

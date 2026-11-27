@@ -92,7 +92,7 @@ function validateEditedDialogue(dialogue) {
     if (!line || ![Object.prototype, null].includes(Object.getPrototypeOf(line))) {
       throw new InputError(label + '格式无效');
     }
-    const speaker = typeof line.speaker === 'string' && line.speaker.trim();
+    const speaker = line.speaker;
     if (!['阿泽', '小晓'].includes(speaker)) throw new InputError(label + '的说话人仅支持阿泽或小晓');
     const text = requireText(line.text, label, { max: MAX_LINE_TEXT_LENGTH });
     let emotion;

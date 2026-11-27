@@ -16,6 +16,15 @@ function speechScopeHash(endpoint, credentials, voices, publicVoices, officialEn
   return createHash('sha256').update(JSON.stringify(scope)).digest('hex');
 }
 
+function speechAccountHash({ endpoint, apiKey, appId, accessKey }) {
+  if (!endpoint) return;
+  const key = apiKey?.trim();
+  const auth = key ? ['apiKey', key] : ['appIdAccessKey', appId?.trim(), accessKey?.trim()];
+  if (auth.every(Boolean)) {
+    return createHash('sha256').update(JSON.stringify([new URL(endpoint).href, ...auth])).digest('hex');
+  }
+}
+
 function buildCacheKey({ provider, model, voice, rate = '+0%', pitch = '+0Hz', emotion = '', text, scopeHash, toneVersion }) {
   const fields = [provider, model, voice, rate, pitch, text].map(value => String(value).trim().normalize('NFC'));
   if (scopeHash) fields.push(scopeHash);
@@ -174,17 +183,7 @@ function createTtsCache(directory, {
     store(key, buffer);
   }
 
-  function seed(key, sourcePath, targetPath) {
-    if (!sourcePath || !statEntry(sourcePath)?.isFile()) return { hit: false };
-    const buffer = fs.readFileSync(sourcePath);
-    const { ok, durationSeconds } = analyzeMp3(buffer);
-    if (!ok) return { hit: false };
-    store(key, buffer);
-    atomicWrite(targetPath, buffer);
-    return { hit: true, filePath: targetPath, bytes: buffer.length, duration: durationSeconds };
-  }
-
-  return { get, put, seed, getPath, prune };
+  return { get, put, getPath, prune };
 }
 
-module.exports = { buildCacheKey, createTtsCache, speechScopeHash };
+module.exports = { buildCacheKey, createTtsCache, speechAccountHash, speechScopeHash };

@@ -188,8 +188,10 @@ function createApp(options = {}, ownerToken) {
     (req, res) => res.json({ success: true, data: manager.deletePodcast(req.params.id) }));
 
   // Only audio is public here. Historical raw meta.json files can contain local paths.
-  app.use('/podcasts', (req, res, next) => {
-    if (!/^\/[a-zA-Z0-9_-]+\/(?!\.)[^/\\]+\.mp3$/i.test(decodeURIComponent(req.path))) return res.sendStatus(404);
+  app.use('/podcasts', withManagerAccess, (req, res, next) => {
+    const match = /^\/([a-zA-Z0-9_-]+)\/(?!\.)[^/\\]+\.mp3$/i.exec(decodeURIComponent(req.path));
+    if (!match) return res.sendStatus(404);
+    manager.reconcilePodcast?.(match[1]);
     next();
   }, express.static(podcastsDir, { fallthrough: false }));
   app.use((req, res, next) => {
