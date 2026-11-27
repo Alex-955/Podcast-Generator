@@ -212,12 +212,15 @@ test('NSIS 即使外层含合法资源也必须有内层归档', t => {
 test('NSIS 检查外层插件、内层运行时及 locales 中的所有条目', t => {
   const { exe, outer, inner } = nsisFixture(t);
   write(outer, '$PLUGINSDIR/app-64.7z', 'fixture payload');
+  write(inner, 'electron_wer.dll', 'fixture runtime');
+  write(inner, 'dxcompiler.dll', 'fixture runtime');
   write(inner, 'locales/zh-CN.pak', 'fixture locale');
   assert.deepEqual(verifyTarget(exe), [applicationFiles.size]);
   for (const [dir, name] of [[outer, 'stray.txt'], [outer, '$PLUGINSDIR/private.dll'],
-    [inner, 'stray.txt'], [inner, '.env'], [inner, 'locales/private.txt']]) {
+    [inner, 'stray.dll'], [inner, 'stray.txt'], [inner, 'stray.js'], [inner, '.env'],
+    [inner, 'dxil.dll'], [inner, 'libEGL.dll'], [inner, 'libGLESv2.dll'], [inner, 'locales/private.txt']]) {
     write(dir, name, 'extra');
-    assert.throws(() => verifyTarget(exe), /白名单以外/);
+    assert.throws(() => verifyTarget(exe), { message: '运行时含白名单以外的条目或链接：' + name });
     fs.unlinkSync(path.join(dir, name));
   }
   fs.renameSync(path.join(outer, '$PLUGINSDIR/app-64.7z'), path.join(outer, '$PLUGINSDIR/app-arm64.7z'));

@@ -280,7 +280,7 @@ function macBundle(app) {
 
 const windowsLayout = runtimeLayout([
   product + '.exe', 'chrome_100_percent.pak', 'chrome_200_percent.pak', 'resources.pak',
-  'd3dcompiler_47.dll', 'dxcompiler.dll', 'dxil.dll', 'ffmpeg.dll', 'libEGL.dll', 'libGLESv2.dll',
+  'd3dcompiler_47.dll', 'dxcompiler.dll', 'electron_wer.dll', 'ffmpeg.dll',
   'vk_swiftshader.dll', 'vulkan-1.dll', 'vk_swiftshader_icd.json', 'icudtl.dat',
   'snapshot_blob.bin', 'v8_context_snapshot.bin', 'LICENSES.chromium.html', 'LICENSE.electron.txt',
   'locales/en-US.pak',
