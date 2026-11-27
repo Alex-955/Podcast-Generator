@@ -1916,6 +1916,49 @@ body.modal-open {
   flex: 1 1 200px;
 }
 
+.modal-portable-box {
+  padding: 10px 13px;
+  border-radius: var(--radius-md);
+  background: var(--bg-canvas);
+  border: 1px dashed var(--hairline-strong);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.modal-portable-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+}
+
+.modal-portable-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: 12.5px;
+}
+
+.modal-portable-links a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.modal-portable-links a:hover {
+  text-decoration: underline;
+}
+
+.sha-inline-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.sha-inline-link:hover {
+  text-decoration: underline;
+}
+
 .sha-box {
   padding: 12px 14px;
   border-radius: var(--radius-md);
