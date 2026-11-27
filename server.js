@@ -15,7 +15,7 @@ const { extractTextFromImages } = require('./src/services/imageExtractor');
 const { fetchLlmModels } = require('./src/services/llmModels');
 const { polishArticleText } = require('./src/services/textPolisher');
 const { recommendPodcastStyle } = require('./src/services/styleRecommender');
-const { acquireInstanceLock } = require('./src/services/instanceLock');
+const { acquireInstanceLock, withDataDirStartupLock } = require('./src/services/instanceLock');
 const { createTaskManager } = require('./src/services/taskManager');
 const { InputError, ttsSecrets } = require('./src/services/validation');
 const { redactProviderDetail } = require('./src/services/providerHttp');
@@ -58,7 +58,7 @@ function resolveDataDir(directory) {
   return path.resolve(directory || process.env.DATA_DIR || path.join(__dirname, 'data'));
 }
 
-function createApp(options = {}) {
+function createApp(options = {}, ownerToken) {
   const app = express();
   const { adminToken = process.env.ADMIN_TOKEN?.trim() || '',
     isLoopbackRequest = req => isLoopbackAddress(req.socket?.remoteAddress) } = options;
@@ -68,10 +68,10 @@ function createApp(options = {}) {
   const podcastsDir = path.resolve(options.podcastsDir || process.env.PODCASTS_DIR || path.join(publicDir, 'podcasts'));
   const extractor = options.extractor || extractArticle;
   let manager = options.taskManager;
-  function initializeManager() {
-    manager ??= createTaskManager({
+  function initializeManager(token = ownerToken) {
+    manager ??= withDataDirStartupLock(dataDir, token, () => createTaskManager({
       ...options, extractor, podcastsDir, tasksDir: path.join(dataDir, 'tasks'), cacheDir: path.join(dataDir, 'tts-cache'),
-    });
+    }));
   }
   appStartup.set(app, { dataDir, initializeManager });
   const requests = new Set();
@@ -222,8 +222,8 @@ async function startServer({
   const dataDir = appStartup.get(app)?.dataDir ?? resolveDataDir(createAppOptions.dataDir);
   const release = await acquireInstanceLock(dataDir);
   try {
-    app ??= createApp({ ...createAppOptions, dataDir });
-    appStartup.get(app)?.initializeManager();
+    app ??= createApp({ ...createAppOptions, dataDir }, release);
+    appStartup.get(app)?.initializeManager(release);
     for (;;) {
       try {
         server = await listen(app, host, candidate);

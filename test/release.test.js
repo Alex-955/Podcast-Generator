@@ -104,7 +104,9 @@ async function verifyStagedServer(stageDir, tmpDir, { nodePath = '' } = {}) {
     });
     const health = await fetch(ready + '/api/health');
     assert.equal(health.status, 200);
-    assert.equal((await health.json()).version, version);
+    const body = await health.json();
+    assert.equal(body.version, version);
+    assert.equal(body.status, 'ok');
     const html = await fetch(ready + '/');
     assert.equal(html.status, 200);
     assert.match(await html.text(), /AI 妙听/);
@@ -145,6 +147,7 @@ function zipEntries(archive, extractDir) {
       const start = local + 30 + length + zip.readUInt16LE(local + 28);
       const data = zip.subarray(start, start + zip.readUInt32LE(offset + 20));
       write(extractDir, name, method ? inflateRawSync(data) : data);
+      if (process.platform !== 'win32') fs.chmodSync(path.join(extractDir, name), (attributes >>> 16) & 0o777);
     }
     entries.set(name, attributes >>> 16);
     offset += 46 + length + zip.readUInt16LE(offset + 30) + zip.readUInt16LE(offset + 32);
@@ -394,10 +397,33 @@ test('发行门禁拦截非 ASCII 主目录、dotenv 冒号语法和不合法 UT
   });
 });
 
+test('带依赖构建与暂存门禁都要求有效且非空的生产包索引', t => {
+  const root = scratch(t);
+  const sourceDir = sourceFixture(root);
+  const outDir = path.join(root, 'out');
+  write(sourceDir, 'node_modules/pkg/index.js', 'module.exports = 1;');
+  const { stageDir } = buildRelease({ sourceDir, outDir, format: 'dir' });
+  write(stageDir, 'node_modules/pkg/index.js', 'module.exports = 1;');
+  const invalidPackages = [null, [], true, 'pkg', {}, { '': {} },
+    { 'node_modules/pkg': null }, { 'node_modules/pkg': { dev: true } }];
+  const invalidLocks = [undefined, '{}', 'invalid', ...invalidPackages.map(packages => JSON.stringify({ packages }))];
+  for (const index of invalidLocks) {
+    for (const dir of [sourceDir, stageDir]) {
+      if (index === undefined) fs.unlinkSync(path.join(dir, 'package-lock.json'));
+      else write(dir, 'package-lock.json', index);
+    }
+    assert.throws(() => buildRelease({ sourceDir, outDir, name: 'invalid', withDeps: true }), /package-lock\.json/);
+    assert.throws(() => runReleaseSecurityGate(stageDir), /package-lock\.json/);
+  }
+  assert.deepEqual(fs.readdirSync(outDir), [path.basename(stageDir)]);
+});
+
 test('离线复制依赖时跳过缓存，只允许指向依赖目录内的符号链接', t => {
   const root = scratch(t);
   const sourceDir = sourceFixture(root);
-  write(sourceDir, 'package-lock.json', '{}'); // Legacy fixture without a packages index.
+  write(sourceDir, 'package-lock.json', JSON.stringify({ packages: {
+    'node_modules/pkg': {}, 'node_modules/alias': {}, 'node_modules/outside': { optional: true },
+  } }));
   const packages = path.join(sourceDir, 'node_modules');
   write(packages, 'pkg/package.json', '{}');
   write(packages, 'pkg/.cache/do-not-ship', 'synthetic cached data');
@@ -460,8 +486,9 @@ test('真实便携 ZIP 和 tar.gz 包含白名单目录、匹配 SHA-256 并带�
   const zip = zipEntries(archives[0], extracted);
   for (const entry of zip.keys()) {
     if (!entry.includes('/node_modules/')) continue;
+    assert.doesNotMatch(entry, /\/(?:tests?\.js|eslint\.config\.[^/]+|yarn\.lock)$|\.map$|\/(?:tests?|\.github)\/|\/\.ds_store$/i);
     if (/^(?:licen[cs]e|notice)/i.test(path.posix.basename(entry))) continue;
-    assert.doesNotMatch(entry, /\.(?:map|md|markdown)$|\/(?:tests?|__tests__|\.github)\/|\/\.ds_store$/i);
+    assert.doesNotMatch(entry, /\.(?:md|markdown)$|\/__tests__\//i);
   }
   const smoke = spawnSync(process.execPath, ['--input-type=module', '-e', `
     import assert from 'node:assert/strict';
@@ -522,7 +549,7 @@ test('真实便携 ZIP 和 tar.gz 包含白名单目录、匹配 SHA-256 并带�
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stderr);
   }
-  await verifyStagedServer(stageDir, root);
+  await verifyStagedServer(path.join(extracted, path.basename(stageDir)), root);
 });
 
 test('tar.gz 使用 PAX 保留超过 USTAR 名称长度的 ASCII 路径', t => {
@@ -550,7 +577,10 @@ test('锁文件排除开发依赖和额外安装的包，嵌套生产包与归�
     write(sourceDir, pkg + '/index.js', 'module.exports = 1;');
   }
   const omit = ['TeSt/index.js', '__mocks__/mock.js', '.github/workflows/x.yml', 'index.js.map', 'index.d.mts',
-    'GUIDE.markdown', 'migration.txt', 'tsconfig.build.json', 'webpack.config.js'];
+    'GUIDE.markdown', 'migration.txt', 'tsconfig.build.json', 'webpack.config.js', 'test.js', 'TESTS.JS',
+    'a.test.js', 'b.spec.js', 'c.test.cjs', 'd.spec.cjs', 'e.test.mjs', 'f.spec.mjs',
+    'ESLint.config.mjs', 'prettier.config.cjs', 'jest.config.js', 'vitest.config.ts', 'rollup.config.mjs',
+    'babel.config.json', 'Yarn.Lock', 'pnpm-lock.yaml', 'package-lock.json', 'npm-shrinkwrap.json', '.nycrc', '.mocharc.yml'];
   for (const file of [...omit, 'LICENSE.md', 'NOTICE.txt']) write(sourceDir, prod + '/' + file, 'fixture');
   const { stageDir, archives } = buildRelease({ sourceDir, outDir: path.join(root, 'out'), name: 'demo', withDeps: true });
   const names = zipEntries(archives[0]);
@@ -560,10 +590,12 @@ test('锁文件排除开发依赖和额外安装的包，嵌套生产包与归�
   for (const file of [dev + '/index.js', 'node_modules/build-tool/index.js', 'node_modules/extraneous/index.js',
     ...omit.map(file => prod + '/' + file)]) assert.ok(!names.has('demo/' + file), file);
   write(stageDir, dev + '/index.js', 'fixture');
-  for (const file of ['index.js.map', 'test/index.js']) write(stageDir, prod + '/' + file, 'fixture');
+  write(stageDir, 'node_modules/extraneous/index.js', 'fixture');
+  for (const file of omit) write(stageDir, prod + '/' + file, 'fixture');
   assert.throws(() => runReleaseSecurityGate(stageDir), error =>
     error.issues.includes(dev + ' 不在生产依赖清单中') &&
-    ['index.js.map', 'test'].every(file => error.issues.includes(prod + '/' + file + ' 属于禁运路径')));
+    error.issues.includes('node_modules/extraneous 不在生产依赖清单中') &&
+    omit.every(file => error.issues.includes(prod + '/' + file.split('/')[0] + ' 属于禁运路径')));
 });
 
 test('归档条目与门禁清单不符时不发布 ZIP 和校验清单', t => {

@@ -9,7 +9,7 @@ const activeDirectories = new Map();
 
 function locked() {
   return Object.assign(new Error('当前数据目录正被另一个运行中的 AI 妙听实例占用，请先停止该实例或使用独立的 DATA_DIR'), {
-    code: 'DATA_DIR_LOCKED',
+    code: 'DATA_DIR_LOCKED', statusCode: 409,
   });
 }
 
@@ -65,9 +65,13 @@ function tryReclaim(dir, file, claim) {
   return true;
 }
 
-async function acquireInstanceLock(directory) {
+function canonicalDataDir(directory) {
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const dir = fs.realpathSync.native(directory);
+  return fs.realpathSync.native(directory);
+}
+
+async function acquireInstanceLock(directory) {
+  const dir = canonicalDataDir(directory);
   // Drop our claim before retrying so simultaneous stale-lock reclaimers
   // cannot deadlock. A confirmed live owner always fails immediately.
   for (let attempt = 0; attempt < 6; attempt++) {
@@ -114,10 +118,10 @@ function tryAcquire(dir) {
     throw error;
   }
 
-  activeDirectories.set(dir, owner);
+  activeDirectories.set(dir, release);
   function release() {
     process.removeListener('exit', release);
-    if (activeDirectories.get(dir) !== owner) return;
+    if (activeDirectories.get(dir) !== release) return;
     activeDirectories.delete(dir);
     try {
       removeOwnedLock(file, owner);
@@ -129,4 +133,22 @@ function tryAcquire(dir) {
   return release;
 }
 
-module.exports = { acquireInstanceLock, processExists };
+// A standalone app holds a short-lived claim through synchronous recovery so
+// another process cannot acquire the directory between the check and the write.
+function withDataDirStartupLock(directory, ownerToken, initialize) {
+  const dir = canonicalDataDir(directory);
+  const active = activeDirectories.get(dir);
+  if (active) {
+    if (active !== ownerToken) throw locked();
+    return initialize();
+  }
+  const release = tryAcquire(dir);
+  if (!release) throw locked();
+  try {
+    return initialize();
+  } finally {
+    release();
+  }
+}
+
+module.exports = { acquireInstanceLock, withDataDirStartupLock, processExists };

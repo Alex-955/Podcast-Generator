@@ -154,6 +154,9 @@ function excludedDependency(relative, directory) {
   const name = parts.pop();
   if (parts.some(part => DEPENDENCY_DIRS.has(part)) || name === '.ds_store') return true;
   if (directory) return DEPENDENCY_DIRS.has(name);
+  if (/^(?:tests?\.js|yarn\.lock|pnpm-lock\.yaml|package-lock\.json|npm-shrinkwrap\.json)$/.test(name) ||
+      /\.(?:test|spec)\.(?:js|cjs|mjs)$/.test(name) ||
+      /^(?:(?:eslint|prettier|jest|vitest|rollup|babel)\.config\.|\.nycrc|\.mocharc)/.test(name)) return true;
   if (/^(?:licen[cs]e|notice)/.test(name)) return false;
   return DEPENDENCY_DOC.test(name) ||
     /\.(?:map|d\.(?:ts|mts|cts)|tsbuildinfo|md|markdown|txt)$/.test(name) ||
@@ -161,7 +164,7 @@ function excludedDependency(relative, directory) {
     /^(?:\.eslintrc|\.prettierrc|\.babelrc|gruntfile|gulpfile|karma\.conf|webpack\.config)/.test(name);
 }
 
-function productionPackages(root) {
+function productionPackages(root, required = true) {
   const contents = fs.readFileSync(plainFile(root, 'package-lock.json'), 'utf8');
   let packages;
   try {
@@ -169,8 +172,22 @@ function productionPackages(root) {
   } catch {
     throw new Error('package-lock.json 格式无效');
   }
-  if (!packages || !Object.keys(packages).length) return null;
-  return new Map(Object.entries(packages).filter(([key, pkg]) => key.startsWith('node_modules/') && !pkg.dev));
+  if (!required) return null;
+  const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!isRecord(packages)) throw new Error('package-lock.json 缺少有效的 packages 索引');
+  const production = new Map();
+  for (const [relative, pkg] of Object.entries(packages)) {
+    if (!isRecord(pkg) || (pkg.dev !== undefined && typeof pkg.dev !== 'boolean')) {
+      throw new Error('package-lock.json 的 packages 条目无效');
+    }
+    if (!relative.startsWith('node_modules/')) continue;
+    if (!/^(?:node_modules\/(?:@[\w.-]+\/)?[\w-][\w.-]*)(?:\/node_modules\/(?:@[\w.-]+\/)?[\w-][\w.-]*)*$/.test(relative)) {
+      throw new Error('锁文件包含无效依赖路径');
+    }
+    if (!pkg.dev) production.set(relative, pkg);
+  }
+  if (!production.size) throw new Error('package-lock.json 的 packages 索引缺少生产依赖');
+  return production;
 }
 
 function packageOwner(relative) {
@@ -191,7 +208,7 @@ function copyDependencies(sourceDir, stageDir) {
     const physical = path.relative(source, real).split(path.sep).join('/');
     const stat = fs.statSync(real);
     if (excludedDependency(relative, stat.isDirectory()) || excludedDependency(physical, stat.isDirectory())) return;
-    if (packages && physical) {
+    if (physical) {
       const owner = packageOwner('node_modules/' + physical);
       if (!packages.has(owner)) throw new Error('依赖链接目标不在生产依赖清单中：' + relative);
     }
@@ -203,7 +220,7 @@ function copyDependencies(sourceDir, stageDir) {
       fs.mkdirSync(to, { recursive: true });
       const parents = new Set([...ancestors, real]);
       for (const entry of fs.readdirSync(real, { withFileTypes: true })) {
-        if (packages && entry.name === 'node_modules') continue; // Nested packages have their own lock entries.
+        if (entry.name === 'node_modules') continue; // Nested packages have their own lock entries.
         const child = relative + '/' + entry.name;
         if (!excludedDependency(child, entry.isDirectory())) copyEntry(path.join(real, entry.name), child, parents);
       }
@@ -211,11 +228,7 @@ function copyDependencies(sourceDir, stageDir) {
       throw new Error('依赖目录包含非常规文件：' + relative);
     }
   }
-  if (!packages) return copyEntry(source, 'node_modules', new Set());
   for (const [relative, pkg] of packages) {
-    if (!/^(?:node_modules\/(?:@[\w.-]+\/)?[\w-][\w.-]*)(?:\/node_modules\/(?:@[\w.-]+\/)?[\w-][\w.-]*)*$/.test(relative)) {
-      throw new Error('锁文件包含无效依赖路径');
-    }
     const from = path.join(sourceDir, relative);
     if (pkg.optional && !fs.existsSync(from)) continue;
     if (!fs.statSync(from, { throwIfNoEntry: false })?.isDirectory()) throw new Error('缺少生产依赖：' + relative);
@@ -308,8 +321,9 @@ function scanContent(contents, relative, issues) {
 function runReleaseSecurityGate(stageDir, manifest = new Set()) {
   const issues = [];
   const files = new Set();
-  const lockFile = path.join(stageDir, 'package-lock.json');
-  const packages = fs.lstatSync(lockFile, { throwIfNoEntry: false })?.isFile() ? productionPackages(stageDir) : null;
+  const hasDeps = fs.existsSync(path.join(stageDir, 'node_modules'));
+  const lock = fs.lstatSync(path.join(stageDir, 'package-lock.json'), { throwIfNoEntry: false });
+  const packages = hasDeps || lock?.isFile() ? productionPackages(stageDir, hasDeps) : null;
   let hasSource = false;
   function scan(dir, prefix = '') {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

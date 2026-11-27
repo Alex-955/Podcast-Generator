@@ -262,7 +262,7 @@ test('同进程与独立 CLI 都无法抢占运行中任务，关闭后可重新
   await entered.promise;
   const id = created.body.data.id;
   const file = path.join(options.dataDir, 'tasks', id + '.json');
-  const checkpoint = fs.readFileSync(file, 'utf8');
+  const checkpoint = fs.readFileSync(file);
   assert.equal(JSON.parse(checkpoint).status, 'running');
   const alias = path.join(path.dirname(options.dataDir), 'alias');
   fs.symlinkSync(options.dataDir, alias, process.platform === 'win32' ? 'junction' : 'dir');
@@ -270,10 +270,17 @@ test('同进程与独立 CLI 都无法抢占运行中任务，关闭后可重新
     code: 'DATA_DIR_LOCKED',
   });
   await assert.rejects(startServer({ app: createApp(options), port: 0 }), { code: 'DATA_DIR_LOCKED' });
+  const standalone = createApp({ ...options, dataDir: alias }).listen(0, host);
+  t.after(() => new Promise(resolve => standalone.close(resolve)));
+  await once(standalone, 'listening');
+  const refused = await request(standalone.address().port, 'health');
+  assert.equal(refused.status, 409);
+  assert.equal(refused.body.code, 'DATA_DIR_LOCKED');
+  assert.deepEqual(fs.readFileSync(file), checkpoint);
   const other = launch(t, 0, options);
   assert.deepEqual(await other.ready, { error: 'DATA_DIR_LOCKED' });
   assert.deepEqual(await other.exit, [1, null]);
-  assert.equal(fs.readFileSync(file, 'utf8'), checkpoint);
+  assert.deepEqual(fs.readFileSync(file), checkpoint);
   assert.equal((await request(first.port, 'tasks/' + id)).body.data.status, 'running');
   await first.close();
   const next = await startServer({ ...options, port: 0 });
@@ -285,6 +292,12 @@ test('回收已退出进程遗留的锁，关闭时保留其他所有者的替�
   const options = settings();
   const child = launch(t, 0, options);
   assert.ok((await child.ready).port > 0);
+  const standalone = createApp(options).listen(0, host);
+  t.after(() => new Promise(resolve => standalone.close(resolve)));
+  await once(standalone, 'listening');
+  const refused = await request(standalone.address().port, 'health');
+  assert.equal(refused.status, 409);
+  assert.equal(refused.body.code, 'DATA_DIR_LOCKED');
   child.child.kill('SIGKILL');
   await child.exit;
   const lock = path.join(options.dataDir, '.server.lock');

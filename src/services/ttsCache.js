@@ -25,7 +25,7 @@ function buildCacheKey({ provider, model, voice, rate = '+0%', pitch = '+0Hz', e
 }
 
 const CACHE_FILENAME = /^[a-f0-9]{64}\.mp3$/;
-const TEMP_FILENAME = /^\.tmp-[0-9a-f-]{36}$/i;
+const TEMP_FILENAME = /^\.tmp-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TEMP_MAX_AGE_MS = 60 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 60_000;
 const statEntry = file => fs.lstatSync(file, { throwIfNoEntry: false });
@@ -77,8 +77,17 @@ function createTtsCache(directory, {
       if (error.code === 'ENOENT') return;
       throw error;
     }
-    if (eligible(claimed)) remove(claimed);
-    else if (statEntry(claimed) && !statEntry(file)) fs.renameSync(claimed, file);
+    if (!eligible(claimed)) {
+      // Restore a replacement only if its original name is still available.
+      // If another writer took that name, preserve both files.
+      try {
+        fs.linkSync(claimed, file);
+      } catch (error) {
+        if (error.code === 'EEXIST' || error.code === 'ENOENT') return;
+        throw error;
+      }
+    }
+    remove(claimed);
   }
 
   function prune({ protectKey } = {}) {
