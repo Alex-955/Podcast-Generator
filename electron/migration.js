@@ -2,8 +2,8 @@
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { constants, createWriteStream } = require('node:fs');
-const { pipeline } = require('node:stream/promises');
+const { constants } = require('node:fs');
+const { isValidMp3 } = require('../src/services/mp3Utils');
 const { redactProviderDetail } = require('../src/services/providerHttp');
 
 async function statIfPresent(file) {
@@ -78,8 +78,9 @@ async function stagePodcast(source, stage) {
         if (bytes === null) return false;
         await fs.writeFile(dest, bytes, { flag: 'wx' });
       } else {
-        const output = createWriteStream(dest, { flags: 'wx' });
-        await pipeline(file.createReadStream(), output);
+        const audio = await file.readFile();
+        if (!isValidMp3(audio)) return false;
+        await fs.writeFile(dest, audio, { flag: 'wx' });
       }
     } finally { await file.close(); }
   }

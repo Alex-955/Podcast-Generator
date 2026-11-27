@@ -1,10 +1,15 @@
 'use strict';
 
-function classify(raw, origin) {
+const DESKTOP_ORIGIN = 'aimiaoting://app';
+
+function classify(raw, origin = DESKTOP_ORIGIN) {
   try {
     const url = new URL(raw);
-    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return 'deny';
-    return url.origin === origin ? 'local' : 'external';
+    const allowed = new URL(origin);
+    if (url.username || url.password) return 'deny';
+    if (['aimiaoting:', 'https:', 'http:'].includes(url.protocol) &&
+        url.protocol === allowed.protocol && url.host === allowed.host) return 'local';
+    return ['http:', 'https:'].includes(url.protocol) ? 'external' : 'deny';
   } catch { return 'deny'; }
 }
 
@@ -31,4 +36,4 @@ function allowDownload(urls, origin) {
     /^\/podcasts\/[\w-]+\/[^/]+\.mp3$/i.test(new URL(urls.at(-1)).pathname);
 }
 
-module.exports = { classify, guardNavigation, allowDownload };
+module.exports = { DESKTOP_ORIGIN, classify, guardNavigation, allowDownload };

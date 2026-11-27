@@ -52,8 +52,8 @@ jobs:
           name: portable
           if-no-files-found: error
           path: |
-            dist/*.zip
-            dist/*.tar.gz
+            dist/ai-podcast-generator-v*-portable.zip
+            dist/ai-podcast-generator-v*-portable.tar.gz
 
   desktop-mac:
     runs-on: macos-latest
@@ -67,11 +67,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run desktop:build:mac
-      - run: node scripts/verify-desktop-bundle.js
+      - name: Verify final disk images
+        shell: bash
+        run: |
+          set -euo pipefail
+          for dmg in dist/AI-Miaoting-v*-mac-*.dmg; do
+            node scripts/verify-desktop-bundle.js "$dmg"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-mac
-          path: dist/*.dmg
+          path: dist/AI-Miaoting-v*-mac-*.dmg
           if-no-files-found: error
 
   desktop-win:
@@ -86,11 +92,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run desktop:build:win
-      - run: node scripts/verify-desktop-bundle.js
+      - name: Verify final NSIS installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          for exe in dist/AI-Miaoting-v*-win-*-setup.exe; do
+            node scripts/verify-desktop-bundle.js "$exe"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-win
-          path: dist/*.exe
+          path: dist/AI-Miaoting-v*-win-*-setup.exe
           if-no-files-found: error
 
   publish:
@@ -111,8 +123,12 @@ jobs:
           set -euo pipefail
           version=$(node -p "require('../package.json').version")
           files=("AI-Miaoting-v${version}-mac-arm64.dmg" "AI-Miaoting-v${version}-mac-x64.dmg"
-                 "AI-Miaoting-v${version}-win-x64-setup.exe" *.zip *.tar.gz)
-          test "${#files[@]}" -eq 5
+                 "AI-Miaoting-v${version}-win-x64-setup.exe" "ai-podcast-generator-v${version}-portable.zip"
+                 "ai-podcast-generator-v${version}-portable.tar.gz")
+          shopt -s dotglob nullglob
+          entries=(*)
+          test "${#entries[@]}" -eq 5
+          for file in "${files[@]}"; do test -f "$file"; done
           sha256sum "${files[@]}" > SHA256SUMS.txt
           sha256sum -c SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
@@ -127,8 +143,8 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            dist/*.dmg
-            dist/*.exe
-            dist/*.zip
-            dist/*.tar.gz
+            dist/AI-Miaoting-v*-mac-*.dmg
+            dist/AI-Miaoting-v*-win-*-setup.exe
+            dist/ai-podcast-generator-v*-portable.zip
+            dist/ai-podcast-generator-v*-portable.tar.gz
             dist/SHA256SUMS.txt

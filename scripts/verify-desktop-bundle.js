@@ -2,12 +2,25 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { scanContent, productionPackages, packageOwner } = require('./build-release');
+const os = require('node:os');
+const { execFileSync } = require('node:child_process');
+const { scanContent, productionPackages, packageOwner, excludedDependency, forbiddenPath } = require('./build-release');
 
-const required = ['electron/main.js', 'electron/preload.js', 'server.js', 'package.json', 'public/index.html',
-  'LICENSE', 'TRADEMARK.md'];
-const filesAtRoot = new Set(['package.json', 'server.js', 'LICENSE', 'TRADEMARK.md']);
-const directories = new Set(['electron', 'src', 'public', 'node_modules']);
+const applicationFiles = new Set([
+  'package.json', 'server.js', 'LICENSE', 'TRADEMARK.md',
+  'electron/main.js', 'electron/preload.js', 'electron/windowState.js', 'electron/navigationGuard.js', 'electron/migration.js',
+  'public/index.html', 'public/style.css', 'public/app.js', 'public/inputSource.js', 'public/audioEngine.js',
+  'src/services/atomicWrite.js', 'src/services/audioMerger.js', 'src/services/connectionTests.js',
+  'src/services/edgeTtsAdapter.js', 'src/services/extractor.js', 'src/services/httpTts.js',
+  'src/services/imageExtractor.js', 'src/services/instanceLock.js', 'src/services/llmCredentials.js',
+  'src/services/llmModels.js', 'src/services/minimaxTtsProvider.js', 'src/services/mp3Utils.js',
+  'src/services/podcastPublication.js', 'src/services/providerHttp.js', 'src/services/scriptEngine.js',
+  'src/services/speechNormalize.js', 'src/services/styleRecommender.js', 'src/services/taskManager.js',
+  'src/services/textPolisher.js', 'src/services/ttsCache.js', 'src/services/ttsCredentials.js',
+  'src/services/ttsProvider.js', 'src/services/ttsService.js', 'src/services/validation.js',
+  'src/services/volcengineTtsProvider.js',
+]);
+const applicationDirs = new Set(['electron', 'public', 'src', 'src/services']);
 const { isUtf8 } = require('node:buffer');
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const stat = file => fs.lstatSync(file, { throwIfNoEntry: false });
@@ -94,18 +107,25 @@ function checkContent(name, bytes) {
 
 function verifyBundle(file) {
   const packages = productionPackages(path.resolve(__dirname, '..'));
-  const versions = new Set([...packages].map(([location, pkg]) =>
-    location.split('node_modules/').at(-1) + '@' + pkg.version));
+  // electron-builder hoists nested packages, so match their locked names and versions.
+  const productionNames = new Set(), versions = new Set();
+  for (const [location, pkg] of packages) {
+    const name = location.split('node_modules/').at(-1);
+    productionNames.add(name);
+    versions.add(name + '@' + pkg.version);
+  }
   const owners = new Set(), manifests = new Set(), found = new Set();
   function visit(name, bytes) {
-    const parts = name.split('/');
-    if ((!directories.has(parts[0]) && !(bytes && filesAtRoot.has(name))) ||
-        parts.some(part => /^(?:\.env.*|\.git|\.ds_store|tests?|__tests__|plan\.md|agents\.md|roadmap\.md)$/i.test(part)) ||
-        /\.map$/i.test(name) || (name.startsWith('public/podcasts/') && name !== 'public/podcasts/.gitkeep'))
-      throw new Error('包含白名单以外的路径');
-    if (bytes === null) return;
-    if (parts[0] === 'node_modules') {
+    const directory = bytes === null;
+    if (name === 'node_modules' && directory) return;
+    if (name.startsWith('node_modules/')) {
+      if (forbiddenPath(name) || excludedDependency(name, directory)) throw new Error('生产依赖含禁运文件');
       const owner = packageOwner(name);
+      if (directory) {
+        if (owner === name && !productionNames.has(owner.split('node_modules/').at(-1))) throw new Error('含非生产依赖');
+        return;
+      }
+      if (!owner || owner === name) throw new Error('依赖路径无效');
       owners.add(owner);
       if (name === owner + '/package.json') {
         const pkg = JSON.parse(bytes);
@@ -113,14 +133,16 @@ function verifyBundle(file) {
           throw new Error('含非生产依赖');
         manifests.add(owner);
       }
+    } else if (!(directory ? applicationDirs : applicationFiles).has(name)) {
+      throw new Error('包含白名单以外的路径');
     }
-    if (name === 'public/podcasts/.gitkeep' && bytes.length) throw new Error('播客占位文件必须为空');
+    if (directory) return;
     found.add(name);
     checkContent(name, bytes);
   }
   if (path.basename(file) === 'app.asar') readArchive(file, visit);
   else walkDirectory(file, visit);
-  for (const name of required) if (!found.has(name)) throw new Error('缺少 ' + name);
+  for (const name of applicationFiles) if (!found.has(name)) throw new Error('缺少 ' + name);
   for (const owner of owners) if (!manifests.has(owner)) throw new Error('依赖缺少清单');
   return found.size;
 }
@@ -137,7 +159,9 @@ function resourcesAt(dir) {
                !(entry.isFile() && name === 'app.asar')) throw new Error('外置资源不在白名单内');
   }
   const publicDir = path.join(dir, 'public');
-  if (stat(publicDir)) walkDirectory(publicDir, (name, bytes) => {
+  const marker = stat(path.join(publicDir, 'podcasts', '.gitkeep'));
+  if (!marker?.isFile() || marker.size !== 0) throw new Error('缺少空的播客占位文件');
+  walkDirectory(publicDir, (name, bytes) => {
     if (!(name === 'podcasts' && bytes === null) && !(name === 'podcasts/.gitkeep' && bytes?.length === 0))
       throw new Error('外置资源不在白名单内');
   });
@@ -165,11 +189,78 @@ function locate(target) {
   return bundles;
 }
 
-module.exports = { verifyBundle, locate };
+function verifyTarget(target) {
+  if (target.toLowerCase().endsWith('.dmg')) return verifyDmg(target);
+  if (target.toLowerCase().endsWith('.exe')) return verifyNsis(target);
+  return locate(target).map(verifyBundle);
+}
+
+function verifyInstalledResources(resources) {
+  if (!stat(resources)?.isDirectory()) throw new Error('缺少普通资源目录');
+  const archive = resourcesAt(resources);
+  if (path.basename(archive) !== 'app.asar') throw new Error('安装包缺少 ASAR');
+  return verifyBundle(archive);
+}
+
+function verifyDmg(target) {
+  const mount = fs.mkdtempSync(path.join(os.tmpdir(), 'miaoting-dmg-'));
+  let attached = false;
+  try {
+    execFileSync('hdiutil', ['attach', '-nobrowse', '-readonly', '-plist', '-mountpoint', mount, target]);
+    attached = true;
+    const app = 'AI 妙听.app';
+    if (!stat(path.join(mount, app))?.isDirectory() ||
+        fs.readlinkSync(path.join(mount, 'Applications')) !== '/Applications') throw new Error('安装盘布局无效');
+    for (const entry of fs.readdirSync(mount, { withFileTypes: true })) {
+      if ([app, 'Applications'].includes(entry.name)) continue;
+      if (entry.isFile() && ['.DS_Store', '.VolumeIcon.icns', '.background.tiff'].includes(entry.name)) continue;
+      if (entry.isDirectory() && ['.background', '.fseventsd'].includes(entry.name)) {
+        const allowed = entry.name === '.background' ? /^background\.(?:tiff?|png)$/i : /^(?:[a-f0-9]+|fseventsd-uuid|no_log)$/;
+        walkDirectory(path.join(mount, entry.name), (name, bytes) => {
+          if (!bytes || !allowed.test(name)) throw new Error('安装盘元数据含额外文件');
+        });
+        continue;
+      }
+      throw new Error('安装盘根目录含额外文件');
+    }
+    return [verifyInstalledResources(path.join(mount, app, 'Contents', 'Resources'))];
+  } finally {
+    if (attached) {
+      try { execFileSync('hdiutil', ['detach', mount]); }
+      catch { execFileSync('hdiutil', ['detach', '-force', mount]); }
+    }
+    fs.rmdirSync(mount);
+  }
+}
+
+function verifyNsis(target) {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'miaoting-nsis-'));
+  const extract = (file, dir, type) => execFileSync('7z',
+    ['x', '-t' + type, '-y', '-bd', '-o' + dir, '--', file], { stdio: 'ignore' });
+  try {
+    const outer = path.join(temp, 'outer');
+    extract(target, outer, 'Nsis');
+    const plugins = path.join(outer, '$PLUGINSDIR');
+    const payloads = stat(plugins)?.isDirectory() ? fs.readdirSync(plugins).filter(name => /^app-.*\.7z$/i.test(name)) : [];
+    if (payloads.length === 0) return [verifyInstalledResources(path.join(outer, 'resources'))];
+    if (payloads.length !== 1 || payloads[0] !== 'app-64.7z' || stat(path.join(outer, 'resources'))) {
+      throw new Error('NSIS 安装负载不匹配');
+    }
+    const payload = path.join(plugins, payloads[0]);
+    if (!stat(payload)?.isFile()) throw new Error('NSIS 安装负载无效');
+    const inner = path.join(temp, 'payload');
+    extract(payload, inner, '7z');
+    return [verifyInstalledResources(path.join(inner, 'resources'))];
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+
+module.exports = { verifyBundle, verifyTarget, locate, applicationFiles };
 if (require.main === module) {
   try {
-    for (const bundle of locate(path.resolve(process.argv[2] || 'dist'))) {
-      console.log('桌面包通过安全门禁，已检查 %d 个文件', verifyBundle(bundle));
+    for (const count of verifyTarget(path.resolve(process.argv[2] || 'dist'))) {
+      console.log('桌面包通过安全门禁，已检查 %d 个应用文件', count);
     }
   } catch (error) {
     console.error(error.code || (error instanceof SyntaxError ? 'ASAR 清单无效' : error.message));

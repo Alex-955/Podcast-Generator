@@ -700,4 +700,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { buildRelease, runReleaseSecurityGate, parseArgs, scanContent, productionPackages, packageOwner };
+module.exports = { buildRelease, runReleaseSecurityGate, parseArgs, scanContent, productionPackages, packageOwner, excludedDependency, forbiddenPath };

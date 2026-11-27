@@ -10,7 +10,9 @@ const path = require('node:path');
 const { loadWindowState, saveWindowState } = require('../electron/windowState');
 const { classify, guardNavigation, allowDownload } = require('../electron/navigationGuard');
 const { importLegacyPodcasts } = require('../electron/migration');
-const { verifyBundle, locate } = require('../scripts/verify-desktop-bundle');
+const { makeMp3 } = require('./helpers/mp3Fixtures');
+const { execFileSync } = require('node:child_process');
+const { applicationFiles, verifyBundle, locate } = require('../scripts/verify-desktop-bundle');
 const root = path.resolve(__dirname, '..');
 
 function scratch(t) {
@@ -37,12 +39,16 @@ test('窗口默认居中、记录副屏负坐标、拔下副屏后完整可见�
 });
 
 test('守卫阻止站外导航、重定向与子窗口，外部网页交系统浏览器，下载限本机音频', () => {
-  const origin = 'http://127.0.0.1:3458', external = 'https://example.org/path';
+  const origin = 'aimiaoting://app', external = 'https://example.org/path';
   const contents = new EventEmitter(), opened = [];
   contents.setWindowOpenHandler = fn => { contents.popup = fn; };
   guardNavigation(contents, origin, url => opened.push(url));
   assert.equal(classify(origin + '/', origin), 'local');
-  assert.equal(classify(origin.replace('3458', '3459'), origin), 'external');
+  assert.equal(classify('http://127.0.0.1:3458'), 'external');
+  assert.equal(classify('http://127.0.0.1:3458', 'http://127.0.0.1:3458'), 'local');
+  for (const url of ['aimiaoting://elsewhere', 'aimiaoting://app:8888', 'aimiaoting://user@app']) {
+    assert.equal(classify(url), 'deny');
+  }
   for (const type of ['will-frame-navigate', 'will-redirect']) {
     for (const [url, blocked] of [[origin, false], [external, true], ['file:///invalid', true]]) {
       let prevented = false;
@@ -68,8 +74,8 @@ function write(dir, name, bytes) {
 }
 
 function podcast(dir, id) {
-  write(dir, id + '/full_podcast.mp3', 'fixture-audio');
-  write(dir, id + '/sentence_001.mp3', 'fixture-sentence');
+  write(dir, id + '/full_podcast.mp3', makeMp3(4));
+  write(dir, id + '/sentence_001.mp3', makeMp3(2));
   write(dir, id + '/meta.json', '{"podcastTitle":"fixture"}');
 }
 
@@ -115,8 +121,18 @@ test('迁移拒绝链接目录、链接音频以及链接元数据', async t => 
   assert.ok(!fs.existsSync(path.join(target, 'valid/sentence_link.mp3')));
 });
 
-const fixture = Object.fromEntries(['electron/main.js', 'electron/preload.js', 'server.js', 'package.json',
-  'public/index.html', 'LICENSE', 'TRADEMARK.md'].map(name => [name, 'content']));
+test('拒绝伪造整期 MP3 或截断分句并清理暂存目录', async t => {
+  const dir = scratch(t), source = path.join(dir, 'podcasts'), target = path.join(dir, 'out');
+  podcast(source, 'fake');
+  podcast(source, 'partial');
+  write(source, 'fake/full_podcast.mp3', 'fake MP3');
+  write(source, 'partial/sentence_001.mp3', makeMp3(2).subarray(0, -1));
+  const result = await importLegacyPodcasts(source, target);
+  assert.deepEqual([result.invalidCount, result.importedCount], [2, 0]);
+  assert.deepEqual(fs.readdirSync(target), []);
+});
+
+const fixture = Object.fromEntries(Array.from(applicationFiles, name => [name, 'content']));
 
 function asar(files) {
   const tree = { files: {} }, data = [];
@@ -145,10 +161,11 @@ test('同时发现两种平台产物；正常 ASAR 与展开目录通过，禁�
   for (const [name, bytes] of Object.entries(fixture)) write(app, name, bytes);
   const file = path.join(dir, 'win-unpacked/resources/app.asar');
   write(dir, path.relative(dir, file), asar(fixture));
+  for (const resources of [path.dirname(app), path.dirname(file)]) write(resources, 'public/podcasts/.gitkeep', '');
   assert.deepEqual(locate(dir).sort(), [app, file].sort());
   for (const target of locate(dir)) assert.equal(verifyBundle(target), Object.keys(fixture).length);
   for (const name of ['plan/notes', '.env', 'AGENTS.md', 'data/tasks/x', 'public/podcasts/id/meta.json',
-    'src/.git/HEAD', 'src/a.map', 'node_modules/electron/index.js', 'src/../private']) {
+    'electron/extra.js', 'public/stray.js', 'src/services/stray.js', 'src/.git/HEAD', 'src/a.map', 'node_modules/electron/index.js', 'src/../private']) {
     fs.writeFileSync(file, asar({ ...fixture, [name]: 'fixture' }));
     assert.throws(() => verifyBundle(file));
   }
@@ -162,9 +179,30 @@ test('同时发现两种平台产物；正常 ASAR 与展开目录通过，禁�
     fs.writeFileSync(file, bytes);
     assert.throws(() => verifyBundle(file));
   }
-  write(file + '.unpacked', 'src/stray', 'extra');
+  write(file + '.unpacked', 'src/services/stray', 'extra');
   fs.writeFileSync(file, asar(fixture));
   assert.throws(() => verifyBundle(file), /未登记/);
+});
+
+test('已锁定的生产依赖仍须排除开发文件，外置播客目录必须只有空占位符', t => {
+  const dir = scratch(t), resources = path.join(dir, 'resources'), file = path.join(resources, 'app.asar');
+  const manifest = 'node_modules/express/package.json';
+  const version = require('../package-lock.json').packages['node_modules/express'].version;
+  const valid = { ...fixture, [manifest]: JSON.stringify({ name: 'express', version }) };
+  write(resources, 'app.asar', asar(valid));
+  assert.equal(verifyBundle(file), Object.keys(valid).length);
+  for (const name of ['a.map', 'test/index.js', 'tests.js', 'eslint.config.mjs', 'yarn.lock', 'notes.md', '.DS_Store']) {
+    fs.writeFileSync(file, asar({ ...valid, ['node_modules/express/' + name]: 'extra' }));
+    assert.throws(() => verifyBundle(file), /禁运/);
+  }
+  fs.writeFileSync(file, asar({ ...valid, [manifest]: JSON.stringify({ name: 'express', version: '0.0.0' }) }));
+  assert.throws(() => verifyBundle(file), /非生产依赖/);
+  assert.throws(() => locate(resources), /占位文件/);
+  write(resources, 'public/podcasts/.gitkeep', 'not empty');
+  assert.throws(() => locate(resources), /占位文件/);
+  write(resources, 'public/podcasts/.gitkeep', '');
+  write(resources, 'public/podcasts/stray.mp3', 'extra');
+  assert.throws(() => locate(resources), /白名单/);
 });
 
 test('桌面运行环境仅用于开发构建，版本、许可证与双端发布契约一致', () => {
@@ -185,7 +223,12 @@ test('桌面运行环境仅用于开发构建，版本、许可证与双端发�
     '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986');
   assert.match(read('TRADEMARK.md'), /AI 妙听[\s\S]*图标/);
   const workflow = read('.github/workflows/release.yml');
-  for (const part of ['needs: [portable, desktop-mac, desktop-win]', 'dist/*.dmg', 'dist/*.exe', 'sha256sum -c', 'action-gh-release@v2']) {
+  for (const part of ['needs: [portable, desktop-mac, desktop-win]', 'dist/AI-Miaoting-v*-mac-*.dmg', 'dist/AI-Miaoting-v*-win-*-setup.exe', 'sha256sum -c', 'action-gh-release@v2']) {
     assert.ok(workflow.includes(part), part);
   }
+});
+
+test('桌面源文件白名单与受追踪的服务文件一致', () => {
+  const tracked = execFileSync('git', ['ls-files', '-z', 'src/services/*.js'], { cwd: root, encoding: 'utf8' });
+  assert.deepEqual([...applicationFiles].filter(name => name.startsWith('src/services/')).sort(), tracked.split('\0').filter(Boolean).sort());
 });

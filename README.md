@@ -11,6 +11,8 @@
 | macOS · Apple Silicon（M 系列） | [AI-Miaoting-v1.0.0-mac-arm64.dmg](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/AI-Miaoting-v1.0.0-mac-arm64.dmg) |
 | macOS · Intel | [AI-Miaoting-v1.0.0-mac-x64.dmg](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/AI-Miaoting-v1.0.0-mac-x64.dmg) |
 | Windows · x64 | [AI-Miaoting-v1.0.0-win-x64-setup.exe](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/AI-Miaoting-v1.0.0-win-x64-setup.exe) |
+| 跨平台便携版 · ZIP（需 Node.js 22+） | [ai-podcast-generator-v1.0.0-portable.zip](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/ai-podcast-generator-v1.0.0-portable.zip) |
+| 跨平台便携版 · tar.gz（需 Node.js 22+） | [ai-podcast-generator-v1.0.0-portable.tar.gz](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/ai-podcast-generator-v1.0.0-portable.tar.gz) |
 
 <a id="first-launch"></a>
 

@@ -26,6 +26,16 @@ files:
   - '!**/.DS_Store'
   - '!**/test/**'
   - '!**/tests/**'
+  # Match the portable production dependency exclusions used by the release gate.
+  - '!node_modules/**/{.bin,.cache,.github,.vscode,.nyc_output,__mocks__,__tests__,example,examples,doc,docs,benchmark,benchmarks,coverage}/**'
+  - '!node_modules/**/{test.js,tests.js,yarn.lock,pnpm-lock.yaml,package-lock.json,npm-shrinkwrap.json}'
+  - '!node_modules/**/*.{test,spec}.{js,cjs,mjs}'
+  - '!node_modules/**/{eslint,prettier,jest,vitest,rollup,babel}.config.*'
+  - '!node_modules/**/{.nycrc,.mocharc,.eslintrc,.prettierrc,.babelrc,Gruntfile,Gulpfile,karma.conf,webpack.config}*'
+  - '!node_modules/**/{.npmignore,.gitignore,.editorconfig,.travis.yml,Makefile,tsconfig*.json}'
+  - '!node_modules/**/*.{d.ts,d.mts,d.cts,tsbuildinfo}'
+  - '!node_modules/**/!(LICENSE*|LICENCE*|NOTICE*|License*|license*|notice*).{md,markdown,txt}'
+  - '!node_modules/**/{README,readme,HISTORY,History,CHANGELOG,CHANGES,SECURITY,CONTRIBUTING}{,.*}'
 # The builder's ASAR walker unconditionally omits .gitkeep. Copy only the
 # empty marker as a resource; never traverse the user's podcast library.
 extraResources:

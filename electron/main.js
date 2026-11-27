@@ -1,11 +1,36 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, dialog, screen, shell, session } = require('electron');
+const { app, BrowserWindow, Menu, dialog, screen, shell, session, protocol } = require('electron');
+const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { MIN_WIDTH, MIN_HEIGHT, loadWindowState, saveWindowState } = require('./windowState');
-const { guardNavigation, allowDownload } = require('./navigationGuard');
+const { DESKTOP_ORIGIN, classify, guardNavigation, allowDownload } = require('./navigationGuard');
 const { importLegacyPodcasts } = require('./migration');
+
+protocol.registerSchemesAsPrivileged([{ scheme: 'aimiaoting', privileges: {
+  standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true,
+} }]);
+
+async function proxyDesktopRequest(request, port, token) {
+  if (classify(request.url) !== 'local') return new Response(null, { status: 403 });
+  const url = new URL(request.url);
+  const headers = new Headers();
+  for (const name of ['accept', 'content-type', 'range', 'if-range', 'if-none-match', 'if-modified-since', 'origin', 'referer']) {
+    if (request.headers.has(name)) headers.set(name, request.headers.get(name));
+  }
+  headers.set('x-desktop-session', token);
+  headers.set('accept-encoding', 'identity');
+  const response = await fetch('http://127.0.0.1:' + port + url.pathname + url.search, {
+    method: request.method, headers, body: request.body, duplex: 'half', redirect: 'manual', signal: request.signal,
+  });
+  const resultHeaders = new Headers(response.headers);
+  for (const name of ['connection', 'keep-alive', 'transfer-encoding']) resultHeaders.delete(name);
+  resultHeaders.set('Content-Security-Policy',
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
+    "object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+  return new Response(response.body, { headers: resultHeaders, status: response.status });
+}
 
 try {
   app.setName('AI 妙听');
@@ -55,7 +80,7 @@ function runDesktop() {
     guardNavigation(win.webContents, origin, url => shell.openExternal(url));
     win.on('close', () => rememberWindow(win));
     win.on('closed', () => { mainWindow = null; });
-    win.loadURL(origin).catch(() => {
+    win.loadURL(origin + '/').catch(() => {
       if (!quitting && !win.isDestroyed()) {
         dialog.showErrorBox('AI 妙听', '工作台加载失败，请退出后重新打开。');
         app.quit();
@@ -128,19 +153,13 @@ function runDesktop() {
   starting = app.whenReady().then(async () => {
     if (quitting) return;
     fs.mkdirSync(podcastsDir, { recursive: true });
-    const { startServer } = require('../server');
-    handle = await startServer({ dataDir, podcastsDir, host: '127.0.0.1', allowEphemeralFallback: false });
+    const { startServer, DEFAULT_PORT } = require('../server');
+    const desktopSessionToken = randomBytes(32).toString('hex');
+    handle = await startServer({ dataDir, podcastsDir, desktopSessionToken, host: '127.0.0.1',
+      port: DEFAULT_PORT, allowPortFallback: true, publicDir: path.join(__dirname, '..', 'public') });
     if (quitting) return;
-    origin = 'http://127.0.0.1:' + handle.port;
-    // Chromium executes javascript: links without a navigation event.
-    session.defaultSession.webRequest.onHeadersReceived({ urls: [origin + '/*'] }, (details, respond) => {
-      const headers = { ...details.responseHeaders };
-      if (details.resourceType === 'mainFrame') headers['Content-Security-Policy'] = [
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
-        "object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
-      ];
-      respond({ responseHeaders: headers });
-    });
+    origin = DESKTOP_ORIGIN;
+    protocol.handle('aimiaoting', request => proxyDesktopRequest(request, handle.port, desktopSessionToken));
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, respond) => respond(false));
     session.defaultSession.on('will-download', (event, item, source) => {
       if (source !== mainWindow?.webContents || !allowDownload(item.getURLChain(), origin)) event.preventDefault();
@@ -150,7 +169,7 @@ function runDesktop() {
   }).catch(error => {
     exitCode = 1;
     dialog.showErrorBox('AI 妙听无法启动', error.code === 'DATA_DIR_LOCKED'
-      ? '数据目录正在使用中。请先退出占用该目录的实例。' : '请检查数据目录权限及本机端口 3456–3475 是否可用。');
+      ? '数据目录正在使用中。请先退出占用该目录的实例。' : '请检查数据目录权限及本机网络是否可用。');
     app.quit();
   });
 }
