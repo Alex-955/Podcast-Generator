@@ -7,7 +7,7 @@ if [ -f "$SCRIPT_DIR/scripts/start-portable.js" ]; then
 elif [ -f "$SCRIPT_DIR/../start-portable.js" ]; then
   PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 else
-  echo "错误：找不到 AI 妙听项目。请将启动文件放回项目目录。" >&2
+  echo "错误：找不到拾声集项目。请将启动文件放回项目目录。" >&2
   exit 1
 fi
 
@@ -39,7 +39,7 @@ ensure_dependencies() {
     echo "错误：找不到 npm。请安装含 npm 的 Node.js 22 或更新版本（https://nodejs.org/）。" >&2
     return 1
   fi
-  echo "正在安装 AI 妙听运行依赖…"
+  echo "正在安装拾声集运行依赖…"
   npm install --omit=dev
 }
 
@@ -64,9 +64,9 @@ on run argv
   try
     activate
     if item 1 of argv is "2" then
-      return button returned of (display dialog "AI 妙听服务异常，请选择操作。" buttons {"退出", "停止服务", "重启服务"} default button "重启服务" cancel button "退出" with title "AI 妙听")
+      return button returned of (display dialog "拾声集服务异常，请选择操作。" buttons {"退出", "停止服务", "重启服务"} default button "重启服务" cancel button "退出" with title "拾声集")
     end if
-    return button returned of (display dialog "AI 妙听正在运行，请选择操作。" buttons {"停止服务", "重启服务", "打开网页"} default button "打开网页" with title "AI 妙听")
+    return button returned of (display dialog "拾声集正在运行，请选择操作。" buttons {"停止服务", "重启服务", "打开网页"} default button "打开网页" with title "拾声集")
   on error messageText number errorNumber
     if errorNumber is -128 then return "退出"
     error messageText number errorNumber

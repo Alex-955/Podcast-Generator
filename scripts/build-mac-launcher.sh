@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-FINAL_APP_PATH="$PROJECT_DIR/AI 妙听.app"
+FINAL_APP_PATH="$PROJECT_DIR/拾声集.app"
 FALLBACK_PROJECT_DIR="$PROJECT_DIR"
 
 if [ "$#" -gt 0 ]; then
@@ -21,7 +21,7 @@ fi
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
-APP_PATH="$TMP_DIR/AI 妙听.app"
+APP_PATH="$TMP_DIR/拾声集.app"
 APPLESCRIPT_SRC="$TMP_DIR/launcher.applescript"
 
 # Finder uses the same portable launcher and Node/CA detection as the .command file.
@@ -32,7 +32,7 @@ on run
   set launcherPath to resolveLauncher()
   if launcherPath is "" then
     activate
-    display dialog "未能找到便携启动脚本。请将「AI 妙听.app」放回项目根目录后再试。" buttons {"好"} default button "好" with icon stop with title "AI 妙听"
+    display dialog "未能找到便携启动脚本。请将「拾声集.app」放回项目根目录后再试。" buttons {"好"} default button "好" with icon stop with title "拾声集"
     return
   end if
 
@@ -40,24 +40,24 @@ on run
     set {statusCode, detail} to getServerStatus(launcherPath)
     activate
     if statusCode is 0 then
-      set actionChoice to button returned of (display dialog (detail & return & return & "请选择操作：") buttons {"停止服务", "重启服务", "打开网页"} default button "打开网页" with title "AI 妙听")
+      set actionChoice to button returned of (display dialog (detail & return & return & "请选择操作：") buttons {"停止服务", "重启服务", "打开网页"} default button "打开网页" with title "拾声集")
     else if statusCode is 2 then
-      set actionChoice to button returned of (display dialog (detail & return & return & "服务异常或未就绪，可直接停止或重启：") buttons {"退出", "停止服务", "重启服务"} default button "停止服务" with title "AI 妙听")
+      set actionChoice to button returned of (display dialog (detail & return & return & "服务异常或未就绪，可直接停止或重启：") buttons {"退出", "停止服务", "重启服务"} default button "停止服务" with title "拾声集")
     else
-      set actionChoice to button returned of (display dialog "AI 妙听服务当前未启动。" buttons {"退出", "启动服务"} default button "启动服务" with title "AI 妙听")
+      set actionChoice to button returned of (display dialog "拾声集服务当前未启动。" buttons {"退出", "启动服务"} default button "启动服务" with title "拾声集")
     end if
     if actionChoice is "退出" then return
 
     if actionChoice is "停止服务" or actionChoice is "重启服务" then
       set stopOutput to runLauncher(launcherPath, "--stop")
-      if stopOutput does not contain "AI 妙听已停止" then
+      if stopOutput does not contain "拾声集已停止" then
         activate
-        display dialog stopOutput buttons {"好"} default button "好" with title "AI 妙听"
+        display dialog stopOutput buttons {"好"} default button "好" with title "拾声集"
         return
       end if
       if actionChoice is "停止服务" then
         activate
-        display dialog "AI 妙听后台服务已停止。" buttons {"好"} default button "好" with title "AI 妙听"
+        display dialog "拾声集后台服务已停止。" buttons {"好"} default button "好" with title "拾声集"
         return
       end if
     end if
@@ -65,7 +65,7 @@ on run
   on error errorMessage number errorNumber
     if errorNumber is not -128 then
       activate
-      display dialog ("AI 妙听操作失败。" & return & errorMessage) buttons {"好"} default button "好" with icon caution with title "AI 妙听"
+      display dialog ("拾声集操作失败。" & return & errorMessage) buttons {"好"} default button "好" with icon caution with title "拾声集"
     end if
   end try
 end run
@@ -92,7 +92,7 @@ on getServerStatus(launcherPath)
     return {0, runLauncher(launcherPath, "--status")}
   on error errorMessage number errorNumber
     if errorNumber is 2 then return {2, errorMessage}
-    if errorNumber is 1 and errorMessage contains "AI 妙听未在运行" then return {1, ""}
+    if errorNumber is 1 and errorMessage contains "拾声集未在运行" then return {1, ""}
     error errorMessage number errorNumber
   end try
 end getServerStatus
@@ -104,54 +104,32 @@ APPLESCRIPT
 
 osacompile -o "$APP_PATH" "$APPLESCRIPT_SRC"
 
-# 生成专属暖赤陶声波应用图标（失败不影响功能）
+# Use the desktop icon in the repository, or the shipped PNG in a portable archive.
 build_icon() {
-  local chrome_bin="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-  local icon_html="$TMP_DIR/icon.html"
-  local base_png="$TMP_DIR/icon-1024.png"
   local iconset_dir="$TMP_DIR/applet.iconset"
   local out_icns="$APP_PATH/Contents/Resources/applet.icns"
+  local base_png="$PROJECT_DIR/public/icon.png"
 
-  if [ ! -x "$chrome_bin" ] || ! command -v sips >/dev/null 2>&1 || ! command -v iconutil >/dev/null 2>&1; then
-    return 0
+  if [ -f "$PROJECT_DIR/build/icon.icns" ]; then
+    cp "$PROJECT_DIR/build/icon.icns" "$out_icns"
+    return
   fi
-
-  cat > "$icon_html" <<'HTML'
-<!DOCTYPE html>
-<html>
-<body style="margin:0;width:1024px;height:1024px;background:transparent;display:flex;align-items:center;justify-content:center;">
-  <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-    <rect x="64" y="64" width="896" height="896" rx="210" fill="#F5F2EB"/>
-    <rect x="64" y="64" width="896" height="896" rx="210" fill="none" stroke="rgba(26,25,22,0.10)" stroke-width="12"/>
-    <rect x="242" y="392" width="76" height="240" rx="38" fill="#1C5A73"/>
-    <rect x="378" y="256" width="76" height="512" rx="38" fill="#B03E24"/>
-    <rect x="514" y="316" width="76" height="392" rx="38" fill="#B03E24"/>
-    <rect x="650" y="362" width="76" height="300" rx="38" fill="#1C5A73"/>
-    <rect x="786" y="446" width="52" height="132" rx="26" fill="#5C574E"/>
-  </svg>
-</body>
-</html>
-HTML
-
-  "$chrome_bin" --headless --disable-gpu --use-mock-keychain --password-store=basic \
-    --default-background-color=00000000 \
-    --window-size=1024,1024 --screenshot="$base_png" "file://$icon_html" >/dev/null 2>&1 || return 0
-  [ -s "$base_png" ] || return 0
 
   mkdir -p "$iconset_dir"
   for sz in 16 32 128 256 512; do
-    sips -z "$sz" "$sz" "$base_png" --out "$iconset_dir/icon_${sz}x${sz}.png" >/dev/null 2>&1 || return 0
+    sips -z "$sz" "$sz" "$base_png" --out "$iconset_dir/icon_${sz}x${sz}.png" >/dev/null
     local dbl=$((sz * 2))
-    sips -z "$dbl" "$dbl" "$base_png" --out "$iconset_dir/icon_${sz}x${sz}@2x.png" >/dev/null 2>&1 || return 0
+    sips -z "$dbl" "$dbl" "$base_png" --out "$iconset_dir/icon_${sz}x${sz}@2x.png" >/dev/null
   done
-  iconutil -c icns "$iconset_dir" -o "$out_icns" >/dev/null 2>&1 || return 0
+  iconutil -c icns "$iconset_dir" -o "$out_icns" >/dev/null
   touch "$APP_PATH"
 }
 
 build_icon
+touch "$APP_PATH/Contents/Resources/inkcast-launcher"
 
 if command -v /usr/libexec/PlistBuddy >/dev/null 2>&1; then
-  /usr/libexec/PlistBuddy -c "Set :CFBundleName AI 妙听" "$APP_PATH/Contents/Info.plist" >/dev/null 2>&1 || true
+  /usr/libexec/PlistBuddy -c "Set :CFBundleName 拾声集" "$APP_PATH/Contents/Info.plist" >/dev/null 2>&1 || true
   /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$APP_PATH/Contents/Info.plist" >/dev/null 2>&1 || \
     /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$APP_PATH/Contents/Info.plist" >/dev/null 2>&1 || true
 fi
@@ -161,7 +139,15 @@ if command -v codesign >/dev/null 2>&1; then
   codesign --verify --deep --strict "$APP_PATH"
 fi
 
-rm -rf "$FINAL_APP_PATH"
-mv "$APP_PATH" "$FINAL_APP_PATH"
-rm -rf "$PROJECT_DIR/启动 AI 妙听.app"
-echo "已生成 AI 妙听服务控制应用：$FINAL_APP_PATH"
+if [ -e "$FINAL_APP_PATH" ] || [ -L "$FINAL_APP_PATH" ]; then
+  if [ -L "$FINAL_APP_PATH" ] || [ ! -f "$FINAL_APP_PATH/Contents/Resources/inkcast-launcher" ]; then
+    echo "同名应用已存在，请先将其移出项目目录。" >&2
+    exit 1
+  fi
+  mv "$FINAL_APP_PATH" "$TMP_DIR/previous.app"
+fi
+if ! mv "$APP_PATH" "$FINAL_APP_PATH"; then
+  if [ -d "$TMP_DIR/previous.app" ]; then mv "$TMP_DIR/previous.app" "$FINAL_APP_PATH"; fi
+  exit 1
+fi
+echo "已生成拾声集服务控制应用：$FINAL_APP_PATH"

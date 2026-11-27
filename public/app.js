@@ -26,7 +26,7 @@
   };
 
   const PODCAST_STYLE_DESCS = {
-    deep_dive: '7:3 主讲拆解 + 主持追问 · 贴近 AI 妙听',
+    deep_dive: '7:3 主讲拆解 + 主持追问 · 沉浸式深度拆解',
     dialogue: '阿泽与小晓 5:5 轻快接力对谈',
     debate: '阿泽力挺原文 × 小晓理性挑刺 · 5:5 克制思辨',
   };
@@ -193,7 +193,7 @@
 
   const TTS_GUIDES = {
     minimax: '默认采用新一代 speech-2.8-turbo（比 02-hd 省约 43% 费用），内置句间节流防 1002 限流。前往 platform.minimaxi.com 创建 API Key 即可使用。',
-    volcengine: '字节跳动豆包大模型语音（OPPO AI 妙听同款语音体系，小天 2.0 + Vivi 2.0 搭配自然）。在 console.volcengine.com/speech/app 开通「大模型语音合成」后获取 API Key。',
+    volcengine: '字节跳动豆包大模型语音（小天 2.0 + Vivi 2.0 搭配自然）。在 console.volcengine.com/speech/app 开通「大模型语音合成」后获取 API Key。',
     edge: '免配置密钥的微软神经网络语音试用通道；因非官方公开接口，近期偶发 403 限流且拟真度一般，长期稳定制作建议使用 MiniMax 或火山豆包。',
   };
 
@@ -1969,7 +1969,7 @@
 
     setDeckPlaying(false);
     dom.playerDeck.dataset.speaker = 'none';
-    dom.miniTitle.textContent = 'AI 妙听双人播客';
+    dom.miniTitle.textContent = '拾声集双人播客';
     dom.miniTime.textContent = '00:00 / 00:00';
     if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.speaker = 'none';
     updateMobileMiniVisibility();
@@ -2198,7 +2198,7 @@
     window.InputSource.resetPlaybackHighlight(state.input);
 
     const sentences = Array.isArray(podcast.sentences) ? podcast.sentences : [];
-    dom.currentPodcastTitle.textContent = podcast.podcastTitle || 'AI 妙听双人播客';
+    dom.currentPodcastTitle.textContent = podcast.podcastTitle || '拾声集双人播客';
     state.currentMetaBaseText = `共 ${sentences.length} 句对话 · 全长 ${formatTime(podcast.totalDuration || 0)}`;
     dom.currentPodcastMeta.textContent = state.currentMetaBaseText;
     renderCurrentPodcastBadges(podcast);
@@ -2236,7 +2236,7 @@
 
     setDeckPlaying(false);
     dom.playerDeck.dataset.speaker = 'none';
-    dom.miniTitle.textContent = podcast.podcastTitle || 'AI 妙听双人播客';
+    dom.miniTitle.textContent = podcast.podcastTitle || '拾声集双人播客';
     state.lastRenderedMiniTimeText = `00:00 / ${totalText}`;
     dom.miniTime.textContent = state.lastRenderedMiniTimeText;
     if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.speaker = 'none';
@@ -2929,7 +2929,7 @@
     if (!podcast || !Array.isArray(podcast.sentences) || !podcast.sentences.length) return;
 
     const lines = [];
-    lines.push(`# ${podcast.podcastTitle || 'AI 妙听双人播客'}`);
+    lines.push(`# ${podcast.podcastTitle || '拾声集双人播客'}`);
     if (podcast.summary) {
       lines.push('', `> ${podcast.summary}`);
     }

@@ -27,7 +27,7 @@ const { testLlmConnection, testTtsConnection } = require('./src/services/connect
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DEFAULT_PORT = 3456;
 const DEFAULT_PORT_FALLBACK_MAX = 3475;
-const FRONTEND_FILES = new Set(['/index.html', '/style.css', '/app.js', '/inputSource.js', '/audioEngine.js']);
+const FRONTEND_FILES = new Set(['/index.html', '/style.css', '/app.js', '/inputSource.js', '/audioEngine.js', '/icon.png']);
 
 function parsePort(value) {
   if (value == null) return DEFAULT_PORT;
@@ -123,12 +123,12 @@ function createApp({ desktopSessionToken, ...options } = {}, ownerToken) {
           const url = new URL(value);
           if (url.username || url.password) return false;
           return (url.protocol === 'http:' && url.host === localHost) ||
-            (url.protocol === 'aimiaoting:' && url.host === 'app');
+            (url.protocol === 'inkcast:' && url.host === 'app');
         } catch { return false; }
       };
       if (req.get('host') === localHost && trusted(req.get('origin')) && trusted(req.get('referer')) &&
           timingSafeEqual(digest, tokenDigest(req.get('x-desktop-session') || ''))) return next();
-      res.status(403).json({ success: false, error: '仅允许通过 AI 妙听桌面应用访问本地接口', code: 'DESKTOP_AUTH_REQUIRED' });
+      res.status(403).json({ success: false, error: '仅允许通过拾声集桌面应用访问本地接口', code: 'DESKTOP_AUTH_REQUIRED' });
     });
   }
   const origins = process.env.CORS_ORIGIN?.split(',').map(origin => origin.trim()).filter(Boolean);
@@ -325,7 +325,7 @@ async function main() {
       try {
         await close();
       } catch {
-        console.error('AI 妙听未能完整关闭');
+        console.error('拾声集未能完整关闭');
         process.exitCode = 1;
       } finally {
         process.removeListener('SIGINT', stop);
@@ -336,13 +336,13 @@ async function main() {
     process.on('SIGTERM', stop);
     if (portable && process.connected) process.send({ port }, () => {});
     if (fellBack) console.log(`首选端口 ${preferredPort} 已被占用，当前监听端口为 ${port}`);
-    console.log(`AI 妙听播客服务已启动 http://${host.includes(':') ? '[' + host + ']' : host}:${port}`);
+    console.log(`拾声集播客服务已启动 http://${host.includes(':') ? '[' + host + ']' : host}:${port}`);
     console.log('局域网手机试听可使用 HOST=0.0.0.0 npm start');
   } catch (error) {
     const code = error.code || 'LISTEN_ERROR';
     if (portable && process.connected) process.send({ error: code }, () => {});
     if (code === 'DATA_DIR_LOCKED') console.error(error.message);
-    else console.error('AI 妙听无法启动（%s）', code);
+    else console.error('拾声集无法启动（%s）', code);
     process.exitCode = 1;
   }
 }

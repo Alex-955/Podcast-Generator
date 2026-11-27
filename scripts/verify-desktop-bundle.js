@@ -9,7 +9,7 @@ const { SOURCE_FILES, scanContent, productionPackages, packageOwner, excludedDep
 const applicationFiles = new Set([
   'package.json', 'server.js', 'LICENSE', 'TRADEMARK.md',
   'electron/main.js', 'electron/preload.js', 'electron/windowState.js', 'electron/navigationGuard.js', 'electron/migration.js',
-  'public/index.html', 'public/style.css', 'public/app.js', 'public/inputSource.js', 'public/audioEngine.js',
+  'public/index.html', 'public/style.css', 'public/app.js', 'public/inputSource.js', 'public/audioEngine.js', 'public/icon.png',
   ...SOURCE_FILES,
 ]);
 const applicationDirs = new Set(['electron', 'public', 'src', 'src/services']);
@@ -227,7 +227,7 @@ function auditRuntime(root, layout, { resources, normalize = name => name } = {}
   walk(root, '');
 }
 
-const product = 'AI 妙听';
+const product = '拾声集';
 const macResources = 'Contents/Resources';
 const electronResources = 'Contents/Frameworks/Electron Framework.framework/Versions/A/Resources';
 function macLayout() {
@@ -324,12 +324,12 @@ function verifyInstalledArchive(archive) {
 }
 
 function verifyDmg(target) {
-  const mount = fs.mkdtempSync(path.join(os.tmpdir(), 'miaoting-dmg-'));
+  const mount = fs.mkdtempSync(path.join(os.tmpdir(), 'inkcast-dmg-'));
   let attached = false;
   try {
     childProcess.execFileSync('hdiutil', ['attach', '-nobrowse', '-readonly', '-plist', '-mountpoint', mount, target]);
     attached = true;
-    const app = 'AI 妙听.app';
+    const app = '拾声集.app';
     if (!stat(path.join(mount, app))?.isDirectory() ||
         fs.readlinkSync(path.join(mount, 'Applications')) !== '/Applications') throw new Error('安装盘布局无效');
     for (const entry of fs.readdirSync(mount, { withFileTypes: true })) {
@@ -355,7 +355,7 @@ function verifyDmg(target) {
 }
 
 function verifyNsis(target) {
-  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'miaoting-nsis-'));
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'inkcast-nsis-'));
   const extract = (file, dir, type) => childProcess.execFileSync('7z',
     ['x', '-t' + type, '-y', '-bd', '-o' + dir, '--', file], { stdio: 'ignore' });
   try {

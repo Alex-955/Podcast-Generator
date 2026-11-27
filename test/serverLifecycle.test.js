@@ -368,7 +368,7 @@ test('桌面鉴权覆盖探活、任务、播客和音频，并脱敏服务异�
   t.after(() => running.close());
   const url = 'http://127.0.0.1:' + running.port;
   const auth = { 'X-Desktop-Session': desktopSessionToken };
-  const denied = { success: false, error: '仅允许通过 AI 妙听桌面应用访问本地接口', code: 'DESKTOP_AUTH_REQUIRED' };
+  const denied = { success: false, error: '仅允许通过拾声集桌面应用访问本地接口', code: 'DESKTOP_AUTH_REQUIRED' };
   for (const route of ['/api/health', '/api/podcasts', '/api/tasks', '/podcasts/ep/full_podcast.mp3']) {
     for (const headers of [{}, { 'X-Desktop-Session': 'wrong' }, { ...auth, Host: 'example.org' },
       { ...auth, Origin: 'https://example.org' }, { ...auth, Referer: 'https://example.org/private' }]) {
@@ -383,7 +383,7 @@ test('桌面鉴权覆盖探活、任务、播客和音频，并脱敏服务异�
       assert.deepEqual(JSON.parse(text), denied);
     }
   }
-  for (const headers of [auth, { ...auth, Origin: 'aimiaoting://app' }, { ...auth, Referer: url + '/' }]) {
+  for (const headers of [auth, { ...auth, Origin: 'inkcast://app' }, { ...auth, Referer: url + '/' }]) {
     const res = await fetch(url + '/api/podcasts', { headers });
     assert.equal(res.status, 200);
     assert.equal((await res.json()).success, true);

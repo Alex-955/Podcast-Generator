@@ -52,8 +52,8 @@ jobs:
           name: portable
           if-no-files-found: error
           path: |
-            dist/ai-podcast-generator-v*-portable.zip
-            dist/ai-podcast-generator-v*-portable.tar.gz
+            dist/InkCast-v*-portable.zip
+            dist/InkCast-v*-portable.tar.gz
 
   desktop-mac:
     runs-on: macos-latest
@@ -71,13 +71,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for dmg in dist/AI-Miaoting-v*-mac-*.dmg; do
+          for dmg in dist/InkCast-v*-mac-*.dmg; do
             node scripts/verify-desktop-bundle.js "$dmg"
           done
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-mac
-          path: dist/AI-Miaoting-v*-mac-*.dmg
+          path: dist/InkCast-v*-mac-*.dmg
           if-no-files-found: error
 
   desktop-win:
@@ -96,13 +96,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for exe in dist/AI-Miaoting-v*-win-*-setup.exe; do
+          for exe in dist/InkCast-v*-win-*-setup.exe; do
             node scripts/verify-desktop-bundle.js "$exe"
           done
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-win
-          path: dist/AI-Miaoting-v*-win-*-setup.exe
+          path: dist/InkCast-v*-win-*-setup.exe
           if-no-files-found: error
 
   publish:
@@ -122,9 +122,9 @@ jobs:
         run: |
           set -euo pipefail
           version=$(node -p "require('../package.json').version")
-          files=("AI-Miaoting-v${version}-mac-arm64.dmg" "AI-Miaoting-v${version}-mac-x64.dmg"
-                 "AI-Miaoting-v${version}-win-x64-setup.exe" "ai-podcast-generator-v${version}-portable.zip"
-                 "ai-podcast-generator-v${version}-portable.tar.gz")
+          files=("InkCast-v${version}-mac-arm64.dmg" "InkCast-v${version}-mac-x64.dmg"
+                 "InkCast-v${version}-win-x64-setup.exe" "InkCast-v${version}-portable.zip"
+                 "InkCast-v${version}-portable.tar.gz")
           shopt -s dotglob nullglob
           entries=(*)
           test "${#entries[@]}" -eq 5
@@ -133,7 +133,7 @@ jobs:
           sha256sum -c SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: ai-miaoting-release
+          name: inkcast-release
           path: dist/*
           if-no-files-found: error
       - name: Publish GitHub Release
@@ -143,8 +143,8 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            dist/AI-Miaoting-v*-mac-*.dmg
-            dist/AI-Miaoting-v*-win-*-setup.exe
-            dist/ai-podcast-generator-v*-portable.zip
-            dist/ai-podcast-generator-v*-portable.tar.gz
+            dist/InkCast-v*-mac-*.dmg
+            dist/InkCast-v*-win-*-setup.exe
+            dist/InkCast-v*-portable.zip
+            dist/InkCast-v*-portable.tar.gz
             dist/SHA256SUMS.txt

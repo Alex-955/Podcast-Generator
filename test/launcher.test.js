@@ -173,9 +173,9 @@ test('受管服务返回 HTTP 503 时状态退出码为 2，仍可停止', async
   assert.deepEqual(await statusPortable(options), { running: false, unhealthy: true, host, port, pid });
   await assert.rejects(run('--status'), {
     code: 2,
-    stdout: `AI 妙听进程仍在运行但健康检查未通过（PID ${pid}，端口 ${port}）\n`,
+    stdout: `拾声集进程仍在运行但健康检查未通过（PID ${pid}，端口 ${port}）\n`,
   });
-  assert.equal((await run('--stop')).stdout.trim(), 'AI 妙听已停止');
+  assert.equal((await run('--stop')).stdout.trim(), '拾声集已停止');
   assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
   assert.equal(fs.existsSync(pidFile), false);
 });
@@ -212,7 +212,7 @@ test('启动失败返回前等待刚启动的子进程退出', async t => {
     'process.send({ port: 0 });',
     'setTimeout(() => {}, 5000);',
   ].join('\n'));
-  await assert.rejects(startPortable({ ...options, port: 0 }), /AI 妙听启动失败或超时/);
+  await assert.rejects(startPortable({ ...options, port: 0 }), /拾声集启动失败或超时/);
   const pid = Number(fs.readFileSync(childPidFile, 'utf8'));
   assert.ok(pid > 0);
   assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
@@ -229,7 +229,7 @@ test('启动超时后强制清理忽略 SIGTERM 的子进程', async t => {
     'setTimeout(() => {}, 15000);',
   ].join('\n'));
   const kill = t.mock.method(ChildProcess.prototype, 'kill');
-  await assert.rejects(startPortable({ ...options, port: 0 }), /AI 妙听启动失败或超时/);
+  await assert.rejects(startPortable({ ...options, port: 0 }), /拾声集启动失败或超时/);
   const pid = Number(fs.readFileSync(childPidFile, 'utf8'));
   assert.ok(pid > 0);
   const signals = kill.mock.calls.filter(call => call.this.pid === pid).map(call => call.arguments[0]);
@@ -341,15 +341,15 @@ test('共享数据目录时另一个安装目录的启动和停止命令都保�
   ], { env: options.env, timeout: 20000 });
 
   await assert.rejects(cli(shared, '--port', String(first.port)), {
-    code: 1, stderr: /当前数据目录正被另一个目录的 AI 妙听实例使用/,
+    code: 1, stderr: /当前数据目录正被另一个目录的拾声集实例使用/,
   });
   assert.equal(fs.readFileSync(a.pidFile, 'utf8'), original);
-  assert.match((await cli(a.options, '--status')).stdout, /AI 妙听正在运行/);
+  assert.match((await cli(a.options, '--status')).stdout, /拾声集正在运行/);
   assert.deepEqual(await stopPortable(shared), { stopped: false, stale: false, foreign: true });
   assert.equal((await cli(shared, '--stop')).stdout.trim(),
-    '当前数据目录正由另一个目录的 AI 妙听实例使用，未停止且未删除其 PID 记录');
+    '当前数据目录正由另一个目录的拾声集实例使用，未停止且未删除其 PID 记录');
   assert.equal(fs.readFileSync(a.pidFile, 'utf8'), original);
-  assert.match((await cli(a.options, '--status')).stdout, /AI 妙听正在运行/);
+  assert.match((await cli(a.options, '--status')).stdout, /拾声集正在运行/);
   assert.equal((await statusPortable(a.options)).pid, first.pid);
 });
 
@@ -458,7 +458,7 @@ function nativeLauncherFixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'podcast native launcher '));
   t.after(() => removeDirWithBudget(root));
   const nested = path.join(root, source);
-  const rootLauncher = path.join(root, 'AI 妙听' + path.extname(source));
+  const rootLauncher = path.join(root, '拾声集' + path.extname(source));
   const bin = path.join(root, 'bin');
   const log = path.join(root, 'launcher.log');
   const expressManifest = path.join(root, 'node_modules/express/package.json');
@@ -585,6 +585,6 @@ test('便携启动器将数据目录占用 IPC 转为独立目录指引', async 
   const { options, pidFile } = fixture(t);
   fs.mkdirSync(options.dataDir);
   fs.writeFileSync(path.join(options.dataDir, '.server.lock'), JSON.stringify({ pid: process.pid }));
-  await assert.rejects(startPortable({ ...options, port: 0 }), /当前数据目录正被另一个运行中的 AI 妙听实例占用.*--data-dir/);
+  await assert.rejects(startPortable({ ...options, port: 0 }), /当前数据目录正被另一个运行中的拾声集实例占用.*--data-dir/);
   assert.equal(fs.existsSync(pidFile), false);
 });

@@ -19,17 +19,17 @@ const SOURCE_FILES = [
   'server.js', 'package.json', 'package-lock.json', 'README.md', 'LICENSE', 'TRADEMARK.md', '.env.example', 'src',
   'scripts/start-portable.js', 'scripts/build-mac-launcher.sh',
   'scripts/launchers/macos.command', 'scripts/launchers/windows.bat',
-  ...['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js'].map(file => 'public/' + file),
+  ...['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js', 'icon.png'].map(file => 'public/' + file),
 ];
 const INTERNAL_FILES = ['ROADMAP.md', 'Plan.md', 'AGENTS.md', 'plan/draft.md', 'website/index.html'];
 const PRIVATE_FILES = [
   '.env', '.env.local', '.git/config', '.DS_Store', 'server.log', 'data/server.pid', 'data/tasks/1.json',
   'data/tts-cache/cache.mp3', 'public/podcasts/secret-ep/full_podcast.mp3',
-  'AI 妙听.app/Contents/sample', '启动 AI 妙听.app/Contents/sample',
+  '拾声集.app/Contents/sample', '其他启动器.app/Contents/sample',
   'test/private-fixture.js', 'src/private-notes.txt', 'public/private.html',
   ...INTERNAL_FILES,
 ];
-const ROOT_LAUNCHERS = ['AI 妙听.bat', 'AI 妙听.command'];
+const ROOT_LAUNCHERS = ['拾声集.bat', '拾声集.command'];
 
 async function removeDirWithBudget(target, { budgetMs = 8000, delayMs = 150 } = {}) {
   const deadline = performance.now() + budgetMs;
@@ -109,7 +109,11 @@ async function verifyStagedServer(stageDir, tmpDir, { nodePath = '' } = {}) {
     assert.equal(body.status, 'ok');
     const html = await fetch(ready + '/');
     assert.equal(html.status, 200);
-    assert.match(await html.text(), /AI 妙听/);
+    assert.match(await html.text(), /拾声集/);
+    const icon = await fetch(ready + '/icon.png');
+    assert.equal(icon.status, 200);
+    assert.equal(icon.headers.get('content-type'), 'image/png');
+    assert.deepEqual(Buffer.from(await icon.arrayBuffer()), fs.readFileSync(path.join(PROJECT, 'public/icon.png')));
   } finally {
     server.kill();
     await finished;
@@ -258,7 +262,7 @@ test('白名单从混有个人数据的源码生成干净目录，暂存服务�
   const { stageDir, archives, checksumFile } = buildRelease({
     sourceDir, outDir: path.join(root, 'out'), format: 'dir',
   });
-  assert.equal(path.basename(stageDir), 'ai-podcast-generator-v' + version + '-portable');
+  assert.equal(path.basename(stageDir), 'InkCast-v' + version + '-portable');
   assert.deepEqual(archives, []);
   assert.equal(checksumFile, null);
   for (const file of PRIVATE_FILES) {
@@ -300,8 +304,8 @@ test('发行门禁识别禁运路径、个人主目录、私钥和 API 密钥，
   write(stageDir, 'data/notes.txt', 'unexpected private data');
   write(stageDir, '.env.example', '# EXAMPLE_SECRET=commented\nVOLCENGINE_TTS_ACCESS_KEY=abc\n');
   write(stageDir, 'public/podcasts/unexpected.mp3', Buffer.from([0xff, 0x00, 0x05]));
-  write(stageDir, 'AI 妙听.app/Contents/sample', 'local app fixture');
-  write(stageDir, '启动 AI 妙听.app/Contents/sample', 'legacy local app fixture');
+  write(stageDir, '拾声集.app/Contents/sample', 'local app fixture');
+  write(stageDir, '其他启动器.app/Contents/sample', 'legacy local app fixture');
   write(stageDir, 'src/path.js', 'const path = "/Users/alice";\n');
   write(stageDir, 'src/linuxHome.js', 'const home = "/home/alice";\n');
   write(stageDir, 'src/windowsHome.js', 'const home = "c:\\\\users\\\\alice";\n');
@@ -311,12 +315,12 @@ test('发行门禁识别禁运路径、个人主目录、私钥和 API 密钥，
   write(stageDir, 'src/privateKey.js', '-----BEGIN OPENSSH PRIVATE KEY-----\n');
   write(stageDir, 'node_modules/pkg/key.pem', '-----BEGIN PRIVATE KEY-----\n');
   for (const file of INTERNAL_FILES) write(stageDir, file, 'offline internal fixture');
-  for (const file of ['AI 妙听.bat', 'scripts/launchers/windows.bat']) write(stageDir, file, '@echo off\n');
-  for (const file of ['AI 妙听.command', 'scripts/launchers/macos.command']) write(stageDir, file, '#!/bin/bash\r\n');
+  for (const file of ['拾声集.bat', 'scripts/launchers/windows.bat']) write(stageDir, file, '@echo off\n');
+  for (const file of ['拾声集.command', 'scripts/launchers/macos.command']) write(stageDir, file, '#!/bin/bash\r\n');
   fs.unlinkSync(path.join(stageDir, 'LICENSE'));
 
   assert.throws(() => runReleaseSecurityGate(stageDir), error => {
-    for (const file of ['AI 妙听.app', '启动 AI 妙听.app', 'ROADMAP.md', 'Plan.md', 'AGENTS.md', 'plan', 'website']) {
+    for (const file of ['拾声集.app', '其他启动器.app', 'ROADMAP.md', 'Plan.md', 'AGENTS.md', 'plan', 'website']) {
       assert.ok(error.issues.includes(file + ' 属于禁运路径'), file);
     }
     for (const detail of ['.env 属于禁运路径', 'data/tasks 属于禁运路径', 'data/notes.txt 属于禁运路径',
@@ -324,8 +328,8 @@ test('发行门禁识别禁运路径、个人主目录、私钥和 API 密钥，
       'public/podcasts/unexpected.mp3 属于禁运路径', 'src/path.js:1 包含本机绝对路径',
       'src/linuxHome.js:1 包含本机绝对路径', 'src/windowsHome.js:1 包含本机绝对路径',
       'src/windowsPath.js:1 包含本机绝对路径', 'src/key.js:1 包含疑似 API 密钥',
-      'src/privateKey.js:1 包含私钥头', 'AI 妙听.bat 必须使用 CRLF', 'scripts/launchers/windows.bat 必须使用 CRLF',
-      'AI 妙听.command 必须使用 LF', 'scripts/launchers/macos.command 必须使用 LF', '缺少必需文件：LICENSE']) {
+      'src/privateKey.js:1 包含私钥头', '拾声集.bat 必须使用 CRLF', 'scripts/launchers/windows.bat 必须使用 CRLF',
+      '拾声集.command 必须使用 LF', 'scripts/launchers/macos.command 必须使用 LF', '缺少必需文件：LICENSE']) {
       assert.ok(error.issues.some(issue => issue.includes(detail)), detail);
     }
     assert.doesNotMatch(error.message, /alice|Offline User|sk-A{30}|=abc|mp3Utils\.js|EXAMPLE_SECRET/);
@@ -541,7 +545,7 @@ test('真实便携 ZIP 和 tar.gz 包含白名单目录、匹配 SHA-256 并带�
     assert.deepEqual(listing.stdout.trimEnd().split(/\r?\n/).sort(), [...tar.keys()].sort());
   }
   const prefix = path.basename(stageDir) + '/';
-  for (const file of ['.env.example', 'public/podcasts/.gitkeep', 'data/.gitkeep', 'LICENSE',
+  for (const file of ['.env.example', 'public/icon.png', 'public/podcasts/.gitkeep', 'data/.gitkeep', 'LICENSE',
     'node_modules/express/package.json']) {
     assert.ok(tar.has(prefix + file), file);
   }

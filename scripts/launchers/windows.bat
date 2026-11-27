@@ -10,7 +10,7 @@ if exist "%~dp0scripts\start-portable.js" (
 ) else if exist "%~dp0..\start-portable.js" (
     set "PROJECT_DIR=%~dp0..\.."
 ) else (
-    echo 错误：找不到 AI 妙听项目。请将启动文件放回项目目录。
+    echo 错误：找不到拾声集项目。请将启动文件放回项目目录。
     goto :failure
 )
 
@@ -96,7 +96,7 @@ if errorlevel 1 (
     echo 错误：找不到 npm。请安装含 npm 的 Node.js 22 或更新版本。
     exit /b 1
 )
-echo 正在安装 AI 妙听运行依赖…
+echo 正在安装拾声集运行依赖…
 call npm install --omit=dev
 exit /b %errorlevel%
 

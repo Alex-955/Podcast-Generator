@@ -8,7 +8,7 @@ const { MIN_WIDTH, MIN_HEIGHT, loadWindowState, saveWindowState } = require('./w
 const { DESKTOP_ORIGIN, classify, guardNavigation, allowDownload } = require('./navigationGuard');
 const { importLegacyPodcasts } = require('./migration');
 
-protocol.registerSchemesAsPrivileged([{ scheme: 'aimiaoting', privileges: {
+protocol.registerSchemesAsPrivileged([{ scheme: 'inkcast', privileges: {
   standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true,
 } }]);
 
@@ -33,16 +33,16 @@ async function proxyDesktopRequest(request, port, token) {
 }
 
 try {
-  app.setName('AI 妙听');
-  if (process.env.AI_MIAOTING_USER_DATA) {
-    const directory = path.resolve(process.env.AI_MIAOTING_USER_DATA);
+  app.setName('拾声集');
+  if (process.env.INKCAST_USER_DATA) {
+    const directory = path.resolve(process.env.INKCAST_USER_DATA);
     fs.mkdirSync(directory, { recursive: true });
     app.setPath('userData', directory);
   }
   if (app.requestSingleInstanceLock()) runDesktop();
   else app.quit();
 } catch {
-  dialog.showErrorBox('AI 妙听无法启动', '无法访问用户数据目录，请检查该目录是否可写。');
+  dialog.showErrorBox('拾声集无法启动', '无法访问用户数据目录，请检查该目录是否可写。');
   app.exit(1);
 }
 
@@ -70,10 +70,10 @@ function runDesktop() {
     const bounds = loadWindowState(userData, areas);
     const win = new BrowserWindow({
       ...bounds, minWidth: Math.min(MIN_WIDTH, bounds.width), minHeight: Math.min(MIN_HEIGHT, bounds.height),
-      title: 'AI 妙听', backgroundColor: '#F5F2EB',
+      title: '拾声集', backgroundColor: '#F5F2EB',
       webPreferences: {
         contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true,
-        preload: path.join(__dirname, 'preload.js'), additionalArguments: ['--miaoting-version=' + app.getVersion()],
+        preload: path.join(__dirname, 'preload.js'), additionalArguments: ['--inkcast-version=' + app.getVersion()],
       },
     });
     mainWindow = win;
@@ -82,7 +82,7 @@ function runDesktop() {
     win.on('closed', () => { mainWindow = null; });
     win.loadURL(origin + '/').catch(() => {
       if (!quitting && !win.isDestroyed()) {
-        dialog.showErrorBox('AI 妙听', '工作台加载失败，请退出后重新打开。');
+        dialog.showErrorBox('拾声集', '工作台加载失败，请退出后重新打开。');
         app.quit();
       }
     });
@@ -111,7 +111,7 @@ function runDesktop() {
       { label: '编辑', role: 'editMenu' },
       { label: '数据', submenu: [
         ...folders.map(([label, dir]) => ({ label, click: async () => {
-          if (await shell.openPath(dir)) dialog.showErrorBox('AI 妙听', '无法打开所选文件夹。');
+          if (await shell.openPath(dir)) dialog.showErrorBox('拾声集', '无法打开所选文件夹。');
         } })),
         { type: 'separator' },
         { label: '导入旧版便携播客…', click: () => {
@@ -139,7 +139,7 @@ function runDesktop() {
       await handle?.close({ timeoutMs: 5000 });
     }).catch(() => {
       exitCode = 1;
-      dialog.showErrorBox('AI 妙听', '服务未能完整关闭，请重新打开检查任务状态。');
+      dialog.showErrorBox('拾声集', '服务未能完整关闭，请重新打开检查任务状态。');
     }).finally(() => {
       if (mainWindow && !mainWindow.isDestroyed()) rememberWindow(mainWindow);
       if (app.isReady()) session.defaultSession.flushStorageData();
@@ -159,7 +159,7 @@ function runDesktop() {
       port: DEFAULT_PORT, allowPortFallback: true, publicDir: path.join(__dirname, '..', 'public') });
     if (quitting) return;
     origin = DESKTOP_ORIGIN;
-    protocol.handle('aimiaoting', request => proxyDesktopRequest(request, handle.port, desktopSessionToken));
+    protocol.handle('inkcast', request => proxyDesktopRequest(request, handle.port, desktopSessionToken));
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, respond) => respond(false));
     session.defaultSession.on('will-download', (event, item, source) => {
       if (source !== mainWindow?.webContents || !allowDownload(item.getURLChain(), origin)) event.preventDefault();
@@ -168,7 +168,7 @@ function runDesktop() {
     createWindow();
   }).catch(error => {
     exitCode = 1;
-    dialog.showErrorBox('AI 妙听无法启动', error.code === 'DATA_DIR_LOCKED'
+    dialog.showErrorBox('拾声集无法启动', error.code === 'DATA_DIR_LOCKED'
       ? '数据目录正在使用中。请先退出占用该目录的实例。' : '请检查数据目录权限及本机网络是否可用。');
     app.quit();
   });

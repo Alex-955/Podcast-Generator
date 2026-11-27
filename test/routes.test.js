@@ -23,7 +23,7 @@ test.before(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'podcast-routes-'));
   publicDir = path.join(root, 'public');
   fs.mkdirSync(publicDir);
-  for (const file of ['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js']) {
+  for (const file of ['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js', 'icon.png']) {
     fs.writeFileSync(path.join(publicDir, file), file);
   }
   const settings = {
@@ -190,7 +190,7 @@ test('前端只公开指定的 GET/HEAD 文件，运行目录只通过音频路�
   const bytes = makeMp3(2);
   fs.writeFileSync(path.join(audioDir, 'clip.mp3'), bytes);
 
-  for (const route of ['/', '/index.html', '/style.css', '/app.js', '/inputSource.js', '/audioEngine.js']) {
+  for (const route of ['/', '/index.html', '/style.css', '/app.js', '/inputSource.js', '/audioEngine.js', '/icon.png']) {
     const get = await fetch(base + route);
     assert.equal(get.status, 200);
     assert.equal(await get.text(), route === '/' ? 'index.html' : route.slice(1));
