@@ -288,6 +288,39 @@ test('同进程与独立 CLI 都无法抢占运行中任务，关闭后可重新
   assert.equal((await request(next.port, 'health')).status, 200);
 });
 
+test('已初始化的独立应用在标准实例持锁后拒绝健康和任务查询，保留运行中任务原文', portOptions, async t => {
+  const options = settings();
+  const standalone = createApp(options).listen(0, host);
+  t.after(() => new Promise(resolve => standalone.close(resolve)));
+  await once(standalone, 'listening');
+  const port = standalone.address().port;
+  assert.equal((await request(port, 'podcasts')).status, 200);
+
+  const entered = Promise.withResolvers();
+  const owner = await startServer({
+    ...options, port: 0, scriptGenerator({ signal }) {
+      entered.resolve();
+      return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+    },
+  });
+  t.after(() => owner.close());
+  const created = await request(owner.port, 'tasks', { body: {
+    mode: 'text', content: '离线任务正文', apiKey: 'offline', baseURL: 'https://fixture.example',
+  } });
+  assert.equal(created.status, 202);
+  await entered.promise;
+  const id = created.body.data.id;
+  const file = path.join(options.dataDir, 'tasks', id + '.json');
+  const checkpoint = fs.readFileSync(file);
+  assert.equal(JSON.parse(checkpoint).status, 'running');
+
+  const health = await request(port, 'health');
+  const task = await request(port, 'tasks/' + id);
+  assert.deepEqual([health.status, health.body.code, task.status, task.body.code],
+    [409, 'DATA_DIR_LOCKED', 409, 'DATA_DIR_LOCKED']);
+  assert.deepEqual(fs.readFileSync(file), checkpoint);
+});
+
 test('回收已退出进程遗留的锁，关闭时保留其他所有者的替换锁', portOptions, async t => {
   const options = settings();
   const child = launch(t, 0, options);

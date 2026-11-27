@@ -15,7 +15,7 @@ const { extractTextFromImages } = require('./src/services/imageExtractor');
 const { fetchLlmModels } = require('./src/services/llmModels');
 const { polishArticleText } = require('./src/services/textPolisher');
 const { recommendPodcastStyle } = require('./src/services/styleRecommender');
-const { acquireInstanceLock, withDataDirStartupLock } = require('./src/services/instanceLock');
+const { acquireInstanceLock, withDataDirLock } = require('./src/services/instanceLock');
 const { createTaskManager } = require('./src/services/taskManager');
 const { InputError, ttsSecrets } = require('./src/services/validation');
 const { redactProviderDetail } = require('./src/services/providerHttp');
@@ -67,11 +67,13 @@ function createApp(options = {}, ownerToken) {
   const dataDir = resolveDataDir(options.dataDir);
   const podcastsDir = path.resolve(options.podcastsDir || process.env.PODCASTS_DIR || path.join(publicDir, 'podcasts'));
   const extractor = options.extractor || extractArticle;
-  let manager = options.taskManager;
+  const { taskManager } = options;
+  let manager = taskManager;
   function initializeManager(token = ownerToken) {
-    manager ??= withDataDirStartupLock(dataDir, token, () => createTaskManager({
+    ownerToken = token;
+    manager ??= createTaskManager({
       ...options, extractor, podcastsDir, tasksDir: path.join(dataDir, 'tasks'), cacheDir: path.join(dataDir, 'tts-cache'),
-    }));
+    });
   }
   appStartup.set(app, { dataDir, initializeManager });
   const requests = new Set();
@@ -108,11 +110,15 @@ function createApp(options = {}, ownerToken) {
   if (origins?.length) {
     app.use(cors({ origin: origins, preflightContinue: true }));
   }
-  app.use('/api', checkAvailable, (req, res, next) => {
-    if (!manager) initializeManager(); // Standalone createApp().listen() initializes on its first API request.
-    next();
-  });
-  if (origins?.length) app.options(/^\/api\//, (req, res) => res.sendStatus(204));
+  function withManagerAccess(req, res, next) {
+    if (taskManager) return next();
+    withDataDirLock(dataDir, ownerToken, () => {
+      initializeManager();
+      next();
+    });
+  }
+  app.use('/api', checkAvailable);
+  if (origins?.length) app.options(/^\/api\//, withManagerAccess, (req, res) => res.sendStatus(204));
   const cancelOnDisconnect = handler => async (req, res) => {
     if (res.destroyed) return;
     if (shutdown) return unavailable(req, res);
@@ -134,14 +140,14 @@ function createApp(options = {}, ownerToken) {
       if (shutdown && !res.destroyed && !res.headersSent) unavailable(req, res);
     }
   };
-  app.post('/api/extract-image', express.json({ limit: '25mb' }), cancelOnDisconnect((payload, opts) => {
+  app.post('/api/extract-image', express.json({ limit: '25mb' }), withManagerAccess, cancelOnDisconnect((payload, opts) => {
     try {
       return extractTextFromImages(payload, opts);
     } finally {
       delete payload.images;
     }
   }));
-  app.use('/api', express.json({ limit: '10mb' }), checkAvailable);
+  app.use('/api', express.json({ limit: '10mb' }), checkAvailable, withManagerAccess);
 
   app.post('/api/llm/test', cancelOnDisconnect(testLlmConnection));
   app.post('/api/llm/models', cancelOnDisconnect(fetchLlmModels));
@@ -222,7 +228,7 @@ async function startServer({
   const dataDir = appStartup.get(app)?.dataDir ?? resolveDataDir(createAppOptions.dataDir);
   const release = await acquireInstanceLock(dataDir);
   try {
-    app ??= createApp({ ...createAppOptions, dataDir }, release);
+    app ??= createApp({ ...createAppOptions, dataDir });
     appStartup.get(app)?.initializeManager(release);
     for (;;) {
       try {

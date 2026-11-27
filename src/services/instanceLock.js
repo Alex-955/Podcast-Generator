@@ -6,6 +6,7 @@ const { randomUUID } = require('node:crypto');
 const { setTimeout: delay } = require('node:timers/promises');
 
 const activeDirectories = new Map();
+const ownerDirectories = new WeakMap();
 
 function locked() {
   return Object.assign(new Error('当前数据目录正被另一个运行中的 AI 妙听实例占用，请先停止该实例或使用独立的 DATA_DIR'), {
@@ -77,7 +78,10 @@ async function acquireInstanceLock(directory) {
   for (let attempt = 0; attempt < 6; attempt++) {
     if (activeDirectories.has(dir)) throw locked();
     const release = tryAcquire(dir);
-    if (release) return release;
+    if (release) {
+      ownerDirectories.set(release, directory);
+      return release;
+    }
     await delay(5 * 2 ** attempt + Math.random() * 10);
   }
   throw locked();
@@ -123,6 +127,7 @@ function tryAcquire(dir) {
     process.removeListener('exit', release);
     if (activeDirectories.get(dir) !== release) return;
     activeDirectories.delete(dir);
+    ownerDirectories.delete(release);
     try {
       removeOwnedLock(file, owner);
     } finally {
@@ -133,22 +138,22 @@ function tryAcquire(dir) {
   return release;
 }
 
-// A standalone app holds a short-lived claim through synchronous recovery so
-// another process cannot acquire the directory between the check and the write.
-function withDataDirStartupLock(directory, ownerToken, initialize) {
+// Keep the claim through synchronous task access, which can recover records on read.
+function withDataDirLock(directory, ownerToken, action) {
+  if (ownerToken && ownerDirectories.get(ownerToken) === directory) return action();
   const dir = canonicalDataDir(directory);
   const active = activeDirectories.get(dir);
   if (active) {
     if (active !== ownerToken) throw locked();
-    return initialize();
+    return action();
   }
   const release = tryAcquire(dir);
   if (!release) throw locked();
   try {
-    return initialize();
+    return action();
   } finally {
     release();
   }
 }
 
-module.exports = { acquireInstanceLock, withDataDirStartupLock, processExists };
+module.exports = { acquireInstanceLock, withDataDirLock, withDataDirStartupLock: withDataDirLock, processExists };
