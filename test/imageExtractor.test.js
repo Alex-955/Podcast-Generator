@@ -92,13 +92,14 @@ test('图片校验拒绝无效数量、类型、编码、单图和总大小', as
   assert.equal((await extractTextFromImages({ ...payload, images: [atLimit] }, { llmRequest })).imageCount, 1);
 });
 
-test('识图传输拿到完整图片，等待响应时已释放传输对象的请求体', async t => {
+test('识图传输拿到完整图片，支持异步读取请求体并在收到响应后释放', async t => {
   configure(t);
   const sent = Promise.withResolvers();
   const received = Promise.withResolvers();
   const input = Object.freeze({ ...payload, images: Object.freeze([...images]) });
   const extraction = extractTextFromImages(input, {
-    llmRequest(_url, outbound) {
+    async llmRequest(_url, outbound) {
+      await new Promise(resolve => setImmediate(resolve));
       const body = JSON.parse(outbound.body);
       assert.deepEqual(body.messages[1].content.slice(0, -1).map(item => item.image_url.url), images);
       sent.resolve(outbound);
@@ -106,10 +107,10 @@ test('识图传输拿到完整图片，等待响应时已释放传输对象的�
     },
   });
   const outbound = await Promise.race([sent.promise, extraction]);
-  assert.equal(outbound.body, null);
   assert.deepEqual(input.images, images);
   received.resolve(response(completion('转录成功')));
   assert.equal((await extraction).imageCount, 2);
+  assert.equal(outbound.body, null);
 
   const request = Object.freeze({ method: 'POST', body: 'reusable body' });
   for (let i = 0; i < 2; i++) {

@@ -3495,10 +3495,13 @@
     dom.seekSlider.addEventListener('input', () => {
       state.isSeeking = true;
       const pct = Number(dom.seekSlider.value) || 0;
-      state.lastRenderedSeekPct = Math.round(pct * 10) / 10;
-      dom.seekSlider.style.setProperty('--seek-pct', `${pct}%`);
+      const clamped = Math.max(0, Math.min(100, pct));
+      const rounded = Math.round(clamped * 10) / 10;
+      state.lastRenderedSeekPct = rounded;
+      dom.seekSlider.style.setProperty('--seek-pct', `${rounded}%`);
+      if (dom.miniProgressFill) dom.miniProgressFill.style.width = `${rounded}%`;
       const dur = dom.mainAudio.duration || state.currentPodcast?.totalDuration || 0;
-      const curStr = formatTime((pct / 100) * dur);
+      const curStr = formatTime((clamped / 100) * dur);
       if (curStr !== state.lastRenderedTimeText) {
         state.lastRenderedTimeText = curStr;
         dom.currentTime.textContent = curStr;
@@ -3585,7 +3588,7 @@
       if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.speaker = 'none';
     });
 
-    window.addEventListener('pagehide', () => {
+    window.addEventListener('pagehide', (e) => {
       stopPolling();
       stopElapsedTimer();
       cancelScheduledSubtitleScroll();
@@ -3605,7 +3608,20 @@
       state.styleRecommendAbortController?.abort();
       state.polishAbortController?.abort();
       dom.mainAudio.pause();
-      state.audioEngine?.dispose?.();
+      if (e.persisted) {
+        state.audioEngine?.suspend?.();
+      } else {
+        state.audioEngine?.dispose?.();
+      }
+    });
+
+    window.addEventListener('pageshow', (e) => {
+      if (!e.persisted) return;
+      updateMobileMiniVisibility();
+      if (hasActiveRunningTask()) {
+        startPolling();
+        pollCurrentTask();
+      }
     });
 
     dom.btnSettings.addEventListener('click', () => openSettingsModal('llm'));

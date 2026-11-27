@@ -55,12 +55,20 @@ function writeAll(fd, buffer, length = buffer.length) {
 function copySegment(segment, output, buffer) {
   const input = fs.openSync(segment.filePath, 'r');
   try {
+    const verifySegment = () => {
+      const current = fs.fstatSync(input, { bigint: true });
+      if (['dev', 'ino', 'size', 'mtimeNs'].some(key => current[key] !== segment.stat[key])) {
+        throw new Error(`音频片段在拼接时已改变：${path.basename(segment.filePath)}`);
+      }
+    };
+    verifySegment();
     for (let offset = 0; offset < segment.bodyLength;) {
       const read = fs.readSync(input, buffer, 0, Math.min(buffer.length, segment.bodyLength - offset), segment.frameOffset + offset);
       if (!read) throw new Error(`音频片段在拼接时被截断：${path.basename(segment.filePath)}`);
       writeAll(output, buffer, read);
       offset += read;
     }
+    verifySegment();
   } finally {
     fs.closeSync(input);
   }
@@ -87,7 +95,14 @@ function concatenateAudioFiles(filePaths, outputFilePath, { gapSeconds = SENTENC
     if (!fs.existsSync(filePath)) {
       throw new Error(`音频片段缺失，拒绝拼接：${path.basename(filePath)}`);
     }
-    const raw = fs.readFileSync(filePath);
+    const input = fs.openSync(filePath, 'r');
+    let raw, stat;
+    try {
+      stat = fs.fstatSync(input, { bigint: true });
+      raw = fs.readFileSync(input);
+    } finally {
+      fs.closeSync(input);
+    }
     const frameLengths = [];
     const { ok, format: frame, variableBitrate: segmentVbr, frameCount } = analyzeMp3(raw, {
       onFrame: length => frameLengths.push(length),
@@ -105,7 +120,7 @@ function concatenateAudioFiles(filePaths, outputFilePath, { gapSeconds = SENTENC
     const body = extractMp3Body(raw);
     const bodyLength = body.length - frame.frameOffset;
     const frameOffset = body.byteOffset - raw.byteOffset + frame.frameOffset;
-    segments.push({ filePath, frameOffset, bodyLength, frameLengths });
+    segments.push({ filePath, stat, frameOffset, bodyLength, frameLengths });
     audioBytes += bodyLength;
   }
 

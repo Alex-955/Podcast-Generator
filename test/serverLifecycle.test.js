@@ -71,6 +71,11 @@ function request(port, route, { agent, body } = {}) {
   });
 }
 
+test('导入 server 模块不创建任务或播客目录', () => {
+  assert.equal(fs.existsSync(process.env.DATA_DIR), false);
+  assert.equal(fs.existsSync(process.env.PODCASTS_DIR), false);
+});
+
 test('默认首选 3456，端口冲突会顺延到下一处空闲端口', portOptions, async t => {
   assert.deepEqual([DEFAULT_PORT, DEFAULT_PORT_FALLBACK_MAX], [3456, 3475]);
   let address = '::1';
@@ -117,6 +122,7 @@ test('默认区间占满后使用随机端口，可禁止随机降级，显式�
   t.after(() => fallback.close());
   assert.equal(fallback.fellBack, true);
   assert.ok(fallback.port < DEFAULT_PORT || fallback.port > DEFAULT_PORT_FALLBACK_MAX);
+  await fallback.close();
   await assert.rejects(startServer({ ...options, allowEphemeralFallback: false }), { code: 'EADDRINUSE' });
   await assert.rejects(startServer({ ...options, port: DEFAULT_PORT }), { code: 'EADDRINUSE' });
 
@@ -126,6 +132,7 @@ test('默认区间占满后使用随机端口，可禁止随机降级，显式�
   assert.ok(random.port > 0);
   assert.equal(random.fellBack, false);
   assert.equal((await request(random.port, 'health')).body.status, 'ok');
+  await random.close();
   await assert.rejects(startServer({ ...options, host: '192.0.2.1' }), { code: 'EADDRNOTAVAIL' });
 });
 
@@ -192,38 +199,37 @@ test('close 立即释放空闲长连接，幂等并在超时后强制关闭未�
   endExtractor.resolve({ content: '检查未响应的路由' });
 });
 
+function launch(t, port, options = settings()) {
+  const cwd = path.dirname(options.dataDir);
+  fs.mkdirSync(cwd, { recursive: true });
+  const child = fork(entry, ['--portable-instance=lifecycle-test'], {
+    cwd, silent: true, execArgv: [],
+    env: { ...process.env, HOST: host, PORT: String(port), DATA_DIR: options.dataDir, PODCASTS_DIR: options.podcastsDir },
+  });
+  const exit = once(child, 'exit');
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    await exit;
+  });
+  child.stdout.resume();
+  child.stderr.resume();
+  const ready = Promise.race([
+    once(child, 'message').then(([message]) => message),
+    exit.then(() => assert.fail('退出前未收到 IPC 启动结果')),
+  ]);
+  return { child, ready, exit };
+}
+
 test('CLI 按 IPC 报告显式 PORT 冲突，PORT=0 启动后收到 SIGTERM 干净退出', {
   timeout: 10000, skip: process.platform === 'win32' && 'Windows 不会交付可捕获的 SIGTERM',
 }, async t => {
   const occupied = await occupy(0, host);
   t.after(() => new Promise(resolve => occupied.close(resolve)));
 
-  function launch(port) {
-    const options = settings();
-    const cwd = path.dirname(options.dataDir);
-    fs.mkdirSync(cwd);
-    const child = fork(entry, ['--portable-instance=lifecycle-test'], {
-      cwd, silent: true, execArgv: [],
-      env: { ...process.env, HOST: host, PORT: String(port), DATA_DIR: options.dataDir, PODCASTS_DIR: options.podcastsDir },
-    });
-    const exit = once(child, 'exit');
-    t.after(async () => {
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-      await exit;
-    });
-    child.stdout.resume();
-    child.stderr.resume();
-    const ready = Promise.race([
-      once(child, 'message').then(([message]) => message),
-      exit.then(() => assert.fail('退出前未收到 IPC 启动结果')),
-    ]);
-    return { child, ready, exit };
-  }
-
-  const rejected = launch(occupied.address().port);
+  const rejected = launch(t, occupied.address().port);
   assert.deepEqual(await rejected.ready, { error: 'EADDRINUSE' });
   assert.deepEqual(await rejected.exit, [1, null]);
-  const running = launch(0);
+  const running = launch(t, 0);
   const { port } = await running.ready;
   assert.ok(port > 0);
   assert.equal((await request(port, 'health')).status, 200);
@@ -237,4 +243,71 @@ test('CLI 按 IPC 报告显式 PORT 冲突，PORT=0 启动后收到 SIGTERM 干�
   } finally {
     watchdog.abort();
   }
+});
+
+test('同进程与独立 CLI 都无法抢占运行中任务，关闭后可重新启动', portOptions, async t => {
+  const options = settings();
+  const entered = Promise.withResolvers();
+  const first = await startServer({
+    ...options, port: 0, scriptGenerator({ signal }) {
+      entered.resolve();
+      return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+    },
+  });
+  t.after(() => first.close());
+  const created = await request(first.port, 'tasks', { body: {
+    mode: 'text', content: '离线任务正文', apiKey: 'offline', baseURL: 'https://fixture.example',
+  } });
+  assert.equal(created.status, 202);
+  await entered.promise;
+  const id = created.body.data.id;
+  const file = path.join(options.dataDir, 'tasks', id + '.json');
+  const checkpoint = fs.readFileSync(file, 'utf8');
+  assert.equal(JSON.parse(checkpoint).status, 'running');
+  const alias = path.join(path.dirname(options.dataDir), 'alias');
+  fs.symlinkSync(options.dataDir, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(startServer({ ...options, dataDir: alias, port: first.port, allowPortFallback: true }), {
+    code: 'DATA_DIR_LOCKED',
+  });
+  await assert.rejects(startServer({ app: createApp(options), port: 0 }), { code: 'DATA_DIR_LOCKED' });
+  const other = launch(t, 0, options);
+  assert.deepEqual(await other.ready, { error: 'DATA_DIR_LOCKED' });
+  assert.deepEqual(await other.exit, [1, null]);
+  assert.equal(fs.readFileSync(file, 'utf8'), checkpoint);
+  assert.equal((await request(first.port, 'tasks/' + id)).body.data.status, 'running');
+  await first.close();
+  const next = await startServer({ ...options, port: 0 });
+  t.after(() => next.close());
+  assert.equal((await request(next.port, 'health')).status, 200);
+});
+
+test('回收已退出进程遗留的锁，关闭时保留其他所有者的替换锁', portOptions, async t => {
+  const options = settings();
+  const child = launch(t, 0, options);
+  assert.ok((await child.ready).port > 0);
+  child.child.kill('SIGKILL');
+  await child.exit;
+  const lock = path.join(options.dataDir, '.server.lock');
+  assert.equal(JSON.parse(fs.readFileSync(lock)).pid, child.child.pid);
+  const next = await startServer({ ...options, port: 0 });
+  t.after(() => next.close());
+  assert.equal(JSON.parse(fs.readFileSync(lock)).pid, process.pid);
+  fs.renameSync(lock, lock + '.previous');
+  fs.writeFileSync(lock, 'replacement');
+  await next.close();
+  assert.equal(fs.readFileSync(lock, 'utf8'), 'replacement');
+});
+
+test('多个 CLI 同时回收死进程的锁时只有一个实例进入监听', portOptions, async t => {
+  const options = settings();
+  const previous = launch(t, 0, options);
+  assert.ok((await previous.ready).port > 0);
+  previous.child.kill('SIGKILL');
+  await previous.exit;
+  const contenders = Array.from({ length: 3 }, () => launch(t, 0, options));
+  const results = await Promise.all(contenders.map(child => child.ready));
+  const winners = results.filter(message => message.port > 0);
+  assert.equal(winners.length, 1);
+  assert.equal(results.filter(message => message.error === 'DATA_DIR_LOCKED').length, 2);
+  assert.equal((await request(winners[0].port, 'health')).status, 200);
 });

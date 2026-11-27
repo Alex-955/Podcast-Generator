@@ -519,6 +519,7 @@
         gainCache.set(podcast.id, gains);
         if (currentPodcast?.id === podcast.id) {
           currentSentenceGains = gains;
+          currentSentenceIdx = -1;
           syncTime(audioEl?.currentTime || 0);
         }
       } catch {
@@ -734,6 +735,24 @@
       return phase;
     }
 
+    function suspend() {
+      playToken += 1;
+      clearTimers();
+      cancelPendingAnalysis();
+      stopBgmImmediate();
+      if (audioEl && !audioEl.paused) {
+        audioEl.pause();
+      }
+      setPhase('idle');
+      if (audioCtx && audioCtx.state === 'running') {
+        try {
+          audioCtx.suspend().catch(() => {});
+        } catch {
+          // Ignore suspend failures on pagehide
+        }
+      }
+    }
+
     function dispose() {
       playToken += 1;
       clearTimers();
@@ -777,6 +796,7 @@
       handleAudioPlay,
       handleAudioPause,
       handleAudioEnded,
+      suspend,
       dispose,
     };
   }

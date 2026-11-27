@@ -399,3 +399,44 @@ test('缓存清理只处理顶层普通缓存文件，跳过目录、链接和�
   assert.throws(() => linkedCache.put(c, source), /缓存目录无效/);
   assert.deepEqual(fs.readFileSync(path.join(outside, c + '.mp3')), audio);
 });
+
+test('prune 只清理超过一小时且身份未变的顶层原子写临时文件', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tts-temp-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const temp = i => path.join(dir, '.tmp-' + String(i).padStart(36, '0'));
+  const time = 8_000_000;
+  for (const [file, age] of [[temp(1), 3600001], [temp(2), 3600000], [temp(3), 4000000], [temp(4) + '.other', 4000000]]) {
+    fs.writeFileSync(file, 'original');
+    fs.utimesSync(file, (time - age) / 1000, (time - age) / 1000);
+  }
+  fs.writeFileSync(temp(7), 'old');
+  fs.utimesSync(temp(7), 1, 1);
+  fs.mkdirSync(temp(5));
+  fs.symlinkSync(temp(5), temp(6), process.platform === 'win32' ? 'junction' : 'dir');
+  const lstat = fs.lstatSync;
+  let observed = false;
+  t.mock.method(fs, 'lstatSync', (file, ...rest) => {
+    const stat = lstat(file, ...rest);
+    if (file === temp(3) && !observed) {
+      observed = true;
+      fs.renameSync(file, file + '.old');
+      fs.writeFileSync(file, 'replacement');
+    }
+    return stat;
+  });
+  const rename = fs.renameSync;
+  t.mock.method(fs, 'renameSync', (from, to) => {
+    if (from === temp(7)) {
+      rename(from, from + '.old');
+      fs.writeFileSync(from, 'new arrival');
+    }
+    return rename(from, to);
+  });
+  createTtsCache(dir, { now: () => time }).prune();
+  assert.equal(fs.existsSync(temp(1)), false);
+  assert.ok(fs.existsSync(temp(2)) && fs.existsSync(temp(4) + '.other'));
+  assert.equal(fs.readFileSync(temp(3), 'utf8'), 'replacement');
+  assert.equal(fs.readFileSync(temp(7), 'utf8'), 'new arrival');
+  assert.ok(lstat(temp(6)).isSymbolicLink());
+  assert.ok(lstat(temp(5)).isDirectory());
+});

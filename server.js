@@ -15,6 +15,7 @@ const { extractTextFromImages } = require('./src/services/imageExtractor');
 const { fetchLlmModels } = require('./src/services/llmModels');
 const { polishArticleText } = require('./src/services/textPolisher');
 const { recommendPodcastStyle } = require('./src/services/styleRecommender');
+const { acquireInstanceLock } = require('./src/services/instanceLock');
 const { createTaskManager } = require('./src/services/taskManager');
 const { InputError, ttsSecrets } = require('./src/services/validation');
 const { redactProviderDetail } = require('./src/services/providerHttp');
@@ -51,18 +52,28 @@ function tokenDigest(token) {
   return createHash('sha256').update(token, 'utf8').digest();
 }
 
+const appStartup = new WeakMap();
+
+function resolveDataDir(directory) {
+  return path.resolve(directory || process.env.DATA_DIR || path.join(__dirname, 'data'));
+}
+
 function createApp(options = {}) {
   const app = express();
   const { adminToken = process.env.ADMIN_TOKEN?.trim() || '',
     isLoopbackRequest = req => isLoopbackAddress(req.socket?.remoteAddress) } = options;
   const adminDigest = adminToken && tokenDigest(adminToken);
   const publicDir = path.resolve(options.publicDir || PUBLIC_DIR);
-  const dataDir = path.resolve(options.dataDir || process.env.DATA_DIR || path.join(__dirname, 'data'));
+  const dataDir = resolveDataDir(options.dataDir);
   const podcastsDir = path.resolve(options.podcastsDir || process.env.PODCASTS_DIR || path.join(publicDir, 'podcasts'));
   const extractor = options.extractor || extractArticle;
-  const manager = options.taskManager || createTaskManager({
-    ...options, extractor, podcastsDir, tasksDir: path.join(dataDir, 'tasks'), cacheDir: path.join(dataDir, 'tts-cache'),
-  });
+  let manager = options.taskManager;
+  function initializeManager() {
+    manager ??= createTaskManager({
+      ...options, extractor, podcastsDir, tasksDir: path.join(dataDir, 'tasks'), cacheDir: path.join(dataDir, 'tts-cache'),
+    });
+  }
+  appStartup.set(app, { dataDir, initializeManager });
   const requests = new Set();
   let shutdown;
   function unavailable(req, res) {
@@ -74,7 +85,7 @@ function createApp(options = {}) {
   }
   app.shutdown = opts => {
     if (shutdown) return shutdown;
-    shutdown = Promise.resolve().then(() => manager.shutdown?.(opts));
+    shutdown = Promise.resolve().then(() => manager?.shutdown?.(opts));
     for (const controller of requests) controller.abort();
     return shutdown;
   };
@@ -97,7 +108,10 @@ function createApp(options = {}) {
   if (origins?.length) {
     app.use(cors({ origin: origins, preflightContinue: true }));
   }
-  app.use('/api', checkAvailable);
+  app.use('/api', checkAvailable, (req, res, next) => {
+    if (!manager) initializeManager(); // Standalone createApp().listen() initializes on its first API request.
+    next();
+  });
   if (origins?.length) app.options(/^\/api\//, (req, res) => res.sendStatus(204));
   const cancelOnDisconnect = handler => async (req, res) => {
     if (res.destroyed) return;
@@ -203,19 +217,27 @@ async function startServer({
 } = {}) {
   const preferredPort = parsePort(port);
   const lastPort = Math.min(65535, Math.floor(maxFallbackPort));
-  app ??= createApp(createAppOptions);
   let candidate = preferredPort;
   let server;
-  for (;;) {
-    try {
-      server = await listen(app, host, candidate);
-      break;
-    } catch (error) {
-      if (error.code !== 'EADDRINUSE' || !allowPortFallback || candidate === 0) throw error;
-      if (candidate < lastPort) candidate++;
-      else if (allowEphemeralFallback !== false) candidate = 0;
-      else throw error;
+  const dataDir = appStartup.get(app)?.dataDir ?? resolveDataDir(createAppOptions.dataDir);
+  const release = await acquireInstanceLock(dataDir);
+  try {
+    app ??= createApp({ ...createAppOptions, dataDir });
+    appStartup.get(app)?.initializeManager();
+    for (;;) {
+      try {
+        server = await listen(app, host, candidate);
+        break;
+      } catch (error) {
+        if (error.code !== 'EADDRINUSE' || !allowPortFallback || candidate === 0) throw error;
+        if (candidate < lastPort) candidate++;
+        else if (allowEphemeralFallback !== false) candidate = 0;
+        else throw error;
+      }
     }
+  } catch (error) {
+    release();
+    throw error;
   }
 
   const actualPort = server.address().port;
@@ -246,15 +268,13 @@ async function startServer({
     if (closing) return closing;
     const completion = Promise.withResolvers();
     closing = completion.promise;
-    drain(timeoutMs).then(completion.resolve, completion.reject);
+    drain(timeoutMs).finally(release).then(completion.resolve, completion.reject);
     return closing;
   }
   return { app, server, host, port: actualPort, preferredPort, fellBack: preferredPort !== 0 && actualPort !== preferredPort, close };
 }
 
-const app = createApp();
-Object.assign(app, { createApp, startServer, parsePort, isLoopbackAddress, DEFAULT_PORT, DEFAULT_PORT_FALLBACK_MAX });
-module.exports = app;
+module.exports = { createApp, startServer, parsePort, isLoopbackAddress, DEFAULT_PORT, DEFAULT_PORT_FALLBACK_MAX };
 
 async function main() {
   const host = process.env.HOST || '127.0.0.1';
@@ -262,7 +282,7 @@ async function main() {
   const portable = process.send && process.argv[2]?.startsWith('--portable-instance=');
   try {
     const { port, preferredPort, fellBack, close } = await startServer({
-      app, host, port: process.env.PORT, allowPortFallback: !explicitPort,
+      host, port: process.env.PORT, allowPortFallback: !explicitPort,
     });
     async function stop() {
       try {
@@ -284,7 +304,8 @@ async function main() {
   } catch (error) {
     const code = error.code || 'LISTEN_ERROR';
     if (portable && process.connected) process.send({ error: code }, () => {});
-    console.error('AI 妙听无法启动（%s）', code);
+    if (code === 'DATA_DIR_LOCKED') console.error(error.message);
+    else console.error('AI 妙听无法启动（%s）', code);
     process.exitCode = 1;
   }
 }

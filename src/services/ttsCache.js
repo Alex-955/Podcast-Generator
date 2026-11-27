@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { createHash } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const { analyzeMp3, isValidMp3 } = require('./mp3Utils');
 const { atomicWrite } = require('./atomicWrite');
 
@@ -25,6 +25,8 @@ function buildCacheKey({ provider, model, voice, rate = '+0%', pitch = '+0Hz', e
 }
 
 const CACHE_FILENAME = /^[a-f0-9]{64}\.mp3$/;
+const TEMP_FILENAME = /^\.tmp-[0-9a-f-]{36}$/i;
+const TEMP_MAX_AGE_MS = 60 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 60_000;
 const statEntry = file => fs.lstatSync(file, { throwIfNoEntry: false });
 
@@ -58,9 +60,31 @@ function createTtsCache(directory, {
     }
   }
 
+  function removeExpiredTemp(file, stat, directory) {
+    const same = (a, b) => a && a.dev === b.dev && a.ino === b.ino;
+    const eligible = candidate => {
+      const current = statEntry(candidate);
+      return current?.isFile() && same(current, stat) && current.mtimeMs === stat.mtimeMs &&
+        same(statEntry(cacheDir), directory);
+    };
+    if (!eligible(file)) return;
+    // Take the name out of circulation before unlinking. A replacement in the
+    // check/rename window must survive, as must any new file at the old name.
+    const claimed = path.join(cacheDir, '.tmp-' + randomUUID());
+    try {
+      fs.renameSync(file, claimed);
+    } catch (error) {
+      if (error.code === 'ENOENT') return;
+      throw error;
+    }
+    if (eligible(claimed)) remove(claimed);
+    else if (statEntry(claimed) && !statEntry(file)) fs.renameSync(claimed, file);
+  }
+
   function prune({ protectKey } = {}) {
     const protectedName = protectKey === undefined ? null : path.basename(getPath(protectKey));
-    if (!statEntry(cacheDir)?.isDirectory()) {
+    const directory = statEntry(cacheDir);
+    if (!directory?.isDirectory()) {
       usage = undefined;
       return;
     }
@@ -68,10 +92,15 @@ function createTtsCache(directory, {
     const candidates = [];
     let bytes = 0, count = 0, oldestMtime = Infinity;
     for (const name of fs.readdirSync(cacheDir)) {
-      if (!CACHE_FILENAME.test(name)) continue;
+      const temp = TEMP_FILENAME.test(name);
+      if (!temp && !CACHE_FILENAME.test(name)) continue;
       const file = path.join(cacheDir, name);
       const stat = statEntry(file);
       if (!stat?.isFile()) continue;
+      if (temp) {
+        if (time - stat.mtimeMs > TEMP_MAX_AGE_MS) removeExpiredTemp(file, stat, directory);
+        continue;
+      }
       if (name !== protectedName && time - stat.mtimeMs > maxAgeMs) {
         remove(file);
         continue;

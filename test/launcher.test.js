@@ -580,3 +580,11 @@ test('两个原生启动器换行与权限，Shell 语法及 macOS 应用查找�
     assert.equal(result.status, 0, result.stderr);
   }
 });
+
+test('便携启动器将数据目录占用 IPC 转为独立目录指引', async t => {
+  const { options, pidFile } = fixture(t);
+  fs.mkdirSync(options.dataDir);
+  fs.writeFileSync(path.join(options.dataDir, '.server.lock'), JSON.stringify({ pid: process.pid }));
+  await assert.rejects(startPortable({ ...options, port: 0 }), /当前数据目录正被另一个运行中的 AI 妙听实例占用.*--data-dir/);
+  assert.equal(fs.existsSync(pidFile), false);
+});

@@ -247,3 +247,31 @@ test('拼接器循环处理短写，写失败后清理临时文件并保留已�
   assert.deepEqual(fs.readdirSync(dir), before);
   assert.deepEqual(fs.readFileSync(out), complete);
 });
+
+for (const change of ['替换', '修改']) {
+  test('两遍拼接之间' + change + '同长度片段时保留原成品', t => {
+    const { dir, entries } = setupEntries(t, [10]);
+    const input = entries[0].filePath;
+    const output = path.join(dir, 'output.mp3');
+    fs.writeFileSync(output, 'previous');
+    const data = fs.readFileSync(input);
+    const previous = fs.statSync(input);
+    const open = fs.openSync;
+    t.mock.method(fs, 'openSync', (file, flags, ...rest) => {
+      if (flags === 'wx' && path.basename(file).startsWith('.tmp-')) {
+        if (change === '替换') {
+          fs.writeFileSync(input + '.next', data);
+          fs.utimesSync(input + '.next', previous.atime, previous.mtime);
+          fs.renameSync(input + '.next', input);
+        } else {
+          fs.writeFileSync(input, data);
+          fs.utimesSync(input, 1, 1);
+        }
+      }
+      return open(file, flags, ...rest);
+    });
+    assert.throws(() => concatenateAudioFiles([input], output), /片段在拼接时已改变/);
+    assert.strictEqual(fs.readFileSync(output, 'utf8'), 'previous');
+    assert.ok(!fs.readdirSync(dir).some(name => name.startsWith('.tmp-')));
+  });
+}

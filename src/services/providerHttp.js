@@ -142,14 +142,11 @@ async function withProviderResponse(endpoint, request, {
     timer = setTimeout(() => controller.abort(), timeoutMs);
     const outbound = { ...request, signal: controller.signal, lookup };
     request = null;
-    let pending;
     try {
-      // The transport takes ownership of the body when invoked, before waiting for headers.
-      pending = llmRequest(endpoint, outbound);
+      response = await llmRequest(endpoint, outbound);
     } finally {
       outbound.body = null;
     }
-    response = await pending;
     controller.signal.throwIfAborted();
     const result = await readResponse(response);
     controller.signal.throwIfAborted();
