@@ -5,15 +5,17 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { atomicWrite } = require('./atomicWrite');
 const { extractArticle, assertValidUrl, assertSafeFetchTarget } = require('./extractor');
 const { generatePodcastScript, normalizePodcastStyle, PODCAST_STYLES } = require('./scriptEngine');
-const { synthesizeDialogueScript, DEFAULT_VOICES, TTS_CHECKPOINT_FILENAME } = require('./ttsService');
+const { synthesizeDialogueScript, DEFAULT_VOICES, sentenceFileName, TTS_CHECKPOINT_FILENAME } = require('./ttsService');
 const { getCredentials, llmSecrets, validateLlmSettings } = require('./llmCredentials');
 const { redactProviderDetail } = require('./providerHttp');
 const { getTtsCredentials, resolveVoiceMapping } = require('./ttsCredentials');
 const { getTtsProvider, DEFAULT_PROVIDER_ID, resolveSpeechRate } = require('./ttsProvider');
 const { SPEECH_SPEEDS, normalizeSpeechSpeed } = require('./speechNormalize');
-const { createTtsCache } = require('./ttsCache');
+const { createTtsCache, speechAccountHash } = require('./ttsCache');
 const { concatenateAudioFiles } = require('./audioMerger');
-const { InputError, validateScriptRequest, ttsSecrets } = require('./validation');
+const { InputError, validateEditedDialogue, validateScriptRequest, redactSecrets, ttsSecrets } = require('./validation');
+
+const { isSafeVersion, assertPodcastVersion, publishEditedPodcast, reconcilePendingPublications } = require('./podcastPublication');
 
 const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
 const SOURCE_TYPES = new Set(['url', 'text', 'image']);
@@ -47,8 +49,9 @@ function sameFileSystemResource(a, b) {
   return Boolean(realLeft && realLeft === realPathIfExists(b));
 }
 
-function readPodcastMetadata(dir) {
+function readPodcastMetadata(dir, resolveTaskStatus) {
   if (!fs.lstatSync(dir, { throwIfNoEntry: false })?.isDirectory()) return;
+  reconcilePendingPublications(dir, resolveTaskStatus);
   const audio = fs.lstatSync(path.join(dir, 'full_podcast.mp3'), { throwIfNoEntry: false });
   const metaFile = path.join(dir, 'meta.json');
   if (!audio?.isFile() || !audio.size || !fs.lstatSync(metaFile, { throwIfNoEntry: false })?.isFile()) return;
@@ -106,6 +109,8 @@ function validTaskRecord(task, id) {
   const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
   const hasText = value => typeof value === 'string' && value.trim().length > 0;
   if (!object(task) || task.id !== id || !object(task.input) || !object(task.progress)) return false;
+  if (task.targetPodcastId !== undefined &&
+      (typeof task.targetPodcastId !== 'string' || !SAFE_ID.test(task.targetPodcastId) || !task.script)) return false;
   if (task.voiceMapping != null && !object(task.voiceMapping)) return false;
   if (!['queued', 'running', 'failed', 'cancelled', 'completed'].includes(task.status)) return false;
   if (typeof task.stage !== 'string' || !Object.hasOwn(STAGES, task.stage)) return false;
@@ -185,7 +190,7 @@ function sanitizeTaskScript(task, sensitive) {
 }
 
 // Only expose public dialogue fields, including when reading older metadata.
-function publicSentences(id, sentences, sensitive) {
+function publicSentences(id, sentences, sensitive, query = '') {
   return sentences.map(({ index, speaker, text, emotion, startTime, endTime, duration, fileName }) => {
     const basename = typeof fileName === 'string' && path.basename(fileName);
     return {
@@ -193,7 +198,7 @@ function publicSentences(id, sentences, sensitive) {
       emotion: redactScriptField(emotion, sensitive), startTime: finiteNumber(startTime),
       endTime: finiteNumber(endTime), duration: finiteNumber(duration),
       ...(basename && redactScriptField(basename, sensitive) === basename && {
-        fileName: basename, audioUrl: `/podcasts/${id}/${encodeURIComponent(basename)}`,
+        fileName: basename, audioUrl: `/podcasts/${id}/${encodeURIComponent(basename)}${query}`,
       }),
     };
   });
@@ -215,10 +220,10 @@ function publicTtsSummary(meta, sensitive) {
 function createTaskManager({
   tasksDir, podcastsDir, cacheDir, extractor = extractArticle, scriptGenerator = generatePodcastScript,
   llmRequest, lookup, ttsSynthesizer = synthesizeDialogueScript, audioMerger = concatenateAudioFiles,
-  ttsProvider, getTtsProviderById = getTtsProvider,
+  adminToken, ttsProvider, getTtsProviderById = getTtsProvider,
 }) {
   const cache = createTtsCache(cacheDir);
-  const storedSecrets = [...llmSecrets({}, {}, { includeDefaultBase: false }), podcastsDir, cacheDir, tasksDir];
+  const storedSecrets = [...llmSecrets({}, {}, { includeDefaultBase: false }), adminToken, podcastsDir, cacheDir, tasksDir];
   let active = null;
   let closing;
 
@@ -244,42 +249,62 @@ function createTaskManager({
     }
     const voiceMapping = resolveVoiceMapping(provider, adapterOptions.model, tts.voiceMapping ?? payload.voiceMapping ?? inherited);
     const scopeHash = provider.getScopeHash?.(Object.values(voiceMapping), adapterOptions);
+    const accountHash = (provider.requiresAuth || provider.getScopeHash) ? speechAccountHash(adapterOptions) : undefined;
     const settings = { ttsProvider: provider.id, ttsModel: adapterOptions.model, voiceMapping, speechSpeed };
     const llmSensitive = llmSecrets(payload, creds, { includeDefaultBase: false });
-    const secrets = [...llmSensitive,
+    const secrets = [...llmSensitive, adminToken,
       ...ttsSecrets(tts), adapterOptions.apiKey, adapterOptions.accessKey, adapterOptions.appId, adapterOptions.endpoint]
       .filter(value => typeof value === 'string' && value.trim()).map(value => value.trim());
-    if (containsSecrets(secrets, settings, payload.title, payload.content, payload.url, task?.sourceContent, task?.input, task?.script)) {
+    if (containsSecrets(secrets, settings, payload.title, payload.content, payload.url, task?.sourceContent, task?.input, task?.script, task?.targetPodcastId, task?.baseVersion)) {
       throw new InputError('输入内容包含敏感凭据，已拦截并中止保存');
     }
     const changed = task && (!sameProvider || previousSpeed !== speechSpeed ||
-      task.ttsScopeHash !== scopeHash || (task.ttsModel || provider.model) !== settings.ttsModel ||
+      task.ttsAccountHash !== accountHash || task.ttsScopeHash !== scopeHash || (task.ttsModel || provider.model) !== settings.ttsModel ||
       Object.keys(voiceMapping).some(name => (previousMapping?.[name] || defaults[name]) !== voiceMapping[name]));
-    return { provider, adapterOptions, secrets, settings, changed, scopeHash, rate: resolveSpeechRate(provider.id, speechSpeed) };
+    return { provider, adapterOptions, secrets, settings, changed, scopeHash, accountHash, rate: resolveSpeechRate(provider.id, speechSpeed) };
   }
 
-  function save(task) {
+  function save(task, publishedPodcast) {
     task.updatedAt = now();
     const sensitive = metadataSecrets(task, storedSecrets);
-    const dto = toDTO(task, sensitive);
+    const dto = toDTO(task, sensitive, publishedPodcast);
     const { mode, url } = task.input;
     const input = { ...dto.input, mode };
     // Restarting the extractor requires the original article URL, including any article signature.
     if (mode === 'url' && typeof url === 'string' && /^https?:\/\//i.test(url) && !containsSecrets(sensitive, url)) input.url = url;
-    const record = { ...dto, input, ttsScopeHash: task.ttsScopeHash, sourceContent: task.sourceContent,
+    const record = { ...dto, input, ...(task.targetPodcastId && { mode: 'resynthesize', baseVersion: task.baseVersion }),
+      ttsScopeHash: task.ttsScopeHash, ttsAccountHash: task.ttsAccountHash, sourceContent: task.sourceContent,
       script: task.script, ...(task.clearPending && { clearPending: true }) };
     atomicWrite(path.join(tasksDir, task.id + '.json'), JSON.stringify(record));
   }
 
-  function readTask(id, { startup = false } = {}) {
+  function storedTask(id, optional = false) {
     checkId(id);
     const file = path.join(tasksDir, id + '.json');
-    if (!fs.existsSync(file)) throw httpError(404, '任务不存在');
-    const task = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (!validTaskRecord(task, id)) throw new Error('任务记录无效');
+    if (!fs.lstatSync(file, { throwIfNoEntry: false })?.isFile()) {
+      if (optional) return;
+      throw httpError(404, '任务不存在');
+    }
+    const raw = fs.readFileSync(file, 'utf8');
+    try {
+      const task = JSON.parse(raw);
+      if (validTaskRecord(task, id)) return task;
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+    }
+    if (!optional) throw new Error('任务记录无效');
+  }
+
+  function resolvePublicationTask(taskId, podcastId) {
+    const task = storedTask(taskId, true);
+    if (task?.targetPodcastId === podcastId) return task;
+  }
+
+  function readTask(id, { startup = false } = {}) {
+    const task = storedTask(id);
     const legacyStyle = task.script ? 'dialogue' : 'deep_dive';
     task.podcastStyle = normalizePodcastStyle(task.podcastStyle === undefined ? legacyStyle : task.podcastStyle);
-    if (!SOURCE_TYPES.has(task.sourceType)) task.sourceType = inferSourceType(task.input.mode);
+    if (!task.targetPodcastId && !SOURCE_TYPES.has(task.sourceType)) task.sourceType = inferSourceType(task.input.mode);
     if (['queued', 'running'].includes(task.status) && active?.task.id !== id) {
       task.status = 'failed';
       task.error = {
@@ -298,6 +323,14 @@ function createTaskManager({
     return task;
   }
 
+  for (const entry of readDirectory(podcastsDir)) {
+    if (!entry.isDirectory() || !SAFE_ID.test(entry.name)) continue;
+    try {
+      reconcilePodcast(entry.name);
+    } catch {
+      console.warn('启动恢复时跳过了一期无法恢复的播客');
+    }
+  }
   for (const entry of readDirectory(tasksDir)) {
     const id = path.basename(entry.name, '.json');
     if (!entry.isFile() || !entry.name.endsWith('.json') || !SAFE_ID.test(id)) continue;
@@ -308,29 +341,42 @@ function createTaskManager({
     }
   }
 
+  function reconcilePodcast(id) {
+    checkId(id);
+    reconcilePendingPublications(path.join(podcastsDir, id), resolvePublicationTask);
+  }
+
   function getPodcast(id) {
     checkId(id);
     const dir = path.join(podcastsDir, id);
     const missing = () => httpError(404, '播客不存在或尚未生成完成');
     try {
-      const meta = readPodcastMetadata(dir);
+      const meta = readPodcastMetadata(dir, resolvePublicationTask);
       if (!meta) throw missing();
-      const metaSensitive = metadataSecrets(meta, storedSecrets);
-      const { podcastTitle, summary = '' } = meta;
-      const podcastStyle = PODCAST_STYLES.includes(meta.podcastStyle) ? meta.podcastStyle : 'dialogue';
-      const sourceType = SOURCE_TYPES.has(meta.sourceType) ? meta.sourceType : null;
-      return {
-        id, podcastTitle: redactScriptField(podcastTitle, metaSensitive), summary: redactScriptField(summary, metaSensitive),
-        podcastStyle, sourceType, sourceTruncated: Boolean(meta.sourceTruncated),
-        createAt: publicDate(meta.createAt, metaSensitive), totalDuration: finiteNumber(meta.totalDuration),
-        sentenceGap: finiteNumber(meta.sentenceGap), measurement: publicIdentifier(meta.measurement, /^[a-zA-Z0-9_-]{1,60}$/, metaSensitive),
-        ...publicTtsSummary(meta, metaSensitive),
-        fullAudioUrl: `/podcasts/${id}/full_podcast.mp3`, sentences: publicSentences(id, meta.sentences || [], metaSensitive),
-      };
+      return podcastDTO(id, meta);
     } catch (error) {
       if (['ENOENT', 'ENOTDIR'].includes(error.code) || error instanceof SyntaxError || error instanceof TypeError) throw missing();
       throw error;
     }
+  }
+
+  function podcastDTO(id, meta) {
+    const metaSensitive = metadataSecrets(meta, storedSecrets);
+    const { podcastTitle, summary = '' } = meta;
+    const audioVersion = isSafeVersion(meta.audioVersion) && redactScriptField(meta.audioVersion, metaSensitive) === meta.audioVersion
+      ? meta.audioVersion : undefined;
+    const query = audioVersion ? '?v=' + audioVersion : '';
+    const podcastStyle = PODCAST_STYLES.includes(meta.podcastStyle) ? meta.podcastStyle : 'dialogue';
+    const sourceType = SOURCE_TYPES.has(meta.sourceType) ? meta.sourceType : null;
+    return {
+      id, podcastTitle: redactScriptField(podcastTitle, metaSensitive), summary: redactScriptField(summary, metaSensitive),
+      podcastStyle, sourceType, sourceTruncated: Boolean(meta.sourceTruncated),
+      createAt: publicDate(meta.createAt, metaSensitive), totalDuration: finiteNumber(meta.totalDuration),
+      sentenceGap: finiteNumber(meta.sentenceGap), measurement: publicIdentifier(meta.measurement, /^[a-zA-Z0-9_-]{1,60}$/, metaSensitive),
+      ...publicTtsSummary(meta, metaSensitive),
+      ...(audioVersion && { audioVersion, updatedAt: publicDate(meta.updatedAt, metaSensitive) }),
+      fullAudioUrl: `/podcasts/${id}/full_podcast.mp3${query}`, sentences: publicSentences(id, meta.sentences || [], metaSensitive, query),
+    };
   }
 
   function listPodcasts() {
@@ -343,7 +389,8 @@ function createTaskManager({
         items.push({ id, podcastTitle, summary, podcastStyle, sourceType, createAt, totalDuration, sentenceCount: sentences.length, fullAudioUrl,
           ...(ttsProvider && { ttsProvider }), ...(ttsModel && { ttsModel }), ...(voiceMapping && { voiceMapping }), speechSpeed });
       } catch (error) {
-        if (error.statusCode !== 404) throw error;
+        if (error.statusCode === 404 || (error.statusCode === 503 && error.code === 'PODCAST_RECOVERY_FAILED')) continue;
+        throw error;
       }
     }
     return { items: items.sort((a, b) => (Date.parse(b.createAt) || 0) - (Date.parse(a.createAt) || 0)) };
@@ -354,8 +401,9 @@ function createTaskManager({
     const dir = path.join(podcastsDir, id);
     const taskFile = path.join(tasksDir, id + '.json');
     if (active) {
-      const { id: activeId, podcastId } = active.task;
-      if (activeId === id || podcastId === id ||
+      const { id: activeId, podcastId, targetPodcastId } = active.task;
+      if (activeId === id || podcastId === id || targetPodcastId === id ||
+          (targetPodcastId && sameFileSystemResource(dir, path.join(podcastsDir, targetPodcastId))) ||
           sameFileSystemResource(dir, path.join(podcastsDir, activeId)) ||
           sameFileSystemResource(taskFile, path.join(tasksDir, activeId + '.json')) ||
           (typeof podcastId === 'string' && SAFE_ID.test(podcastId) &&
@@ -368,7 +416,7 @@ function createTaskManager({
       const location = realPathIfExists(storage);
       return location && (location === realDir || location.startsWith(realDir + path.sep) || realDir.startsWith(location + path.sep));
     });
-    const hasValidPodcast = directory && Boolean(readPodcastMetadata(dir));
+    const hasValidPodcast = directory && Boolean(readPodcastMetadata(dir, resolvePublicationTask));
     let hasValidTask = false;
     if (fs.lstatSync(taskFile, { throwIfNoEntry: false })?.isFile()) {
       try {
@@ -385,10 +433,11 @@ function createTaskManager({
     return { id, deleted: true };
   }
 
-  function toDTO(task, sensitive = metadataSecrets(task, storedSecrets)) {
+  function toDTO(task, sensitive = metadataSecrets(task, storedSecrets), publishedPodcast) {
     const { id, status, stage, input, progress, script, error } = task;
     const podcastId = publicIdentifier(task.podcastId, SAFE_ID, sensitive) ?? null;
     return {
+      ...(task.targetPodcastId && { targetPodcastId: publicIdentifier(task.targetPodcastId, SAFE_ID, sensitive) }),
       id, status, stage, podcastStyle: task.podcastStyle, sourceType: task.sourceType,
       ...publicTtsSummary(task, sensitive),
       input: {
@@ -406,7 +455,7 @@ function createTaskManager({
       hasScript: Boolean(script),
       podcastTitle: redactScriptField(script?.podcastTitle, sensitive) || '',
       summary: redactScriptField(script?.summary, sensitive) || '', podcastId,
-      podcast: status === 'completed' && podcastId ? getPodcast(podcastId) : null,
+      podcast: status === 'completed' && podcastId ? (publishedPodcast ?? getPodcast(podcastId)) : null,
       error: error && typeof error === 'object' && !Array.isArray(error) ? {
         stage: typeof error.stage === 'string' && Object.hasOwn(STAGES, error.stage) ? error.stage : undefined,
         message: redactScriptField(error.message, sensitive), retryable: Boolean(error.retryable),
@@ -416,22 +465,67 @@ function createTaskManager({
     };
   }
 
-  function assertIdle() {
-    if (active) throw httpError(409, '当前已有任务正在生成，请等待完成或先取消当前任务', 'TASK_ALREADY_RUNNING');
+  function assertIdle(targetPodcastId) {
+    if (!active) return;
+    if (targetPodcastId) reconcilePodcast(targetPodcastId);
+    throw httpError(409, '当前已有任务正在生成，请等待完成或先取消当前任务', 'TASK_ALREADY_RUNNING');
   }
 
   function assertAcceptingTasks() {
     if (closing) throw httpError(503, '服务正在关闭，暂不接收新任务', 'SERVER_SHUTTING_DOWN');
   }
 
+  function workingDirectory(task) {
+    return path.join(podcastsDir, task.targetPodcastId ? '.resynth-' + task.id : task.id);
+  }
+
+  function targetMetadata(id) {
+    checkId(id);
+    const meta = readPodcastMetadata(path.join(podcastsDir, id), resolvePublicationTask);
+    if (!meta) throw httpError(404, '播客不存在或尚未生成完成');
+    return meta;
+  }
+
+  function archiveLookup(id, meta, speech) {
+    const settings = speech.settings;
+    if (meta.ttsProvider !== settings.ttsProvider || meta.ttsModel !== settings.ttsModel ||
+        meta.speechSpeed !== settings.speechSpeed ||
+        Object.keys(settings.voiceMapping).some(role => meta.voiceMapping?.[role] !== settings.voiceMapping[role])) return;
+    const keys = meta.cacheKeys;
+    let original;
+    const needsAccount = speech.provider.requiresAuth || speech.provider.getScopeHash;
+    if (keys === undefined || needsAccount) {
+      // A later edit may have been published by a different account than the initial task.
+      try { original = storedTask(meta.audioVersion == null ? id : meta.publicationTaskId); } catch { /* Imported archive. */ }
+      if (needsAccount && (!speech.accountHash || original?.ttsAccountHash !== speech.accountHash ||
+          original.status !== 'completed' || original.podcastId !== id ||
+          (original.podcast?.audioVersion ?? null) !== (meta.audioVersion ?? null))) return;
+      if (keys === undefined && (speech.provider.getScopeHash || speech.provider.toneVersion) &&
+          (!speech.scopeHash || original?.ttsScopeHash !== speech.scopeHash)) return;
+    }
+    const identity = line => JSON.stringify([line.speaker, line.text, line.emotion || '']);
+    const byLine = new Map();
+    for (const [index, sentence] of (meta.sentences || []).entries()) {
+      if (sentence.fileName !== sentenceFileName(index)) continue;
+      const oldLine = original?.script?.dialogue?.[index];
+      if (oldLine && (identity(oldLine) !== identity(sentence) || oldLine.rate || oldLine.pitch)) continue;
+      byLine.set(identity(sentence), { index, file: path.join(podcastsDir, id, sentence.fileName) });
+    }
+    return (line, key) => {
+      const match = byLine.get(identity(line));
+      if (match && (keys === undefined || keys?.[match.index] === key)) return match.file;
+    };
+  }
+
   async function runPipeline(task, creds, speech, signal) {
-    const workDir = path.join(podcastsDir, task.id);
+    const workDir = workingDirectory(task);
+    const podcastId = task.targetPodcastId || task.id;
     const scriptSecrets = [...speech.secrets, creds.baseURL, workDir, cacheDir, tasksDir];
-    function enter(stage) {
+    function enter(stage, publishedPodcast) {
       signal.throwIfAborted();
       task.stage = stage;
       Object.assign(task.progress, stageProgress(stage));
-      save(task);
+      save(task, publishedPodcast);
     }
     try {
       signal.throwIfAborted();
@@ -439,6 +533,7 @@ function createTaskManager({
         clearAudio(workDir);
         delete task.clearPending;
       }
+      const previous = task.targetPodcastId && targetMetadata(podcastId);
       task.status = 'running';
       if (!task.sourceContent && !task.script) {
         enter('extract');
@@ -466,7 +561,9 @@ function createTaskManager({
       Object.assign(task.progress, { completedSegments: 0, totalSegments: task.script.dialogue.length, cachedSegments: 0 });
       enter('tts');
       fs.mkdirSync(workDir, { recursive: true });
+      if (!fs.lstatSync(workDir).isDirectory()) throw new Error('任务音频目录无效');
       const result = await ttsSynthesizer(task.script.dialogue, workDir, task.voiceMapping, {
+        archivedSegment: previous && archiveLookup(podcastId, previous, speech),
         provider: speech.provider, ttsModel: task.ttsModel, adapterOptions: speech.adapterOptions, rate: speech.rate, cache, signal,
         onProgress({ index, completedSegments, totalSegments, cachedSegments, speaker, retrying, attempt, maxAttempts, delayMs, rateLimited }) {
           signal.throwIfAborted();
@@ -492,25 +589,44 @@ function createTaskManager({
       try {
         await audioMerger(result.dialogue.map(sentence => sentence.filePath), tempAudio);
         signal.throwIfAborted();
+        const audioStat = fs.lstatSync(tempAudio);
+        if (!audioStat.isFile() || !audioStat.size) throw new Error('拼接音频文件无效');
         fs.renameSync(tempAudio, path.join(workDir, 'full_podcast.mp3'));
       } finally {
         fs.rmSync(tempAudio, { force: true });
       }
       const meta = {
-        ...speech.settings, id: task.id, podcastTitle: task.script.podcastTitle, summary: task.script.summary,
-        podcastStyle: task.podcastStyle, sourceType: task.sourceType, sourceTruncated: task.input.sourceTruncated, createAt: now(),
+        ...speech.settings, id: podcastId, podcastTitle: task.script.podcastTitle, summary: task.script.summary,
+        podcastStyle: task.podcastStyle, sourceType: task.sourceType, sourceTruncated: task.input.sourceTruncated,
+        createAt: previous ? publicDate(previous.createAt, metadataSecrets(previous, scriptSecrets)) : now(),
+        ...(previous && { updatedAt: now(), publicationTaskId: task.id, audioVersion: randomUUID().replaceAll('-', '') }),
+        cacheKeys: result.cacheKeys,
         totalDuration: result.totalDuration,
         measurement: result.measurement, sentenceGap: result.sentenceGap,
-        fullAudioUrl: `/podcasts/${task.id}/full_podcast.mp3`, sentences: publicSentences(task.id, result.dialogue, scriptSecrets),
+        fullAudioUrl: `/podcasts/${podcastId}/full_podcast.mp3`, sentences: publicSentences(podcastId, result.dialogue, scriptSecrets),
       };
-      atomicWrite(path.join(workDir, 'meta.json'), JSON.stringify(meta));
-      fs.rmSync(path.join(workDir, TTS_CHECKPOINT_FILENAME), { force: true });
-      task.status = 'completed';
-      task.podcastId = task.id;
-      enter('done');
+      const finish = () => {
+        task.status = 'completed';
+        task.podcastId = podcastId;
+        enter('done', podcastDTO(podcastId, meta));
+      };
+      if (previous) {
+        publishEditedPodcast(path.join(podcastsDir, podcastId), workDir, task.baseVersion, meta, task.id, finish, resolvePublicationTask);
+        try { fs.rmSync(workDir, { recursive: true }); }
+        catch { console.warn('无法清理微调剧本暂存目录'); }
+      } else {
+        atomicWrite(path.join(workDir, 'meta.json'), JSON.stringify(meta));
+        fs.rmSync(path.join(workDir, TTS_CHECKPOINT_FILENAME), { force: true });
+        finish();
+      }
     } catch (error) {
       // An immediate resume owns the new checkpoint while this cancelled run drains.
       if (active?.task !== task || active.interruptedForShutdown) return;
+      if (task.targetPodcastId && task.stage === 'done') {
+        task.stage = 'merge';
+        task.podcastId = null;
+        Object.assign(task.progress, stageProgress('merge'));
+      }
       if (signal.aborted || error.name === 'AbortError') {
         task.status = 'cancelled';
         task.error = null;
@@ -550,8 +666,40 @@ function createTaskManager({
     const source = getInput(payload);
     const task = {
       id: randomUUID(), status: 'queued', stage: 'extract', podcastStyle, sourceType, ...source, ...speech.settings,
-      ttsScopeHash: speech.scopeHash, script: null,
+      ttsAccountHash: speech.accountHash, ttsScopeHash: speech.scopeHash, script: null,
       progress: { ...stageProgress('extract'), message: '等待生成', completedSegments: 0, totalSegments: 0, cachedSegments: 0 },
+      createdAt: now(), podcastId: null, error: null,
+    };
+    return start(task, creds, speech);
+  }
+
+  function resynthesizePodcast(podcastId, payload = {}) {
+    assertAcceptingTasks();
+    checkId(podcastId);
+    if (payload?.baseVersion === undefined) {
+      throw new InputError('缺少播客版本号，请刷新最新剧本后再微调');
+    }
+    if (payload.baseVersion !== null && !isSafeVersion(payload.baseVersion)) throw new InputError('无效的播客版本号');
+    const dialogue = validateEditedDialogue(payload.dialogue);
+    const previous = targetMetadata(podcastId);
+    const source = podcastDTO(podcastId, previous);
+    assertPodcastVersion(source.audioVersion, payload.baseVersion);
+    assertIdle();
+    const creds = {};
+    const speech = resolveSpeech(payload, creds, previous);
+    const sensitive = metadataSecrets(previous, [...storedSecrets, ...speech.secrets]);
+    if (!publicIdentifier(podcastId, SAFE_ID, sensitive) || containsSecrets(sensitive, dialogue, speech.settings, source.audioVersion) ||
+        dialogue.some(({ text, emotion }) => [text, emotion].some(value => value && redactSecrets(value) !== value))) {
+      throw new InputError('输入内容包含敏感凭据，已拦截并中止保存');
+    }
+    const script = sanitizeScript({ ...source, dialogue }, sensitive);
+    const task = {
+      id: randomUUID(), status: 'queued', stage: 'tts', targetPodcastId: podcastId, baseVersion: source.audioVersion ?? null,
+      script, podcastStyle: source.podcastStyle, sourceType: source.sourceType, ...speech.settings,
+      ttsAccountHash: speech.accountHash, ttsScopeHash: speech.scopeHash,
+      input: { mode: 'text', title: script.podcastTitle, contentLength: dialogue.reduce((sum, line) => sum + line.text.length, 0),
+        sourceTruncated: source.sourceTruncated },
+      progress: { ...stageProgress('tts'), message: '准备重合成微调剧本', totalSegments: dialogue.length, completedSegments: 0, cachedSegments: 0 },
       createdAt: now(), podcastId: null, error: null,
     };
     return start(task, creds, speech);
@@ -572,21 +720,27 @@ function createTaskManager({
     const requestedStyle = payload.podcastStyle === undefined ? undefined : normalizePodcastStyle(payload.podcastStyle);
     const task = readTask(id);
     const drainingSameTask = active?.task.id === id && active.controller.signal.aborted;
-    if (!drainingSameTask) assertIdle();
+    if (!drainingSameTask) assertIdle(task.targetPodcastId);
     if (!['failed', 'cancelled'].includes(task.status)) throw httpError(409, '当前任务状态无法续跑');
     const podcastStyle = requestedStyle ?? task.podcastStyle;
     const styleChanged = podcastStyle !== task.podcastStyle;
+    if (task.targetPodcastId) {
+      const previous = getPodcast(task.targetPodcastId);
+      assertPodcastVersion(previous.audioVersion, task.baseVersion);
+      if (styleChanged) throw new InputError('微调剧本时不能切换节目风格');
+    }
     const needsScript = !task.script || styleChanged;
     if (styleChanged && !validTaskRecord({ ...task, script: null }, id)) {
       throw new InputError('任务缺少可重新生成的原文，无法切换节目风格');
     }
-    const creds = getCredentials(payload);
+    const creds = task.targetPodcastId ? {} : getCredentials(payload);
     if (needsScript && !creds.apiKey) throw new InputError('尚未生成剧本，请先配置 API Key 后再继续');
-    if (needsScript || [payload.apiKey, payload.baseURL, payload.model, payload.visionModel].some(value => value != null)) {
+    const hasLlmSettings = [payload.apiKey, payload.baseURL, payload.model, payload.visionModel].some(value => value != null);
+    if (needsScript || (!task.targetPodcastId && hasLlmSettings)) {
       validateLlmSettings(payload, creds);
     }
     const speech = resolveSpeech(payload, creds, task);
-    const workDir = path.join(podcastsDir, id);
+    const workDir = workingDirectory(task);
     if (styleChanged) task.script = null;
     const scriptChanged = !styleChanged && sanitizeTaskScript(task,
       metadataSecrets(task, [...speech.secrets, creds.baseURL, workDir, cacheDir, tasksDir]));
@@ -596,7 +750,7 @@ function createTaskManager({
       // Persist the second cleanup across a process restart as well.
       task.clearPending = Boolean(drainingSameTask);
     }
-    Object.assign(task, speech.settings, { ttsScopeHash: speech.scopeHash, podcastStyle });
+    Object.assign(task, speech.settings, { ttsAccountHash: speech.accountHash, ttsScopeHash: speech.scopeHash, podcastStyle });
     task.status = 'running';
     task.error = null;
     return start(task, creds, speech);
@@ -628,7 +782,10 @@ function createTaskManager({
     return closing;
   }
 
-  return { createTask, getTask: id => toDTO(readTask(id)), cancelTask, resumeTask, listPodcasts, getPodcast, deletePodcast, shutdown };
+  return {
+    createTask, resynthesizePodcast, isPodcastEdit: id => Boolean(readTask(id).targetPodcastId),
+    getTask: id => toDTO(readTask(id)), cancelTask, resumeTask, listPodcasts, getPodcast, reconcilePodcast, deletePodcast, shutdown,
+  };
 }
 
 module.exports = { createTaskManager };

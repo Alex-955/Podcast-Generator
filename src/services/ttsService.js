@@ -211,6 +211,7 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping, opt
   const needsCheckpoint = toneVersion || spokenLines.some((spoken, index) => spoken !== dialogueList[index]?.text);
   const checkpoint = needsCheckpoint ? readSpeechCheckpoint(checkpointFile, toneVersion || 'speech-v1') : null;
   const entries = [];
+  const cacheKeys = [];
   const totalSegments = dialogueList.length;
   let cachedSegments = 0;
   let reusedSegments = 0;
@@ -233,7 +234,9 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping, opt
         const scopeHash = provider.getScopeHash?.([voice], adapterOptions);
         return buildCacheKey({ scopeHash, provider: provider.id, model: cacheModel, voice, rate, pitch, emotion, text: spokenText, toneVersion });
       };
-      const checkpointKey = (toneVersion || spokenText !== text) && getKey();
+      const key = (cache || checkpoint) && getKey();
+      cacheKeys.push(key);
+      const checkpointKey = (toneVersion || spokenText !== text) && key;
       const reuseAllowed = !checkpointKey || checkpoint.segments[index] === checkpointKey;
       const existing = reuseAllowed && fs.existsSync(outputPath) && fs.readFileSync(outputPath);
       let fileSize;
@@ -242,8 +245,17 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping, opt
         cachedSegments++;
         fileSize = existing.length;
       } else {
-        const key = checkpointKey || ((cache || checkpoint) && getKey());
-        const cached = cache?.get(key, outputPath);
+        let cached = cache?.get(key, outputPath);
+        if (cache && !cached.hit && options.archivedSegment) {
+          const archived = options.archivedSegment(line, key);
+          if (archived && fs.lstatSync(archived, { throwIfNoEntry: false })?.isFile()) {
+            const audio = fs.readFileSync(archived);
+            if (isValidMp3(audio)) {
+              atomicWrite(outputPath, audio);
+              cached = { hit: true, bytes: audio.length };
+            }
+          }
+        }
         if (cached?.hit) {
           cachedSegments++;
           fileSize = cached.bytes;
@@ -286,7 +298,7 @@ async function synthesizeDialogueScript(dialogueList, workDir, voiceMapping, opt
   const dialogue = sentences.map((sentence, index) => ({
     ...sentence, filePath: entries[index].filePath, fileSize: entries[index].fileSize,
   }));
-  return { dialogue, ...timeline, cachedSegments, reusedSegments };
+  return { dialogue, ...timeline, cachedSegments, reusedSegments, cacheKeys };
 }
 
 module.exports = {

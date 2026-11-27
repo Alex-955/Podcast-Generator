@@ -5,7 +5,7 @@ const { InputError, MAX_DIALOGUE_LINES, MAX_LINE_TEXT_LENGTH } = require('./vali
 
 const LLM_TIMEOUT_MS = 180000;
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
-const PODCAST_STYLES = Object.freeze(['deep_dive', 'dialogue']);
+const PODCAST_STYLES = Object.freeze(['deep_dive', 'dialogue', 'debate']);
 
 function normalizePodcastStyle(value) {
   if (value === undefined) return 'deep_dive';
@@ -14,7 +14,7 @@ function normalizePodcastStyle(value) {
     if (!style) return 'deep_dive';
     if (PODCAST_STYLES.includes(style)) return style;
   }
-  throw new InputError('节目风格仅支持深度主讲（deep_dive）或轻松对谈（dialogue）');
+  throw new InputError('节目风格仅支持深度主讲（deep_dive）、轻松对谈（dialogue）或正反交锋（debate）');
 }
 
 const PACING_PROMPTS = {
@@ -23,6 +23,10 @@ const PACING_PROMPTS = {
 - 阿泽是主持人兼听众代言人，占全篇约 25%–35% 字数，单条 text 约 25~65 字。用生活化场景开场，在转折和关键处替听众精准追问或反问，提炼要点并温暖收尾。
 - 在句首自然融入轻量反应与过渡词，如「嗯，这个点特别关键——」「哦，这么一讲我就懂了……」「对，而且原文里还提到……」「哎等等，这听起来有点反直觉？」。严禁单独拆出只有「嗯」「哦」「对」的无实质内容短行。
 - 结构为开场引入 → 3~4 个递进式重点拆解 → 温暖金句收尾。目标 14~20 条 dialogue 台词，总字数约 1200~1700 字。`,
+  debate: `【正反交锋 / 理性杠精】
+- 阿泽清晰还原并力挺原文的核心论点，解释依据与正向价值。小晓是温和但犀利的理性反方，挑刺、补盲区，追问前提假设与潜在代价。用符合现实逻辑的假设反例检验论点，阿泽要正面回应。
+- 两人有来有往，发言字数大致 5:5。每条 text 约 40~110 字，目标 16~22 条 dialogue 台词，总字数约 1100~1500 字。
+- 保持克制理性，不吵架、不扣帽子、不油腻、不强行抬杠。小晓的质疑必须紧扣原文事实或普遍常识逻辑，严禁编造原文中不存在的数据、案例或引言。`,
   dialogue: `【轻松对谈】
 - 像两个老朋友在咖啡馆录播客，有接话、呼应和适度的情绪叹词，例如「哈哈确实」「可不是嘛」。
 - 让两人轮流推进对话，发言字数之比大致在 4:6 至 5:5。阿泽接住小晓的话、讲出自己的理解，也参与讲故事和打比方。小晓可以主动提问，让阿泽接着讲。避免「那后来呢？」之类的五六字短问。

@@ -72,7 +72,7 @@ function createApp(options = {}, ownerToken) {
   function initializeManager(token = ownerToken) {
     ownerToken = token;
     manager ??= createTaskManager({
-      ...options, extractor, podcastsDir, tasksDir: path.join(dataDir, 'tasks'), cacheDir: path.join(dataDir, 'tts-cache'),
+      ...options, adminToken, extractor, podcastsDir, tasksDir: path.join(dataDir, 'tasks'), cacheDir: path.join(dataDir, 'tts-cache'),
     });
   }
   appStartup.set(app, { dataDir, initializeManager });
@@ -96,14 +96,20 @@ function createApp(options = {}, ownerToken) {
     next();
   }
 
-  function authorizeDeletion(req, res, next) {
+  function authorizePodcastWrite(req, res, next) {
     if (isLoopbackRequest(req)) return next();
+    const deletion = req.method === 'DELETE';
     if (!adminDigest) {
-      return res.status(403).json({ success: false, error: '为保护本地播客，局域网设备默认禁止删除历史播客，请在启动服务的电脑本机删除' });
+      return res.status(403).json({ success: false, error: deletion ? '为保护本地播客，局域网设备默认禁止删除历史播客，请在启动服务的电脑本机删除' : '请在本机微调播客，或配置管理令牌' });
     }
     const candidates = [req.get('x-admin-token'), bearerToken(req)];
     if (candidates.some(token => token && timingSafeEqual(adminDigest, tokenDigest(token)))) return next();
-    return res.status(403).json({ success: false, error: '局域网客户端无权删除本地播客，请在本机操作或提供有效管理令牌' });
+    return res.status(403).json({ success: false, error: deletion ? '局域网客户端无权删除本地播客，请在本机操作或提供有效管理令牌' : '微调播客需要有效管理令牌' });
+  }
+
+  function authorizeTaskWrite(req, res, next) {
+    if (!isLoopbackRequest(req) && manager.isPodcastEdit(req.params.id)) return authorizePodcastWrite(req, res, next);
+    next();
   }
 
   const origins = process.env.CORS_ORIGIN?.split(',').map(origin => origin.trim()).filter(Boolean);
@@ -169,18 +175,23 @@ function createApp(options = {}, ownerToken) {
   }));
   app.post('/api/tasks', (req, res) => res.status(202).json({ success: true, data: manager.createTask(req.body || {}) }));
   app.get('/api/tasks/:id', (req, res) => res.json({ success: true, data: manager.getTask(req.params.id) }));
-  app.post('/api/tasks/:id/cancel', (req, res) => res.json({ success: true, data: manager.cancelTask(req.params.id) }));
-  app.post('/api/tasks/:id/resume', (req, res) => res.status(202).json({
+  app.post('/api/tasks/:id/cancel', authorizeTaskWrite, (req, res) => res.json({ success: true, data: manager.cancelTask(req.params.id) }));
+  app.post('/api/tasks/:id/resume', authorizeTaskWrite, (req, res) => res.status(202).json({
     success: true, data: manager.resumeTask(req.params.id, req.body || {}),
   }));
   app.get('/api/podcasts', (req, res) => res.json({ success: true, data: manager.listPodcasts() }));
   app.get('/api/podcasts/:id', (req, res) => res.json({ success: true, data: manager.getPodcast(req.params.id) }));
-  app.delete('/api/podcasts/:id', authorizeDeletion,
+  app.post('/api/podcasts/:id/resynthesize', authorizePodcastWrite, (req, res) => res.status(202).json({
+    success: true, data: manager.resynthesizePodcast(req.params.id, req.body || {}),
+  }));
+  app.delete('/api/podcasts/:id', authorizePodcastWrite,
     (req, res) => res.json({ success: true, data: manager.deletePodcast(req.params.id) }));
 
   // Only audio is public here. Historical raw meta.json files can contain local paths.
-  app.use('/podcasts', (req, res, next) => {
-    if (!/^\/[a-zA-Z0-9_-]+\/[^/]+\.mp3$/i.test(decodeURIComponent(req.path))) return res.sendStatus(404);
+  app.use('/podcasts', withManagerAccess, (req, res, next) => {
+    const match = /^\/([a-zA-Z0-9_-]+)\/(?!\.)[^/\\]+\.mp3$/i.exec(decodeURIComponent(req.path));
+    if (!match) return res.sendStatus(404);
+    manager.reconcilePodcast?.(match[1]);
     next();
   }, express.static(podcastsDir, { fallthrough: false }));
   app.use((req, res, next) => {

@@ -4,10 +4,16 @@
   const DEFAULT_BASE_URL = 'https://api.deepseek.com';
   const DEFAULT_MODEL = 'deepseek-flash';
   const MAX_CONTENT_LENGTH = 12000;
+  const MAX_LINE_TEXT_LENGTH = 2000;
   const FULL_PREVIEW_THRESHOLD = 150;
   const POLL_INTERVAL_MS = 1000;
   const SPEEDS = [0.8, 1.0, 1.25, 1.5, 1.75, 2.0];
   const STAGE_ORDER = ['extract', 'script', 'tts', 'merge'];
+  const PODCAST_STYLES = ['deep_dive', 'dialogue', 'debate'];
+
+  function normalizePodcastStyleClient(value) {
+    return PODCAST_STYLES.includes(value) ? value : 'deep_dive';
+  }
 
   const STORAGE_KEYS = {
     apiKey: 'ai_podcast_apikey',
@@ -22,6 +28,7 @@
   const PODCAST_STYLE_DESCS = {
     deep_dive: '7:3 主讲拆解 + 主持追问 · 贴近 AI 妙听',
     dialogue: '阿泽与小晓 5:5 轻快接力对谈',
+    debate: '阿泽力挺原文 × 小晓理性挑刺 · 5:5 克制思辨',
   };
 
   const LLM_PRESETS = [
@@ -172,6 +179,7 @@
   const PODCAST_STYLE_LABELS = {
     deep_dive: '深度主讲',
     dialogue: '轻松对谈',
+    debate: '正反交锋',
   };
 
   const TTS_MODEL_LABELS = {
@@ -256,9 +264,10 @@
     modalTtsSpeed: 'relaxed',
     modalTtsSpeedChanged: false,
     ttsSpeedOverrideTaskId: null,
+    ttsSettingsOverrideTaskId: null,
     modalVolcAuthMode: 'apiKey',
     uiInputTab: 'url',
-    podcastStyle: readStorage(STORAGE_KEYS.podcastStyle) === 'dialogue' ? 'dialogue' : 'deep_dive',
+    podcastStyle: normalizePodcastStyleClient(readStorage(STORAGE_KEYS.podcastStyle)),
     input: window.InputSource.createState(),
     imageSlices: [],
     extractingImages: false,
@@ -294,6 +303,14 @@
     subtitleScrollRaf: 0,
     mobileMiniRaf: 0,
     userScrollingSubtitlesUntil: 0,
+    scriptEdit: {
+      active: false,
+      podcastId: null,
+      baseVersion: null,
+      original: [],
+      draft: [],
+      submitting: false,
+    },
   };
 
   const dom = {
@@ -454,6 +471,13 @@
     btnBgmMode: document.getElementById('btnBgmMode'),
     bgmModeLabel: document.getElementById('bgmModeLabel'),
     btnSpeed: document.getElementById('btnSpeed'),
+    btnEditScript: document.getElementById('btnEditScript'),
+    scriptEditorBar: document.getElementById('scriptEditorBar'),
+    scriptEditorStatus: document.getElementById('scriptEditorStatus'),
+    scriptEditorCacheHint: document.getElementById('scriptEditorCacheHint'),
+    btnResetScriptEdits: document.getElementById('btnResetScriptEdits'),
+    btnCancelScriptEdit: document.getElementById('btnCancelScriptEdit'),
+    btnResynthesizeScript: document.getElementById('btnResynthesizeScript'),
     subtitlesList: document.getElementById('subtitlesList'),
 
     mobileMiniPlayer: document.getElementById('mobileMiniPlayer'),
@@ -708,7 +732,7 @@
   }
 
   function updatePodcastStyleUI() {
-    const style = state.podcastStyle === 'dialogue' ? 'dialogue' : 'deep_dive';
+    const style = normalizePodcastStyleClient(state.podcastStyle);
     const draft = state.confirmedDraft;
     const rec = draft?.styleRecommendation;
     dom.confirmStyleButtons?.forEach((btn) => {
@@ -766,7 +790,7 @@
       const current = state.confirmedDraft;
       if (!current || current.draftId !== draftId) return;
       current.styleRecommendLoading = false;
-      const recStyle = data?.style === 'dialogue' ? 'dialogue' : data?.style === 'deep_dive' ? 'deep_dive' : '';
+      const recStyle = PODCAST_STYLES.includes(data?.style) ? data.style : '';
       if (recStyle) {
         current.styleRecommendation = {
           style: recStyle,
@@ -971,7 +995,7 @@
 
   function renderConfirmationCard(draft, { recommendStyle = false } = {}) {
     if (recommendStyle) {
-      state.podcastStyle = readStorage(STORAGE_KEYS.podcastStyle) === 'dialogue' ? 'dialogue' : 'deep_dive';
+      state.podcastStyle = normalizePodcastStyleClient(readStorage(STORAGE_KEYS.podcastStyle));
     }
     if (recommendStyle || !draft.draftId) {
       draft.draftId = ++state.draftSeq;
@@ -1510,6 +1534,7 @@
 
       invalidateConfirmedDraft();
       state.ttsSpeedOverrideTaskId = null;
+      state.ttsSettingsOverrideTaskId = null;
       setActiveTask(task);
       if (window.innerWidth <= 900) {
         dom.progressSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1553,6 +1578,7 @@
       dom.btnStartGenerate.disabled = busy;
       dom.btnStartGenerate.querySelector('span').textContent = busy ? '当前已有任务生成中' : '开始生成双人播客';
     }
+    updateScriptEditAvailability();
   }
 
   function startPolling() {
@@ -1613,7 +1639,13 @@
         if (task.podcast) {
           loadPodcast(task.podcast, { autoplay: false });
         }
-        showToast(`播客《${task.podcastTitle || '新剧集'}》已生成完毕`);
+        if (task.targetPodcastId) {
+          const cached = task.progress?.cachedSegments || 0;
+          const total = task.progress?.totalSegments || task.podcast?.sentences?.length || 0;
+          showToast(`《${task.podcastTitle || '当前播客'}》微调重拼完成（缓存命中 ${cached}/${total} 句）`);
+        } else {
+          showToast(`播客《${task.podcastTitle || '新剧集'}》已生成完毕`);
+        }
         window.setTimeout(() => {
           if (state.activeTask?.id === task.id && state.activeTask?.status === 'completed') {
             setActiveTask(null);
@@ -1806,19 +1838,26 @@
 
   async function handleResumeTask(taskId) {
     try {
-      const ttsPayload = buildTtsPayload();
-      if (state.ttsSpeedOverrideTaskId !== taskId) {
-        delete ttsPayload.speechSpeed;
+      const isResynthesize = Boolean(state.activeTask?.id === taskId && state.activeTask?.targetPodcastId);
+      let ttsPayload;
+      if (isResynthesize && state.ttsSettingsOverrideTaskId !== taskId) {
+        ttsPayload = buildResynthesizeTtsPayload(state.activeTask);
+      } else {
+        ttsPayload = buildTtsPayload();
+        if (state.ttsSpeedOverrideTaskId !== taskId) {
+          delete ttsPayload.speechSpeed;
+        }
       }
+      const body = isResynthesize
+        ? { tts: ttsPayload }
+        : { ...buildCredsPayload(), tts: ttsPayload };
       const task = await apiJson(`/api/tasks/${encodeURIComponent(taskId)}/resume`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...buildCredsPayload(),
-          tts: ttsPayload,
-        }),
+        body: JSON.stringify(body),
       });
       state.ttsSpeedOverrideTaskId = null;
+      state.ttsSettingsOverrideTaskId = null;
       setActiveTask(task);
       startPolling();
       showToast('已从断点恢复生成');
@@ -1892,6 +1931,7 @@
   }
 
   function resetPlayerToEmptyState() {
+    exitScriptEditMode({ rerender: false });
     cancelScheduledSubtitleScroll();
     state.currentPodcast = null;
     state.lastSpeakerRole = 'none';
@@ -1922,6 +1962,7 @@
     if (dom.btnBgmMode) dom.btnBgmMode.disabled = true;
     dom.btnSpeed.disabled = true;
     dom.btnCopyMarkdown.disabled = true;
+    updateScriptEditAvailability();
     dom.btnDownloadAudio.removeAttribute('href');
     dom.btnDownloadAudio.classList.add('is-disabled');
     dom.btnDownloadAudio.setAttribute('aria-disabled', 'true');
@@ -2053,6 +2094,13 @@
         tag.textContent = sourceLabel;
         meta.appendChild(tag);
       }
+      const styleLabel = PODCAST_STYLE_LABELS[item.podcastStyle];
+      if (styleLabel) {
+        const styleTag = document.createElement('span');
+        styleTag.className = `history-style-tag${item.podcastStyle === 'debate' ? ' is-debate' : ''}`;
+        styleTag.textContent = styleLabel;
+        meta.appendChild(styleTag);
+      }
       const parts = [
         `${item.sentenceCount || 0} 句`,
         formatTime(item.totalDuration || 0),
@@ -2140,6 +2188,7 @@
   }
 
   function loadPodcast(podcast, { autoplay = false } = {}) {
+    exitScriptEditMode({ rerender: false });
     cancelScheduledSubtitleScroll();
     state.currentPodcast = podcast;
     state.lastSpeakerRole = 'none';
@@ -2178,6 +2227,7 @@
     if (dom.btnBgmMode) dom.btnBgmMode.disabled = false;
     dom.btnSpeed.disabled = false;
     dom.btnCopyMarkdown.disabled = sentences.length === 0;
+    updateScriptEditAvailability();
 
     dom.btnDownloadAudio.href = podcast.fullAudioUrl;
     dom.btnDownloadAudio.download = `${podcast.podcastTitle || 'ai-podcast'}.mp3`;
@@ -2203,6 +2253,390 @@
         state.audioEngine.requestPlay().catch(() => {});
       } else {
         dom.mainAudio.play().catch(() => {});
+      }
+    }
+  }
+
+  function updateScriptEditAvailability() {
+    const hasSentences = Boolean(state.currentPodcast?.sentences?.length);
+    const busy = hasActiveRunningTask() || state.scriptEdit.submitting;
+    if (dom.btnEditScript) {
+      dom.btnEditScript.disabled = !hasSentences || busy;
+      const label = dom.btnEditScript.querySelector('span');
+      if (label) label.textContent = state.scriptEdit.active ? '微调中' : '微调剧本';
+    }
+    if (state.scriptEdit.active) {
+      updateScriptEditorToolbar();
+    }
+  }
+
+  function normalizeEditableLine(sentence, origIndex) {
+    return {
+      origIndex,
+      speaker: displaySpeakerName(sentence.speaker),
+      text: String(sentence.text || ''),
+      emotion: typeof sentence.emotion === 'string' ? sentence.emotion.trim() : '',
+    };
+  }
+
+  function isDraftLineModified(line, originalList) {
+    if (line.origIndex < 0 || line.origIndex >= originalList.length) return true;
+    const orig = originalList[line.origIndex];
+    return line.speaker !== orig.speaker ||
+      line.text.trim() !== orig.text.trim() ||
+      line.emotion !== orig.emotion;
+  }
+
+  function computeScriptEditStats() {
+    const { original, draft } = state.scriptEdit;
+    const origSignatures = new Map();
+    original.forEach((line) => {
+      const sig = `${line.speaker}\0${line.text.trim()}\0${line.emotion}`;
+      origSignatures.set(sig, (origSignatures.get(sig) || 0) + 1);
+    });
+
+    let changedCount = 0;
+    let reusedCount = 0;
+    let emptyCount = 0;
+    let overlongCount = 0;
+    let structureChanged = draft.length !== original.length;
+
+    draft.forEach((line, idx) => {
+      const trimmed = line.text.trim();
+      if (!trimmed) emptyCount += 1;
+      else if (trimmed.length > MAX_LINE_TEXT_LENGTH) overlongCount += 1;
+
+      const sig = `${line.speaker}\0${trimmed}\0${line.emotion}`;
+      const matched = (origSignatures.get(sig) || 0) > 0;
+      if (matched) {
+        reusedCount += 1;
+        origSignatures.set(sig, origSignatures.get(sig) - 1);
+      } else {
+        changedCount += 1;
+      }
+
+      if (!structureChanged) {
+        const atSameIdx = original[idx];
+        if (!atSameIdx || atSameIdx.speaker !== line.speaker ||
+            atSameIdx.text.trim() !== trimmed || atSameIdx.emotion !== line.emotion) {
+          structureChanged = true;
+        }
+      }
+    });
+
+    const deletedCount = Math.max(0, original.length - draft.length);
+    const hasChanges = structureChanged || changedCount > 0 || deletedCount > 0;
+    return {
+      totalCount: draft.length,
+      changedCount,
+      reusedCount,
+      deletedCount,
+      emptyCount,
+      overlongCount,
+      hasChanges,
+    };
+  }
+
+  function updateScriptEditorToolbar() {
+    if (!dom.scriptEditorBar || !state.scriptEdit.active) return;
+    const stats = computeScriptEditStats();
+    const busy = hasActiveRunningTask() || state.scriptEdit.submitting;
+
+    dom.scriptEditorStatus.className = 'script-editor-status';
+    if (stats.emptyCount > 0) {
+      dom.scriptEditorStatus.classList.add('is-error');
+      dom.scriptEditorStatus.textContent = `有 ${stats.emptyCount} 句台词为空，请补充或删除后再合成`;
+      dom.scriptEditorCacheHint?.classList.add('hidden');
+    } else if (stats.overlongCount > 0) {
+      dom.scriptEditorStatus.classList.add('is-error');
+      dom.scriptEditorStatus.textContent = `有 ${stats.overlongCount} 句超过 ${MAX_LINE_TEXT_LENGTH} 字上限`;
+      dom.scriptEditorCacheHint?.classList.add('hidden');
+    } else if (!stats.hasChanges) {
+      dom.scriptEditorStatus.textContent = '点击任意句子修改台词或切换说话人';
+      dom.scriptEditorCacheHint?.classList.add('hidden');
+    } else {
+      dom.scriptEditorStatus.classList.add('is-dirty');
+      const parts = [];
+      if (stats.changedCount > 0) parts.push(`已改动 ${stats.changedCount} 句`);
+      if (stats.deletedCount > 0) parts.push(`删减 ${stats.deletedCount} 句`);
+      dom.scriptEditorStatus.textContent = parts.length ? parts.join(' · ') : '已调整台词顺序';
+      if (dom.scriptEditorCacheHint) {
+        if (stats.reusedCount > 0) {
+          dom.scriptEditorCacheHint.textContent = `预计 ${stats.reusedCount} 句秒级复用缓存`;
+          dom.scriptEditorCacheHint.classList.remove('hidden');
+        } else {
+          dom.scriptEditorCacheHint.classList.add('hidden');
+        }
+      }
+    }
+
+    if (dom.btnResetScriptEdits) {
+      dom.btnResetScriptEdits.disabled = !stats.hasChanges || busy;
+    }
+    if (dom.btnCancelScriptEdit) {
+      dom.btnCancelScriptEdit.disabled = state.scriptEdit.submitting;
+    }
+    if (dom.btnResynthesizeScript) {
+      dom.btnResynthesizeScript.disabled = !stats.hasChanges || stats.emptyCount > 0 || stats.overlongCount > 0 || stats.totalCount === 0 || busy;
+      dom.btnResynthesizeScript.textContent = state.scriptEdit.submitting ? '正在提交…' : '重新合成';
+    }
+  }
+
+  function autoSizeTextarea(el) {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.max(58, el.scrollHeight + 2)}px`;
+  }
+
+  function syncScriptEditorRowState(rowEl, draftIndex) {
+    if (!rowEl) return;
+    const line = state.scriptEdit.draft[draftIndex];
+    if (!line) return;
+    const isHost = line.speaker === '阿泽';
+    const modified = isDraftLineModified(line, state.scriptEdit.original);
+    const trimmed = line.text.trim();
+    const invalid = !trimmed || trimmed.length > MAX_LINE_TEXT_LENGTH;
+
+    rowEl.classList.toggle('is-host', isHost);
+    rowEl.classList.toggle('is-guest', !isHost);
+    rowEl.classList.toggle('is-modified', modified && !invalid);
+    rowEl.classList.toggle('is-invalid', invalid);
+
+    const speakerBtn = rowEl.querySelector('[data-edit-action="toggle-speaker"]');
+    if (speakerBtn) {
+      speakerBtn.textContent = `${line.speaker} ⇄`;
+      speakerBtn.setAttribute('aria-label', `第 ${draftIndex + 1} 句说话人：${line.speaker}，点击切换`);
+    }
+    const modTag = rowEl.querySelector('.subtitle-modified-tag');
+    if (modTag) modTag.classList.toggle('hidden', !modified);
+    const restoreBtn = rowEl.querySelector('[data-edit-action="restore-line"]');
+    if (restoreBtn) restoreBtn.classList.toggle('hidden', !modified);
+  }
+
+  function renderScriptEditorList() {
+    cancelScheduledSubtitleScroll();
+    dom.subtitlesList.classList.add('is-editing');
+    dom.subtitlesList.textContent = '';
+    state.subtitleElements = [];
+
+    const draft = state.scriptEdit.draft;
+    const canDelete = draft.length > 1;
+    const fragment = document.createDocumentFragment();
+    const textareas = [];
+
+    draft.forEach((line, idx) => {
+      const isHost = line.speaker === '阿泽';
+      const modified = isDraftLineModified(line, state.scriptEdit.original);
+      const trimmed = line.text.trim();
+      const invalid = !trimmed || trimmed.length > MAX_LINE_TEXT_LENGTH;
+
+      const row = document.createElement('div');
+      row.className = `subtitle-item ${isHost ? 'is-host' : 'is-guest'}${modified && !invalid ? ' is-modified' : ''}${invalid ? ' is-invalid' : ''}`;
+      row.dataset.editIndex = String(idx);
+
+      const meta = document.createElement('div');
+      meta.className = 'subtitle-meta';
+
+      const speakerBtn = document.createElement('button');
+      speakerBtn.type = 'button';
+      speakerBtn.className = 'subtitle-speaker-toggle';
+      speakerBtn.dataset.editAction = 'toggle-speaker';
+      speakerBtn.dataset.editIndex = String(idx);
+      speakerBtn.textContent = `${line.speaker} ⇄`;
+      speakerBtn.title = '点击切换说话人（阿泽 ⇄ 小晓）';
+      speakerBtn.setAttribute('aria-label', `第 ${idx + 1} 句说话人：${line.speaker}，点击切换`);
+      meta.appendChild(speakerBtn);
+
+      if (line.emotion) {
+        const emotion = document.createElement('span');
+        emotion.className = 'subtitle-emotion';
+        emotion.textContent = `· ${line.emotion}`;
+        meta.appendChild(emotion);
+      }
+
+      const modTag = document.createElement('span');
+      modTag.className = `subtitle-modified-tag${modified ? '' : ' hidden'}`;
+      modTag.textContent = '已改动';
+      meta.appendChild(modTag);
+
+      const rowActions = document.createElement('div');
+      rowActions.className = 'subtitle-row-actions';
+
+      const restoreBtn = document.createElement('button');
+      restoreBtn.type = 'button';
+      restoreBtn.className = `subtitle-mini-action${modified ? '' : ' hidden'}`;
+      restoreBtn.dataset.editAction = 'restore-line';
+      restoreBtn.dataset.editIndex = String(idx);
+      restoreBtn.textContent = '还原';
+      rowActions.appendChild(restoreBtn);
+
+      if (canDelete) {
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'subtitle-mini-action is-danger';
+        delBtn.dataset.editAction = 'delete-line';
+        delBtn.dataset.editIndex = String(idx);
+        delBtn.textContent = '删除';
+        rowActions.appendChild(delBtn);
+      }
+
+      const idxLabel = document.createElement('span');
+      idxLabel.className = 'subtitle-time';
+      idxLabel.textContent = `#${idx + 1}`;
+      rowActions.appendChild(idxLabel);
+
+      meta.appendChild(rowActions);
+
+      const textarea = document.createElement('textarea');
+      textarea.className = 'subtitle-edit-input';
+      textarea.dataset.editIndex = String(idx);
+      textarea.rows = 2;
+      textarea.maxLength = MAX_LINE_TEXT_LENGTH;
+      textarea.value = line.text;
+      textarea.setAttribute('aria-label', `编辑第 ${idx + 1} 句台词`);
+
+      row.append(meta, textarea);
+      fragment.appendChild(row);
+      textareas.push(textarea);
+    });
+
+    dom.subtitlesList.appendChild(fragment);
+    window.requestAnimationFrame(() => {
+      textareas.forEach(autoSizeTextarea);
+    });
+    updateScriptEditorToolbar();
+  }
+
+  function enterScriptEditMode() {
+    const podcast = state.currentPodcast;
+    if (!podcast?.id || !Array.isArray(podcast.sentences) || !podcast.sentences.length) return;
+    if (hasActiveRunningTask()) {
+      showToast('当前已有任务正在生成，请等待完成或先取消');
+      return;
+    }
+    if (state.scriptEdit.active && state.scriptEdit.podcastId === podcast.id) return;
+
+    const original = podcast.sentences.map((s, idx) => normalizeEditableLine(s, idx));
+    state.scriptEdit = {
+      active: true,
+      podcastId: podcast.id,
+      baseVersion: typeof podcast.audioVersion === 'string' ? podcast.audioVersion : null,
+      original,
+      draft: original.map((item) => ({ ...item })),
+      submitting: false,
+    };
+
+    dom.scriptEditorBar?.classList.remove('hidden');
+    renderScriptEditorList();
+    updateScriptEditAvailability();
+  }
+
+  function exitScriptEditMode({ rerender = true } = {}) {
+    const wasActive = state.scriptEdit.active;
+    state.scriptEdit = {
+      active: false,
+      podcastId: null,
+      baseVersion: null,
+      original: [],
+      draft: [],
+      submitting: false,
+    };
+    dom.scriptEditorBar?.classList.add('hidden');
+    dom.subtitlesList?.classList.remove('is-editing');
+    if (wasActive && rerender && state.currentPodcast) {
+      window.InputSource.resetPlaybackHighlight(state.input);
+      renderSubtitles(Array.isArray(state.currentPodcast.sentences) ? state.currentPodcast.sentences : []);
+      if (dom.mainAudio.currentTime > 0) {
+        syncHighlightToTime(dom.mainAudio.currentTime);
+      }
+    }
+    updateScriptEditAvailability();
+  }
+
+  function resetAllScriptEdits() {
+    if (!state.scriptEdit.active) return;
+    state.scriptEdit.draft = state.scriptEdit.original.map((item) => ({ ...item }));
+    renderScriptEditorList();
+    showToast('已还原全部未保存修改');
+  }
+
+  function buildResynthesizeTtsPayload(podcast) {
+    const providerId = ['minimax', 'volcengine', 'edge'].includes(podcast?.ttsProvider)
+      ? podcast.ttsProvider
+      : resolveEffectiveTtsProviderId();
+    const payload = buildTtsPayload(state.ttsConfig, providerId);
+    if (podcast?.ttsProvider === providerId) {
+      if (podcast.speechSpeed === 'relaxed' || podcast.speechSpeed === 'standard') {
+        payload.speechSpeed = podcast.speechSpeed;
+      }
+      if (podcast.ttsModel && providerId !== 'edge') {
+        payload.model = podcast.ttsModel;
+        if (providerId === 'volcengine') payload.resourceId = podcast.ttsModel;
+      }
+      if (podcast.voiceMapping && typeof podcast.voiceMapping === 'object') {
+        const preserved = {};
+        if (podcast.voiceMapping.阿泽) preserved.阿泽 = podcast.voiceMapping.阿泽;
+        if (podcast.voiceMapping.小晓) preserved.小晓 = podcast.voiceMapping.小晓;
+        if (preserved.阿泽 && preserved.小晓) {
+          payload.voiceMapping = preserved;
+        }
+      }
+    }
+    return payload;
+  }
+
+  async function handleResynthesizeScript() {
+    if (!state.scriptEdit.active || state.scriptEdit.submitting) return;
+    const podcast = state.currentPodcast;
+    if (!podcast?.id || state.scriptEdit.podcastId !== podcast.id) return;
+    if (hasActiveRunningTask()) {
+      showToast('当前已有任务正在生成，请等待完成或先取消');
+      return;
+    }
+
+    const stats = computeScriptEditStats();
+    if (!stats.hasChanges || stats.emptyCount > 0 || stats.overlongCount > 0 || stats.totalCount === 0) {
+      updateScriptEditorToolbar();
+      return;
+    }
+
+    const dialogue = state.scriptEdit.draft.map((line) => ({
+      speaker: line.speaker,
+      text: line.text.trim(),
+      ...(line.emotion ? { emotion: line.emotion } : {}),
+    }));
+
+    state.scriptEdit.submitting = true;
+    updateScriptEditAvailability();
+
+    try {
+      const task = await apiJson(`/api/podcasts/${encodeURIComponent(podcast.id)}/resynthesize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          baseVersion: state.scriptEdit.baseVersion,
+          dialogue,
+          tts: buildResynthesizeTtsPayload(podcast),
+        }),
+      });
+
+      exitScriptEditMode({ rerender: true });
+      state.ttsSpeedOverrideTaskId = null;
+      state.ttsSettingsOverrideTaskId = null;
+      setActiveTask(task);
+      if (window.innerWidth <= 900) {
+        dom.progressSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      startPolling();
+      showToast(stats.reusedCount > 0
+        ? `已开始微调重合成（预计 ${stats.reusedCount} 句将复用缓存）`
+        : '已开始重新合成播客音频');
+    } catch (err) {
+      state.scriptEdit.submitting = false;
+      updateScriptEditAvailability();
+      handleCredentialOrTaskError(err);
+      if (err.status === 409 && err.code === 'PODCAST_VERSION_CONFLICT') {
+        handleSelectHistory(podcast.id);
       }
     }
   }
@@ -2377,6 +2811,8 @@
       dom.playerDeck.dataset.speaker = speakerRole;
       if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.speaker = speakerRole;
     }
+
+    if (state.scriptEdit.active) return;
 
     if (idx !== prevIdx) {
       if (prevIdx >= 0 && state.subtitleElements[prevIdx]) {
@@ -3258,8 +3694,12 @@
     state.ttsConfig = tts;
     if (!state.activeTask?.id) {
       state.ttsSpeedOverrideTaskId = null;
-    } else if (state.modalTtsSpeedChanged) {
-      state.ttsSpeedOverrideTaskId = state.activeTask.id;
+      state.ttsSettingsOverrideTaskId = null;
+    } else {
+      state.ttsSettingsOverrideTaskId = state.activeTask.id;
+      if (state.modalTtsSpeedChanged) {
+        state.ttsSpeedOverrideTaskId = state.activeTask.id;
+      }
     }
     state.modalTtsSpeedChanged = false;
 
@@ -3363,7 +3803,7 @@
     }
     dom.confirmStyleButtons?.forEach((btn) => {
       btn.addEventListener('click', () => {
-        const nextStyle = btn.dataset.podcastStyle === 'dialogue' ? 'dialogue' : 'deep_dive';
+        const nextStyle = normalizePodcastStyleClient(btn.dataset.podcastStyle);
         if (state.confirmedDraft) {
           state.confirmedDraft.userPickedStyle = true;
         }
@@ -3453,14 +3893,81 @@
       }
     });
 
+    if (dom.btnEditScript) {
+      dom.btnEditScript.addEventListener('click', () => {
+        if (state.scriptEdit.active) {
+          exitScriptEditMode({ rerender: true });
+        } else {
+          enterScriptEditMode();
+        }
+      });
+    }
+    if (dom.btnResetScriptEdits) {
+      dom.btnResetScriptEdits.addEventListener('click', resetAllScriptEdits);
+    }
+    if (dom.btnCancelScriptEdit) {
+      dom.btnCancelScriptEdit.addEventListener('click', () => exitScriptEditMode({ rerender: true }));
+    }
+    if (dom.btnResynthesizeScript) {
+      dom.btnResynthesizeScript.addEventListener('click', handleResynthesizeScript);
+    }
+
     dom.subtitlesList.addEventListener('click', (e) => {
+      if (state.scriptEdit.active) {
+        const actionBtn = e.target.closest('[data-edit-action]');
+        if (!actionBtn || !dom.subtitlesList.contains(actionBtn)) return;
+        const action = actionBtn.dataset.editAction;
+        const idx = Number(actionBtn.dataset.editIndex);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= state.scriptEdit.draft.length) return;
+        if (action === 'toggle-speaker') {
+          const line = state.scriptEdit.draft[idx];
+          line.speaker = line.speaker === '阿泽' ? '小晓' : '阿泽';
+          syncScriptEditorRowState(actionBtn.closest('.subtitle-item'), idx);
+          updateScriptEditorToolbar();
+        } else if (action === 'restore-line') {
+          const line = state.scriptEdit.draft[idx];
+          const orig = state.scriptEdit.original[line.origIndex];
+          if (orig) {
+            state.scriptEdit.draft[idx] = { ...orig };
+            const row = actionBtn.closest('.subtitle-item');
+            const textarea = row?.querySelector('.subtitle-edit-input');
+            if (textarea) {
+              textarea.value = orig.text;
+              autoSizeTextarea(textarea);
+            }
+            syncScriptEditorRowState(row, idx);
+            updateScriptEditorToolbar();
+          }
+        } else if (action === 'delete-line') {
+          if (state.scriptEdit.draft.length <= 1) {
+            showToast('剧本至少需要保留 1 句台词');
+            return;
+          }
+          state.scriptEdit.draft.splice(idx, 1);
+          renderScriptEditorList();
+        }
+        return;
+      }
       const row = e.target.closest('.subtitle-item');
       if (!row || !dom.subtitlesList.contains(row)) return;
       const idx = Number(row.dataset.index);
       if (Number.isInteger(idx)) jumpToSubtitleIndex(idx);
     });
 
+    dom.subtitlesList.addEventListener('input', (e) => {
+      if (!state.scriptEdit.active) return;
+      const textarea = e.target.closest('.subtitle-edit-input');
+      if (!textarea || !dom.subtitlesList.contains(textarea)) return;
+      const idx = Number(textarea.dataset.editIndex);
+      if (!Number.isInteger(idx) || !state.scriptEdit.draft[idx]) return;
+      state.scriptEdit.draft[idx].text = textarea.value;
+      autoSizeTextarea(textarea);
+      syncScriptEditorRowState(textarea.closest('.subtitle-item'), idx);
+      updateScriptEditorToolbar();
+    });
+
     dom.subtitlesList.addEventListener('keydown', (e) => {
+      if (state.scriptEdit.active) return;
       if (e.key !== 'Enter' && e.key !== ' ') return;
       const row = e.target.closest('.subtitle-item');
       if (!row || !dom.subtitlesList.contains(row)) return;

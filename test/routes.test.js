@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { once } = require('node:events');
+const { createHash } = require('node:crypto');
 const { Readable } = require('node:stream');
 const { setTimeout: delay } = require('node:timers/promises');
 const { extractArticle } = require('../src/services/extractor');
@@ -15,7 +16,7 @@ const apiKey = 'offline-credential';
 const baseURL = 'https://offline-task.example';
 const payload = { mode: 'text', content: '离线文章正文', apiKey, baseURL };
 let root, publicDir, server, base, previousEnv;
-let generate, llmRequest, observeProbe;
+let generate, llmRequest, observeProbe, synthesizeOverride;
 const { getTtsProvider } = require('../src/services/ttsProvider');
 
 test.before(async () => {
@@ -49,7 +50,9 @@ test.before(async () => {
     scriptGenerator: args => generate(args),
     ttsProvider: {
       id: 'offline', model: 'test',
-      synthesizeToFile({ outputPath }) {
+      synthesizeToFile(args) {
+        if (synthesizeOverride) return synthesizeOverride(args);
+        const { outputPath } = args;
         const mp3 = makeMp3(10);
         fs.writeFileSync(outputPath, mp3);
         return { bytes: mp3.length, duration: 0.24 };
@@ -207,7 +210,7 @@ test('前端只公开指定的 GET/HEAD 文件，运行目录只通过音频路�
 });
 
 test('创建、单活冲突、取消、续跑、轮询成品、历史与外置静态音频', async () => {
-  const invalidStyle = '节目风格仅支持深度主讲（deep_dive）或轻松对谈（dialogue）';
+  const invalidStyle = '节目风格仅支持深度主讲（deep_dive）、轻松对谈（dialogue）或正反交锋（debate）';
   const tasksDir = path.join(publicDir, 'custom-data', 'tasks');
   const taskFiles = () => fs.existsSync(tasksDir) ? fs.readdirSync(tasksDir) : [];
   const before = taskFiles();
@@ -221,10 +224,10 @@ test('创建、单活冲突、取消、续跑、轮询成品、历史与外置�
   generate = ({ signal }) => new Promise((resolve, reject) => {
     signal.addEventListener('abort', () => reject(new Error('迟到的上游失败')), { once: true });
   });
-  const { data: task } = await request('tasks', 202, { ...payload, podcastStyle: ' DIALOGUE ', sourceType: 'image' });
+  const { data: task } = await request('tasks', 202, { ...payload, podcastStyle: ' DEBATE ', sourceType: 'image' });
   const route = 'tasks/' + task.id;
   assert.equal(task.status, 'queued');
-  assert.equal(task.podcastStyle, 'dialogue');
+  assert.equal(task.podcastStyle, 'debate');
   assert.equal(task.sourceType, 'image');
   assert.equal((await request('tasks', 409, payload)).code, 'TASK_ALREADY_RUNNING');
   await request(route + '/resume', 409, {});
@@ -240,10 +243,10 @@ test('创建、单活冲突、取消、续跑、轮询成品、历史与外置�
   assert.equal(fs.readFileSync(record, 'utf8'), checkpoint);
 
   generate = async ({ podcastStyle }) => {
-    assert.equal(podcastStyle, 'dialogue');
+    assert.equal(podcastStyle, 'debate');
     return { podcastTitle: '路由测试', summary: '测试', dialogue: [{ speaker: '阿泽', text: '开场' }] };
   };
-  assert.equal((await request(route + '/resume', 202, { apiKey, baseURL })).data.podcastStyle, 'dialogue');
+  assert.equal((await request(route + '/resume', 202, { apiKey, baseURL })).data.podcastStyle, 'debate');
   const deadline = performance.now() + 5000;
   let completed;
   do {
@@ -254,7 +257,7 @@ test('创建、单活冲突、取消、续跑、轮询成品、历史与外置�
   assert.equal(completed.status, 'completed');
   const detail = (await request('podcasts/' + task.id, 200)).data;
   assert.deepEqual(completed.podcast, detail);
-  assert.equal(detail.podcastStyle, 'dialogue');
+  assert.equal(detail.podcastStyle, 'debate');
   assert.equal(detail.sourceType, 'image');
   const { id, sourceType, ttsProvider, ttsModel, voiceMapping } = (await request('podcasts', 200)).data.items[0];
   assert.deepEqual({ id, sourceType, ttsProvider, ttsModel, voiceMapping }, {
@@ -803,4 +806,246 @@ test('本地模型服务经实际 HTTP 传输完成 /models 及最小对话探�
   calls.length = 0;
   await request('llm/test', 400, { apiKey, baseURL: process.env.LLM_BASE_URL + '/untrusted' });
   assert.equal(calls.length, 0);
+});
+
+test('微调接口只合成改写的一句，清空缓存后复用归档并保持帧时间轴', async t => {
+  const lines = Array.from({ length: 10 }, (_, i) => ({
+    speaker: i % 2 ? '小晓' : '阿泽', text: '交锋台词' + i, emotion: '认真',
+  }));
+  let calls = 0;
+  let gate;
+  synthesizeOverride = async ({ outputPath, text }) => {
+    if (gate) await gate.promise;
+    calls++;
+    const mp3 = makeMp3(2 + text.length);
+    fs.writeFileSync(outputPath, mp3);
+    return { duration: 1, bytes: mp3.length };
+  };
+  t.after(() => { synthesizeOverride = undefined; });
+  generate = () => ({ podcastTitle: '交锋', summary: '摘要', dialogue: lines });
+  const poll = async id => {
+    for (let i = 0; i < 300; i++) {
+      const { data } = await request('tasks/' + id, 200);
+      if (data.status === 'completed') return data;
+      assert.notEqual(data.status, 'failed', JSON.stringify(data.error));
+      await delay(10);
+    }
+    assert.fail('任务未完成');
+  };
+  const { id } = (await request('tasks', 202, { ...payload, sourceType: 'image', podcastStyle: 'debate' })).data;
+  const original = (await poll(id)).podcast;
+  assert.equal(calls, 10);
+  assert.equal(original.audioVersion, undefined);
+  const dir = path.join(publicDir, 'external-audio', id);
+  const metaFile = path.join(dir, 'meta.json');
+  const route = 'podcasts/' + id + '/resynthesize';
+  assert.equal((await request(route, 400, { dialogue: lines })).error, '缺少播客版本号，请刷新最新剧本后再微调');
+  let previous = original;
+  for (const legacy of [true, false]) {
+    if (legacy) {
+      fs.rmSync(path.join(publicDir, 'custom-data', 'tts-cache'), { recursive: true });
+      const meta = JSON.parse(fs.readFileSync(metaFile));
+      delete meta.cacheKeys;
+      fs.writeFileSync(metaFile, JSON.stringify(meta));
+    }
+    const before = fs.readFileSync(path.join(dir, 'full_podcast.mp3'));
+    const edits = previous.sentences.map(line => ({ ...line }));
+    edits[legacy ? 6 : 4].text += '补充论据';
+    calls = 0;
+    const tts = { apiKey, appId: 'offline-edit-app', accessKey: 'offline-edit-access', endpoint: 'https://edit.example/speech' };
+    gate = Promise.withResolvers();
+    let queued;
+    try {
+      queued = (await request(route, 202, { dialogue: edits, baseVersion: previous.audioVersion ?? null, tts })).data;
+      await request('podcasts/' + id, 409, undefined, 'DELETE');
+      const hidden = '/podcasts/.resynth-' + queued.id + '/sentence_000.mp3';
+      assert.equal((await fetch(base + hidden)).status, 404);
+    } finally {
+      gate.resolve();
+      gate = null;
+    }
+    assert.equal(queued.targetPodcastId, id);
+    assert.equal(queued.stage, 'tts');
+    const completed = await poll(queued.id);
+    assert.equal(calls, 1);
+    assert.equal(completed.progress.cachedSegments, 9);
+    const detail = completed.podcast;
+    const meta = JSON.parse(fs.readFileSync(metaFile));
+    const checkpoint = fs.readFileSync(path.join(publicDir, 'custom-data', 'tasks', queued.id + '.json'), 'utf8');
+    for (const value of [...Object.values(tts), root]) {
+      assert.ok(!JSON.stringify(meta).includes(value));
+      assert.ok(!checkpoint.includes(value));
+    }
+    assert.match(detail.audioVersion, /^[a-zA-Z0-9_-]{1,32}$/);
+    assert.notEqual(detail.audioVersion, previous.audioVersion);
+    assert.equal(detail.audioVersion, meta.audioVersion);
+    assert.ok(Number.isFinite(Date.parse(detail.updatedAt)));
+    for (const name of ['createAt', 'podcastStyle', 'id', 'podcastTitle', 'summary', 'sourceType', 'sourceTruncated',
+      'ttsModel', 'speechSpeed', 'ttsProvider', 'voiceMapping']) assert.deepEqual(detail[name], original[name]);
+    const version = '?v=' + detail.audioVersion;
+    assert.equal(detail.fullAudioUrl, original.fullAudioUrl + version);
+    const full = Buffer.from(await (await fetch(base + detail.fullAudioUrl)).arrayBuffer());
+    assert.notDeepEqual(full, before);
+    const duration = require('../src/services/mp3Utils').getMp3DurationSeconds;
+    assert.ok(Math.abs(duration(full) - detail.totalDuration) < 1e-9);
+    assert.equal(meta.totalDuration, detail.sentences.at(-1).endTime);
+    for (const [index, sentence] of detail.sentences.entries()) {
+      assert.equal(sentence.text, edits[index].text);
+      assert.equal(sentence.audioUrl, original.sentences[index].audioUrl + version);
+      const bytes = Buffer.from(await (await fetch(base + sentence.audioUrl)).arrayBuffer());
+      assert.ok(Math.abs(duration(bytes) - (sentence.endTime - sentence.startTime)) < 1e-9);
+      assert.equal(sentence.startTime, index ? detail.sentences[index - 1].endTime + detail.sentenceGap : 0);
+    }
+    assert.equal(fs.existsSync(path.join(publicDir, 'external-audio', '.resynth-' + queued.id)), false);
+    const stale = await request(route, 409, { dialogue: lines, baseVersion: previous.audioVersion ?? null });
+    assert.equal(stale.code, 'PODCAST_VERSION_CONFLICT');
+    assert.deepEqual((await request('podcasts/' + id, 200)).data, detail);
+    assert.deepEqual(fs.readFileSync(path.join(dir, 'full_podcast.mp3')), full);
+    assert.equal(JSON.parse(checkpoint).baseVersion, previous.audioVersion ?? null);
+    const cache = path.join(publicDir, 'custom-data', 'tts-cache');
+    assert.equal(fs.readdirSync(cache).length, legacy ? 1 : 2);
+    previous = detail;
+  }
+  for (const dialogue of [[], Array(301).fill(lines[0]), [{ speaker: '第三人', text: '正文' }],
+    [{ speaker: '阿泽', text: ' ' }], [{ speaker: '小晓', text: '文'.repeat(2001) }]]) {
+    await request(route, 400, { baseVersion: previous.audioVersion, dialogue });
+  }
+  for (const baseVersion of [false, 0, {}, [], '', ' invalid ', 'v'.repeat(33)]) {
+    assert.equal((await request(route, 400, { dialogue: lines, baseVersion })).error, '无效的播客版本号');
+  }
+  await request(route, 400, { baseVersion: previous.audioVersion, dialogue: [{ speaker: '阿泽', text: apiKey }], tts: { apiKey } });
+  await request('podcasts/missing/resynthesize', 404, { baseVersion: null, dialogue: lines });
+  await request('podcasts/..%2Fprivate/resynthesize', 400, { baseVersion: null, dialogue: lines });
+});
+
+test('启动时隔离不完整或损坏的备份，其他任务运行期间仍返回准确的错误', async t => {
+  const podcastsDir = path.join(root, 'recovery-podcasts');
+  const dataDir = path.join(root, 'recovery-data');
+  const tasksDir = path.join(dataDir, 'tasks');
+  fs.mkdirSync(tasksDir, { recursive: true });
+  const audio = makeMp3(2);
+  const product = { 'meta.json': Buffer.from('{"podcastTitle":"现有成品"}'), 'full_podcast.mp3': audio, 'sentence_000.mp3': audio };
+  const backup = { 'meta.json': Buffer.from('{"podcastTitle":"备份"}'), 'full_podcast.mp3': makeMp3(3), 'sentence_000.mp3': makeMp3(1) };
+  const originals = Object.fromEntries(Object.entries(backup)
+    .map(([name, bytes]) => [name, createHash('sha256').update(bytes).digest('hex')]));
+  const edit = { baseVersion: null, dialogue: [{ speaker: '阿泽', text: '离线微调' }] };
+  const faults = {
+    'missing-dir': () => {},
+    'changed-audio': dir => fs.writeFileSync(path.join(dir, 'full_podcast.mp3'), makeMp3(4)),
+    'changed-meta': dir => fs.writeFileSync(path.join(dir, 'meta.json'), '{"podcastTitle":"篡改"}'),
+    'extra-segment': dir => fs.writeFileSync(path.join(dir, 'sentence_001.mp3'), audio),
+    'missing-segment': dir => fs.unlinkSync(path.join(dir, 'sentence_000.mp3')),
+    'legacy-meta': dir => fs.writeFileSync(path.join(dir, 'meta.json'), '{'),
+    'legacy-audio': dir => fs.writeFileSync(path.join(dir, 'full_podcast.mp3'), audio.subarray(0, -1)),
+    'legacy-segment': dir => fs.writeFileSync(path.join(dir, 'sentence_000.mp3'), 'invalid'),
+  };
+  for (const id of ['healthy', ...Object.keys(faults)]) {
+    const dir = path.join(podcastsDir, id);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [name, bytes] of Object.entries(product)) fs.writeFileSync(path.join(dir, name), bytes);
+    if (id === 'healthy') continue;
+    const taskId = 'edit-' + id;
+    fs.writeFileSync(path.join(tasksDir, taskId + '.json'), JSON.stringify({
+      id: taskId, targetPodcastId: id, baseVersion: null, status: 'failed', stage: 'tts',
+      input: { mode: 'text' }, progress: {}, script: { dialogue: edit.dialogue },
+    }));
+    const transaction = path.join(dir, '.tmp-publish-' + taskId);
+    fs.mkdirSync(transaction);
+    fs.writeFileSync(path.join(transaction, 'prepared'), JSON.stringify({
+      taskId, previousVersion: null, targetVersion: 'target', dialogueCount: 1,
+      originals: id.startsWith('legacy-') ? undefined : originals,
+    }));
+    if (id === 'missing-dir') continue;
+    const saved = path.join(transaction, 'originals');
+    fs.mkdirSync(saved);
+    for (const [name, bytes] of Object.entries(backup)) fs.writeFileSync(path.join(saved, name), bytes);
+    faults[id](saved);
+  }
+
+  const warnings = t.mock.method(console, 'warn', () => {});
+  const gate = Promise.withResolvers();
+  const local = await require('../server').startServer({
+    port: 0, publicDir, podcastsDir, dataDir,
+    ttsProvider: { id: 'edge', model: 'offline', async synthesizeToFile({ outputPath }) {
+      await gate.promise;
+      fs.writeFileSync(outputPath, audio);
+      return { bytes: audio.length, duration: 1 };
+    } },
+  });
+  t.after(() => { gate.resolve(); return local.close(); });
+  assert.equal(warnings.mock.callCount(), Object.keys(faults).length);
+  for (const call of warnings.mock.calls) assert.ok(!JSON.stringify(call.arguments).includes(root));
+  const url = 'http://127.0.0.1:' + local.port;
+  const list = await fetch(url + '/api/podcasts');
+  assert.equal(list.status, 200);
+  assert.deepEqual((await list.json()).data.items.map(item => item.id), ['healthy']);
+  const detail = await fetch(url + '/api/podcasts/healthy');
+  assert.equal(detail.status, 200);
+  const playback = await fetch(url + (await detail.json()).data.fullAudioUrl);
+  assert.equal(playback.status, 200);
+  assert.deepEqual(Buffer.from(await playback.arrayBuffer()), audio);
+
+  const post = body => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const healthyEdit = url + '/api/podcasts/healthy/resynthesize';
+  assert.equal((await fetch(healthyEdit, post(edit))).status, 202);
+  for (const invalid of [{ dialogue: edit.dialogue }, { ...edit, baseVersion: false }, { ...edit, dialogue: [] }]) {
+    assert.equal((await fetch(healthyEdit, post(invalid))).status, 400);
+  }
+  assert.equal((await fetch(url + '/api/podcasts/absent/resynthesize', post(edit))).status, 404);
+  for (const [baseVersion, code] of [['older', 'PODCAST_VERSION_CONFLICT'], [null, 'TASK_ALREADY_RUNNING']]) {
+    const res = await fetch(healthyEdit, post({ ...edit, baseVersion }));
+    assert.equal(res.status, 409);
+    assert.equal((await res.json()).code, code);
+  }
+  for (const id of Object.keys(faults)) {
+    const taskId = 'edit-' + id;
+    for (const [route, options] of [
+      ['/api/podcasts/' + id], ['/podcasts/' + id + '/full_podcast.mp3'],
+      ['/api/podcasts/' + id + '/resynthesize', post(edit)], ['/api/tasks/' + taskId + '/resume', post({})],
+      ['/api/podcasts/' + id, { method: 'DELETE' }],
+    ]) {
+      const res = await fetch(url + route, options);
+      assert.equal(res.status, 503, route);
+      assert.equal((await res.json()).code, 'PODCAST_RECOVERY_FAILED');
+    }
+    const dir = path.join(podcastsDir, id);
+    assert.ok(fs.existsSync(path.join(dir, '.tmp-publish-' + taskId, 'prepared')));
+    for (const [name, bytes] of Object.entries(product)) assert.deepEqual(fs.readFileSync(path.join(dir, name)), bytes);
+  }
+
+  const legacy = path.join(podcastsDir, 'legacy-segment');
+  const transaction = path.join(legacy, '.tmp-publish-edit-legacy-segment');
+  fs.writeFileSync(path.join(transaction, 'originals', 'sentence_000.mp3'), backup['sentence_000.mp3']);
+  assert.equal((await fetch(url + '/api/podcasts/legacy-segment')).status, 503);
+  const marker = path.join(transaction, 'prepared');
+  fs.writeFileSync(marker, JSON.stringify({ ...JSON.parse(fs.readFileSync(marker)), originals }));
+  assert.equal((await fetch(url + '/api/podcasts/legacy-segment')).status, 200);
+  for (const [name, bytes] of Object.entries(backup)) assert.deepEqual(fs.readFileSync(path.join(legacy, name)), bytes);
+  assert.equal(fs.existsSync(transaction), false);
+});
+
+test('局域网微调及其续跑、取消都验证管理令牌', async t => {
+  const calls = [];
+  const taskManager = {
+    isPodcastEdit: () => true,
+    resynthesizePodcast: id => { calls.push(id); return { id: 'edit', targetPodcastId: id }; },
+    resumeTask: id => { calls.push(id); return { id }; },
+    cancelTask: id => { calls.push(id); return { id }; },
+  };
+  const token = 'offline-edit-admin';
+  const app = require('../server').createApp({ taskManager, adminToken: token, isLoopbackRequest: () => false });
+  const local = app.listen(0, '127.0.0.1');
+  await once(local, 'listening');
+  t.after(() => new Promise(resolve => local.close(resolve)));
+  for (const [route, ok] of [['podcasts/original/resynthesize', 202], ['tasks/edit/resume', 202], ['tasks/edit/cancel', 200]]) {
+    for (const [headers, status] of [[{}, 403], [{ 'x-admin-token': 'invalid' }, 403], [{ authorization: 'Bearer ' + token }, ok]]) {
+      const res = await fetch(`http://127.0.0.1:${local.address().port}/api/${route}`, {
+        method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+        body: route.endsWith('/resynthesize') ? JSON.stringify({ baseVersion: null }) : undefined,
+      });
+      assert.equal(res.status, status);
+      assert.ok(!(await res.text()).includes(token));
+    }
+  }
+  assert.deepEqual(calls, ['original', 'edit', 'edit']);
 });

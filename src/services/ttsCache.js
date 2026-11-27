@@ -16,6 +16,15 @@ function speechScopeHash(endpoint, credentials, voices, publicVoices, officialEn
   return createHash('sha256').update(JSON.stringify(scope)).digest('hex');
 }
 
+function speechAccountHash({ endpoint, apiKey, appId, accessKey }) {
+  if (!endpoint) return;
+  const key = apiKey?.trim();
+  const auth = key ? ['apiKey', key] : ['appIdAccessKey', appId?.trim(), accessKey?.trim()];
+  if (auth.every(Boolean)) {
+    return createHash('sha256').update(JSON.stringify([new URL(endpoint).href, ...auth])).digest('hex');
+  }
+}
+
 function buildCacheKey({ provider, model, voice, rate = '+0%', pitch = '+0Hz', emotion = '', text, scopeHash, toneVersion }) {
   const fields = [provider, model, voice, rate, pitch, text].map(value => String(value).trim().normalize('NFC'));
   if (scopeHash) fields.push(scopeHash);
@@ -149,12 +158,10 @@ function createTtsCache(directory, {
     return { hit: true, filePath: targetPath, bytes: buffer.length, duration: durationSeconds };
   }
 
-  function put(key, sourcePath) {
+  function store(key, buffer) {
     const cached = getPath(key);
     const directory = statEntry(cacheDir);
     if (directory && !directory.isDirectory()) throw new Error('音频缓存目录无效');
-    const buffer = fs.readFileSync(sourcePath);
-    if (!isValidMp3(buffer)) throw new Error('无法缓存无效的 MP3');
     const previous = usage && statEntry(cached);
     atomicWrite(cached, buffer);
     const time = now();
@@ -170,7 +177,13 @@ function createTtsCache(directory, {
     }
   }
 
+  function put(key, sourcePath) {
+    const buffer = fs.readFileSync(sourcePath);
+    if (!isValidMp3(buffer)) throw new Error('无法缓存无效的 MP3');
+    store(key, buffer);
+  }
+
   return { get, put, getPath, prune };
 }
 
-module.exports = { buildCacheKey, createTtsCache, speechScopeHash };
+module.exports = { buildCacheKey, createTtsCache, speechAccountHash, speechScopeHash };

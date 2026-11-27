@@ -965,8 +965,10 @@ button {
 .style-pill-group {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
+  max-width: 100%;
   padding: 3px;
-  border-radius: var(--radius-pill);
+  border-radius: 14px;
   background: var(--bg-subtle);
   gap: 2px;
 }
@@ -974,15 +976,16 @@ button {
 .style-pill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   border: 0;
   background: transparent;
   color: var(--ink-secondary);
   border-radius: var(--radius-pill);
-  padding: 4px 12px;
+  padding: 4px 10px;
   font-size: 12.5px;
   font-weight: 500;
   line-height: 1.4;
+  white-space: nowrap;
   transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
 }
 
@@ -1464,6 +1467,24 @@ button {
   font-weight: 600;
   line-height: 1.4;
   flex-shrink: 0;
+}
+
+.history-style-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--host-soft);
+  color: var(--host);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.history-style-tag.is-debate {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .history-row.is-active .history-source-tag {
@@ -2015,10 +2036,18 @@ button {
 .transcript-header {
   padding: 16px 36px 10px;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-shrink: 0;
+}
+
+.transcript-title-group {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
 }
 
 .transcript-heading {
@@ -2036,6 +2065,191 @@ button {
 
 .transcript-hint.hint-mobile {
   display: none;
+}
+
+.script-editor-bar {
+  margin: 0 28px 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: 0 2px 12px -8px rgba(26, 25, 22, 0.14);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.script-editor-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.script-editor-status {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-secondary);
+}
+
+.script-editor-status.is-dirty {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.script-editor-status.is-error {
+  color: var(--err);
+  font-weight: 600;
+}
+
+.script-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.subtitles-list.is-editing {
+  gap: 8px;
+}
+
+.subtitles-list.is-editing .subtitle-item {
+  cursor: default;
+  background: var(--bg-surface);
+  border: 1px solid var(--hairline);
+  padding: 12px 14px 12px 20px;
+}
+
+.subtitles-list.is-editing .subtitle-item:hover {
+  background: var(--bg-surface);
+  border-color: var(--hairline-strong);
+}
+
+.subtitles-list.is-editing .subtitle-item.is-host::before {
+  background: var(--host);
+  opacity: 0.45;
+  transform: scaleY(0.85);
+}
+
+.subtitles-list.is-editing .subtitle-item.is-guest::before {
+  background: var(--guest);
+  opacity: 0.45;
+  transform: scaleY(0.85);
+}
+
+.subtitles-list.is-editing .subtitle-item.is-modified {
+  border-color: rgba(176, 62, 36, 0.36);
+  background: #FFFBF8;
+}
+
+.subtitles-list.is-editing .subtitle-item.is-modified::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+.subtitles-list.is-editing .subtitle-item.is-invalid {
+  border-color: var(--err);
+  background: var(--err-soft);
+}
+
+.subtitle-speaker-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  padding: 2px 9px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+  transition: background-color 150ms ease, border-color 150ms ease, transform 120ms ease;
+}
+
+.subtitle-speaker-toggle:active {
+  transform: scale(0.96);
+}
+
+.subtitle-item.is-host .subtitle-speaker-toggle {
+  background: var(--host-soft);
+  color: var(--host);
+}
+
+.subtitle-item.is-host .subtitle-speaker-toggle:hover {
+  border-color: rgba(28, 90, 115, 0.28);
+}
+
+.subtitle-item.is-guest .subtitle-speaker-toggle {
+  background: var(--guest-soft);
+  color: var(--guest);
+}
+
+.subtitle-item.is-guest .subtitle-speaker-toggle:hover {
+  border-color: rgba(176, 62, 36, 0.28);
+}
+
+.subtitle-modified-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.subtitle-row-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.subtitle-mini-action {
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.subtitle-mini-action:hover {
+  background: var(--bg-subtle);
+  color: var(--ink-primary);
+}
+
+.subtitle-mini-action.is-danger:hover {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.subtitle-edit-input {
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: var(--bg-canvas);
+  color: var(--ink-primary);
+  font-size: 14.5px;
+  line-height: 1.65;
+  resize: vertical;
+  min-height: 58px;
+  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.subtitle-edit-input:focus {
+  outline: none;
+  background: var(--bg-surface);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .subtitles-list {
@@ -2644,8 +2858,27 @@ button {
 
   .transcript-header {
     padding: 16px 16px 8px;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .transcript-title-group {
     flex-direction: column;
     gap: 2px;
+  }
+
+  .script-editor-bar {
+    margin: 0 10px 10px;
+    padding: 10px 12px;
+  }
+
+  .script-editor-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .subtitle-edit-input {
+    font-size: 16px;
   }
 
   .transcript-hint.hint-desktop {

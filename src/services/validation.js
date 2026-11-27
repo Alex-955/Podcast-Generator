@@ -84,6 +84,28 @@ function validateDialogueList(dialogue) {
   return dialogue;
 }
 
+function validateEditedDialogue(dialogue) {
+  if (!Array.isArray(dialogue) || !dialogue.length) throw new InputError('对话内容为空');
+  if (dialogue.length > MAX_DIALOGUE_LINES) throw new InputError(`台词超过 ${MAX_DIALOGUE_LINES} 行上限`);
+  return Array.from(dialogue, (line, index) => {
+    const label = `第 ${index + 1} 行台词`;
+    if (!line || ![Object.prototype, null].includes(Object.getPrototypeOf(line))) {
+      throw new InputError(label + '格式无效');
+    }
+    const speaker = line.speaker;
+    if (!['阿泽', '小晓'].includes(speaker)) throw new InputError(label + '的说话人仅支持阿泽或小晓');
+    const text = requireText(line.text, label, { max: MAX_LINE_TEXT_LENGTH });
+    let emotion;
+    if (line.emotion != null) {
+      if (typeof line.emotion !== 'string' || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(line.emotion) || line.emotion.trim().length > 20) {
+        throw new InputError(label + '的情绪须为不超过 20 字的单行文本');
+      }
+      emotion = line.emotion.trim();
+    }
+    return { speaker, text, ...(emotion && { emotion }) };
+  });
+}
+
 /**
  * 校验音色映射：值必须在 AVAILABLE_VOICES 白名单内。
  */
@@ -111,7 +133,7 @@ function validateVoiceMapping(mapping, providerOrAllowedIds) {
 
 function ttsSecrets(tts = {}) {
   const env = process.env;
-  return [tts.apiKey, tts.appId, tts.accessKey, tts.endpoint, env.MINIMAX_API_KEY, env.MINIMAX_TTS_ENDPOINT,
+  return [tts.apiKey, tts.appId, tts.accessKey, tts.endpoint, tts.baseURL, env.MINIMAX_API_KEY, env.MINIMAX_TTS_ENDPOINT,
     env.VOLCENGINE_TTS_API_KEY, env.VOLCENGINE_TTS_APP_ID, env.VOLCENGINE_TTS_ACCESS_KEY, env.VOLCENGINE_TTS_ENDPOINT];
 }
 
@@ -136,6 +158,7 @@ module.exports = {
   requireText,
   validateScriptRequest,
   validateDialogueList,
+  validateEditedDialogue,
   validateVoiceMapping,
   redactSecrets,
   ttsSecrets,
