@@ -1656,6 +1656,18 @@ test('元数据写入和回滚均失败时阻断访问，恢复后不会撤销�
   const staleBackup = path.join(root, 'stale-backup');
   fs.cpSync(transaction, staleBackup, { recursive: true });
   fault = false;
+  const marker = path.join(transaction, 'prepared');
+  const backupMeta = path.join(transaction, 'originals', 'meta.json');
+  const partial = snapshot();
+  const unsigned = { ...info };
+  delete unsigned.originals;
+  fs.writeFileSync(marker, JSON.stringify(unsigned));
+  fs.writeFileSync(backupMeta, '{"podcastTitle":"已篡改"}');
+  assert.throws(() => manager.getPodcast(id), { statusCode: 503, code: 'PODCAST_RECOVERY_FAILED' });
+  assert.deepEqual(snapshot(), partial);
+  assert.equal(fs.readFileSync(marker, 'utf8'), JSON.stringify(unsigned));
+  fs.writeFileSync(marker, JSON.stringify(info));
+  fs.writeFileSync(backupMeta, original['meta.json']);
   assert.deepEqual(manager.getPodcast(id).sentences.map(line => line.text), dialogue.map(line => line.text));
   assert.deepEqual(snapshot(), original);
   assert.equal(fs.existsSync(transaction), false);

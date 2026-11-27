@@ -1016,6 +1016,9 @@ test('启动时隔离不完整或损坏的备份，其他任务运行期间仍�
   const legacy = path.join(podcastsDir, 'legacy-segment');
   const transaction = path.join(legacy, '.tmp-publish-edit-legacy-segment');
   fs.writeFileSync(path.join(transaction, 'originals', 'sentence_000.mp3'), backup['sentence_000.mp3']);
+  assert.equal((await fetch(url + '/api/podcasts/legacy-segment')).status, 503);
+  const marker = path.join(transaction, 'prepared');
+  fs.writeFileSync(marker, JSON.stringify({ ...JSON.parse(fs.readFileSync(marker)), originals }));
   assert.equal((await fetch(url + '/api/podcasts/legacy-segment')).status, 200);
   for (const [name, bytes] of Object.entries(backup)) assert.deepEqual(fs.readFileSync(path.join(legacy, name)), bytes);
   assert.equal(fs.existsSync(transaction), false);

@@ -2,7 +2,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { atomicWrite } = require('./atomicWrite');
-const { isValidMp3 } = require('./mp3Utils');
 const { sentenceFileName } = require('./ttsService');
 const { MAX_DIALOGUE_LINES } = require('./validation');
 
@@ -23,18 +22,15 @@ function verifyOriginals(dir, digests) {
   if (!fs.lstatSync(dir).isDirectory()) throw new Error('微调备份目录无效');
   const names = fs.readdirSync(dir);
   if (!names.includes('meta.json') || !names.includes('full_podcast.mp3')) throw new Error('微调备份不完整');
-  if (digests !== undefined && (!digests || typeof digests !== 'object' || Array.isArray(digests) ||
-      Object.keys(digests).length !== names.length)) throw new Error('微调备份清单无效');
+  if (!digests || typeof digests !== 'object' || Array.isArray(digests) ||
+      Object.keys(digests).length !== names.length) throw new Error('微调备份清单无效');
   for (const name of names) {
     const file = path.join(dir, name);
     if (!(name === 'meta.json' || name === 'full_podcast.mp3' || segment.test(name)) ||
         !fs.lstatSync(file).isFile()) throw new Error('微调备份文件无效');
-    const bytes = fs.readFileSync(file);
-    if (digests !== undefined) {
-      if (digests[name] !== backupDigest(bytes)) throw new Error('微调备份校验失败');
-    } else if (name === 'meta.json') {
-      JSON.parse(bytes);
-    } else if (!isValidMp3(bytes)) throw new Error('微调备份音频无效');
+    if (!Object.hasOwn(digests, name) || digests[name] !== backupDigest(fs.readFileSync(file))) {
+      throw new Error('微调备份校验失败');
+    }
   }
   return names;
 }
@@ -75,15 +71,12 @@ function reconcileTransaction(target, dir, taskId, resolveTaskStatus) {
   const stat = fs.lstatSync(marker, { throwIfNoEntry: false });
   if (!stat) return; // No target files were changed, or cleanup was interrupted.
   if (!stat.isFile()) throw new Error('微调事务标记无效');
+  const originals = path.join(dir, 'originals');
+  const info = JSON.parse(fs.readFileSync(marker, 'utf8'));
+  const names = verifyOriginals(originals, info.originals);
   const task = resolveTaskStatus(taskId, path.basename(target));
   if (task === 'completed' || task?.status === 'completed') return;
-  const originals = path.join(dir, 'originals');
-  const saved = fs.readFileSync(marker, 'utf8');
-  // Earlier versions used an empty marker and kept the dialogue count in the task.
-  const info = saved ? JSON.parse(saved) : {
-    taskId, previousVersion: readVersion(originals), dialogueCount: task?.script?.dialogue?.length,
-  };
-  if (info.taskId !== taskId || (saved && !isSafeVersion(info.targetVersion)) ||
+  if (info.taskId !== taskId || !isSafeVersion(info.targetVersion) ||
       (info.previousVersion !== null && !isSafeVersion(info.previousVersion))) {
     throw new Error('微调事务版本无效');
   }
@@ -93,7 +86,6 @@ function reconcileTransaction(target, dir, taskId, resolveTaskStatus) {
   if (!Number.isSafeInteger(info.dialogueCount) || info.dialogueCount < 1 || info.dialogueCount > MAX_DIALOGUE_LINES) {
     throw new Error('微调事务句数无效');
   }
-  const names = verifyOriginals(originals, info.originals);
   for (const name of names) restoreFile(originals, dir, target, name);
   for (let index = 0; index < info.dialogueCount; index++) {
     const name = sentenceFileName(index);
@@ -146,7 +138,10 @@ function publishEditedPodcast(target, work, baseVersion, meta, taskId, finish, r
     for (const name of [...fresh, ...obsolete, 'meta.json']) {
       const original = path.join(target, name);
       const stat = fs.lstatSync(original, { throwIfNoEntry: false });
-      if (!stat) continue;
+      if (!stat) {
+        if (name === 'meta.json' || name === 'full_podcast.mp3') throw new Error('微调备份不完整');
+        continue;
+      }
       if (!stat.isFile()) throw new Error('播客音频目录包含无效文件');
       const backup = path.join(originals, name);
       fs.copyFileSync(original, backup, fs.constants.COPYFILE_FICLONE);
