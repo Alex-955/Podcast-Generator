@@ -6,8 +6,7 @@ node_modules/
 /data/
 /public/podcasts/*
 !/public/podcasts/.gitkeep
-/启动 AI 妙听.app/
-/AI 妙听.app/
+/*.app/
 /dist/
 *.log
 /ROADMAP.md

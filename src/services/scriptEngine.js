@@ -18,7 +18,7 @@ function normalizePodcastStyle(value) {
 }
 
 const PACING_PROMPTS = {
-  deep_dive: `【深度主讲：OPPO AI 妙听风格】
+  deep_dive: `【深度主讲：拾声集沉浸拆解风格】
 - 采用 7:3 的主讲与追问节奏。小晓是常驻深度主讲人，占全篇约 65%–75% 字数，单条 text 鼓励写 80~170 字。每次讲完整一个核心论点、原文中的真实案例或贴近日常的比喻，不要强行把完整观点切碎。
 - 阿泽是主持人兼听众代言人，占全篇约 25%–35% 字数，单条 text 约 25~65 字。用生活化场景开场，在转折和关键处替听众精准追问或反问，提炼要点并温暖收尾。
 - 在句首自然融入轻量反应与过渡词，如「嗯，这个点特别关键——」「哦，这么一讲我就懂了……」「对，而且原文里还提到……」「哎等等，这听起来有点反直觉？」。严禁单独拆出只有「嗯」「哦」「对」的无实质内容短行。
@@ -206,7 +206,7 @@ function parseScript(data, title) {
   });
   return {
     success: true,
-    podcastTitle: setting(script.podcastTitle) || setting(title) || 'AI妙听播客',
+    podcastTitle: setting(script.podcastTitle) || setting(title) || '拾声集播客',
     summary: setting(script.summary),
     dialogue,
     usage: data.usage,

@@ -1,5 +1,5 @@
-appId: com.aimiaoting.desktop
-productName: AI 妙听
+appId: com.inkcast.desktop
+productName: 拾声集
 asar: true
 files:
   - electron/**/*
@@ -47,7 +47,7 @@ mac:
   hardenedRuntime: false
   gatekeeperAssess: false
   category: public.app-category.music
-  artifactName: AI-Miaoting-v${version}-mac-${arch}.dmg
+  artifactName: InkCast-v${version}-mac-${arch}.dmg
   target:
     - target: dmg
       arch: [arm64, x64]
@@ -62,4 +62,4 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  artifactName: AI-Miaoting-v${version}-win-${arch}-setup.exe
+  artifactName: InkCast-v${version}-win-${arch}-setup.exe

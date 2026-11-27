@@ -9,7 +9,7 @@ const activeDirectories = new Map();
 const ownerDirectories = new WeakMap();
 
 function locked() {
-  return Object.assign(new Error('当前数据目录正被另一个运行中的 AI 妙听实例占用，请先停止该实例或使用独立的 DATA_DIR'), {
+  return Object.assign(new Error('当前数据目录正被另一个运行中的拾声集实例占用，请先停止该实例或使用独立的 DATA_DIR'), {
     code: 'DATA_DIR_LOCKED', statusCode: 409,
   });
 }

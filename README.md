@@ -1,4 +1,4 @@
-# AI 妙听 · 双人对话播客生成器
+# 拾声集（InkCast）· 双人对话播客生成器
 
 把网页长文、微信公众号文章，或者手机里截下的长图笔记，一键变成**主持人阿泽 × 嘉宾小晓**像朋友聊天一样的双人对话播客——带完整纯人声 MP3、同步高亮字幕，还有温暖克制的播音质感。
 
@@ -8,21 +8,21 @@
 
 | 系统 | 安装包 |
 | --- | --- |
-| macOS · Apple Silicon（M 系列） | [AI-Miaoting-v1.0.0-mac-arm64.dmg](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/AI-Miaoting-v1.0.0-mac-arm64.dmg) |
-| macOS · Intel | [AI-Miaoting-v1.0.0-mac-x64.dmg](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/AI-Miaoting-v1.0.0-mac-x64.dmg) |
-| Windows · x64 | [AI-Miaoting-v1.0.0-win-x64-setup.exe](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/AI-Miaoting-v1.0.0-win-x64-setup.exe) |
-| 跨平台便携版 · ZIP（需 Node.js 22+） | [ai-podcast-generator-v1.0.0-portable.zip](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/ai-podcast-generator-v1.0.0-portable.zip) |
-| 跨平台便携版 · tar.gz（需 Node.js 22+） | [ai-podcast-generator-v1.0.0-portable.tar.gz](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/ai-podcast-generator-v1.0.0-portable.tar.gz) |
+| macOS · Apple Silicon（M 系列） | [InkCast-v1.0.0-mac-arm64.dmg](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/InkCast-v1.0.0-mac-arm64.dmg) |
+| macOS · Intel | [InkCast-v1.0.0-mac-x64.dmg](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/InkCast-v1.0.0-mac-x64.dmg) |
+| Windows · x64 | [InkCast-v1.0.0-win-x64-setup.exe](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/InkCast-v1.0.0-win-x64-setup.exe) |
+| 跨平台便携版 · ZIP（需 Node.js 22+） | [InkCast-v1.0.0-portable.zip](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/InkCast-v1.0.0-portable.zip) |
+| 跨平台便携版 · tar.gz（需 Node.js 22+） | [InkCast-v1.0.0-portable.tar.gz](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/InkCast-v1.0.0-portable.tar.gz) |
 
 <a id="first-launch"></a>
 
-**macOS 首次打开**　打开 DMG，把「AI 妙听」拖入「应用程序」。若 Gatekeeper 拦截，请先确认文件来自官方 Release，并与同页的 `SHA256SUMS.txt` 核对。尝试打开应用后，到「系统设置 → 隐私与安全性 → 仍要打开」。也可在核对来源后，单独对已安装的应用执行 `xattr -cr "/Applications/AI 妙听.app"`。
+**macOS 首次打开**　打开 DMG，把「拾声集」拖入「应用程序」。若 Gatekeeper 拦截，请先确认文件来自官方 Release，并与同页的 `SHA256SUMS.txt` 核对。尝试打开应用后，到「系统设置 → 隐私与安全性 → 仍要打开」。也可在核对来源后，单独对已安装的应用执行 `xattr -cr "/Applications/拾声集.app"`。
 
 **Windows 首次安装**　运行安装程序，选择安装目录。若 SmartScreen 显示保护提示，核对官方来源及校验和后，点击「更多信息 → 仍要运行」。
 
 桌面安装包未使用开发者证书签名。[官方 Releases](https://github.com/Alex-955/Podcast-Generator/releases) 同时提供便携 ZIP、tar.gz 与 SHA-256 校验文件。
 
-![AI 妙听双人播客工作台](docs/images/studio-desktop.png)
+![拾声集双人播客工作台](docs/images/studio-desktop.png)
 
 ---
 
@@ -70,11 +70,11 @@
 
 | 系统 | 下载解压后做什么？ | 用完怎么安全关闭？ | 第一次遇到系统弹窗怎么办？ |
 |---|---|---|---|
-| **Windows** | 直接双击根目录 **`AI 妙听.bat`** | 再次双击 **`AI 妙听.bat`**，按提示选择「停止服务」（也可重开网页或重启） | 若出现「Windows 已保护你的电脑」，点 **更多信息 → 仍要运行**（仅第一次需要） |
-| **macOS** | 直接双击根目录 **`AI 妙听.command`** | 再次双击 **`AI 妙听.command`**，在弹窗选择「停止服务」（也可直接打开网页或重启） | 若提示“来自身份不明开发者”，**右键点击文件 → 打开**（或去「系统设置 → 隐私与安全性」点「仍要打开」一次即可——启停已合二为一，全流程仅需授权一次） |
+| **Windows** | 直接双击根目录 **`拾声集.bat`** | 再次双击 **`拾声集.bat`**，按提示选择「停止服务」（也可重开网页或重启） | 若出现「Windows 已保护你的电脑」，点 **更多信息 → 仍要运行**（仅第一次需要） |
+| **macOS** | 直接双击根目录 **`拾声集.command`** | 再次双击 **`拾声集.command`**，在弹窗选择「停止服务」（也可直接打开网页或重启） | 若提示“来自身份不明开发者”，**右键点击文件 → 打开**（或去「系统设置 → 隐私与安全性」点「仍要打开」一次即可——启停已合二为一，全流程仅需授权一次） |
 
 - 启动后服务会在后台运行，并用实际监听端口打开浏览器。默认从 `3456` 到 `3475` 依次尝试，全部被占用时使用系统随机空闲端口。
-- **Mac 桌面党小技巧**：打开仓库目录下的终端运行一行 `bash scripts/build-mac-launcher.sh`，就会生成专属图标的 **`AI 妙听.app`**（可拖进程序坞）：未运行时双击弹窗点 **「启动服务」**，运行中双击弹窗直接选 **「打开网页 / 重启服务 / 停止服务」**（如用 `--portable` 参数编译分发版 `.app`，需放在便携包根目录使用；重新编译会自动清理同级旧版 `启动 AI 妙听.app`）。
+- **Mac 桌面党小技巧**：打开仓库目录下的终端运行一行 `bash scripts/build-mac-launcher.sh`，就会生成专属图标的 **`拾声集.app`**（可拖进程序坞）：未运行时双击弹窗点 **「启动服务」**，运行中双击弹窗直接选 **「打开网页 / 重启服务 / 停止服务」**（如用 `--portable` 参数编译分发版 `.app`，需放在便携包根目录使用）。
 
 ### 2. 三步生成你的第一期播客
 

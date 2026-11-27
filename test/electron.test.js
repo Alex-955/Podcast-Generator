@@ -16,7 +16,7 @@ const { applicationFiles, verifyBundle, verifyTarget, locate } = require('../scr
 const root = path.resolve(__dirname, '..');
 
 function scratch(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'miaoting-desktop-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'inkcast-desktop-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
@@ -39,14 +39,14 @@ test('窗口默认居中、记录副屏负坐标、拔下副屏后完整可见�
 });
 
 test('守卫阻止站外导航、重定向与子窗口，外部网页交系统浏览器，下载限本机音频', () => {
-  const origin = 'aimiaoting://app', external = 'https://example.org/path';
+  const origin = 'inkcast://app', external = 'https://example.org/path';
   const contents = new EventEmitter(), opened = [];
   contents.setWindowOpenHandler = fn => { contents.popup = fn; };
   guardNavigation(contents, origin, url => opened.push(url));
   assert.equal(classify(origin + '/', origin), 'local');
   assert.equal(classify('http://127.0.0.1:3458'), 'external');
   assert.equal(classify('http://127.0.0.1:3458', 'http://127.0.0.1:3458'), 'local');
-  for (const url of ['aimiaoting://elsewhere', 'aimiaoting://app:8888', 'aimiaoting://user@app']) {
+  for (const url of ['inkcast://elsewhere', 'inkcast://app:8888', 'inkcast://user@app']) {
     assert.equal(classify(url), 'deny');
   }
   for (const type of ['will-frame-navigate', 'will-redirect']) {
@@ -157,7 +157,7 @@ function asar(files) {
 
 function macRuntime(app) {
   write(app, 'Contents/Info.plist', '<plist version="1.0"><dict/></plist>');
-  write(app, 'Contents/MacOS/AI 妙听', 'fixture');
+  write(app, 'Contents/MacOS/拾声集', 'fixture');
   write(app, 'Contents/PkgInfo', 'APPL????');
   fs.mkdirSync(path.join(app, 'Contents/Frameworks'));
 }
@@ -168,7 +168,7 @@ function installedResources(dir) {
 }
 
 test('完整 macOS 应用拒绝游离条目、禁运文件和 plist 中的本机路径与凭据', t => {
-  const app = path.join(scratch(t), 'AI 妙听.app');
+  const app = path.join(scratch(t), '拾声集.app');
   macRuntime(app);
   installedResources(path.join(app, 'Contents/Resources'));
   assert.deepEqual(verifyTarget(app), [applicationFiles.size]);
@@ -189,7 +189,7 @@ function nsisFixture(t) {
   const outer = path.join(root, 'outer'), inner = path.join(root, 'inner');
   write(root, 'setup.exe', 'offline NSIS fixture');
   write(outer, '$PLUGINSDIR/System.dll', 'plugin');
-  write(inner, 'AI 妙听.exe', 'runtime');
+  write(inner, '拾声集.exe', 'runtime');
   installedResources(path.join(inner, 'resources'));
   // Replace only 7-Zip extraction. Both archive layers use the production verifier.
   t.mock.method(require('node:child_process'), 'execFileSync', (command, args) => {
@@ -212,7 +212,7 @@ test('NSIS 即使外层含合法资源也必须有内层归档', t => {
 test('NSIS 检查外层插件、内层运行时及 locales 中的所有条目', t => {
   const { exe, outer, inner } = nsisFixture(t);
   write(outer, '$PLUGINSDIR/app-64.7z', 'fixture payload');
-  write(outer, '$R0/Uninstall AI 妙听.exe', 'fixture uninstaller');
+  write(outer, '$R0/Uninstall 拾声集.exe', 'fixture uninstaller');
   write(inner, 'electron_wer.dll', 'fixture runtime');
   write(inner, 'dxcompiler.dll', 'fixture runtime');
   write(inner, 'locales/zh-CN.pak', 'fixture locale');
@@ -229,17 +229,17 @@ test('NSIS 检查外层插件、内层运行时及 locales 中的所有条目', 
   assert.throws(() => verifyTarget(exe), { message: '运行时含白名单以外的条目或链接：$R0/nested' });
   fs.rmdirSync(path.join(outer, '$R0/nested'));
   fs.renameSync(path.join(outer, '$PLUGINSDIR/app-64.7z'), path.join(outer, '$PLUGINSDIR/app-arm64.7z'));
-  const x64Exe = path.join(path.dirname(exe), 'AI-Miaoting-v1.0.0-win-x64-setup.exe');
+  const x64Exe = path.join(path.dirname(exe), 'InkCast-v1.0.0-win-x64-setup.exe');
   fs.renameSync(exe, x64Exe);
   assert.throws(() => verifyTarget(x64Exe), /负载架构不匹配/);
 });
 
 test('同时发现两种平台产物；正常 ASAR 与展开目录通过，禁运内容与损坏归档被拦截', t => {
   const dir = scratch(t);
-  const app = path.join(dir, 'mac-arm64/AI 妙听.app/Contents/Resources/app');
+  const app = path.join(dir, 'mac-arm64/拾声集.app/Contents/Resources/app');
   for (const [name, bytes] of Object.entries(fixture)) write(app, name, bytes);
-  macRuntime(path.join(dir, 'mac-arm64/AI 妙听.app'));
-  write(dir, 'win-unpacked/AI 妙听.exe', 'fixture');
+  macRuntime(path.join(dir, 'mac-arm64/拾声集.app'));
+  write(dir, 'win-unpacked/拾声集.exe', 'fixture');
   const file = path.join(dir, 'win-unpacked/resources/app.asar');
   write(dir, path.relative(dir, file), asar(fixture));
   for (const resources of [path.dirname(app), path.dirname(file)]) write(resources, 'public/podcasts/.gitkeep', '');
@@ -302,9 +302,17 @@ test('桌面运行环境仅用于开发构建，版本、许可证与双端发�
   assert.match(read('LICENSE'), /GNU GENERAL PUBLIC LICENSE\s+Version 3, 29 June 2007/);
   assert.equal(createHash('sha256').update(read('LICENSE').replace(/\r\n/g, '\n')).digest('hex'),
     '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986');
-  assert.match(read('TRADEMARK.md'), /AI 妙听[\s\S]*图标/);
+  assert.match(read('TRADEMARK.md'), /拾声集[\s\S]*图标/);
+  assert.ok(applicationFiles.has('public/icon.png'));
+  const builder = read('electron-builder.yml');
+  for (const value of ['appId: com.inkcast.desktop', 'productName: 拾声集',
+    'artifactName: InkCast-v${version}-mac-${arch}.dmg', 'artifactName: InkCast-v${version}-win-${arch}-setup.exe']) {
+    assert.ok(builder.includes(value), value);
+  }
   const workflow = read('.github/workflows/release.yml');
-  for (const part of ['needs: [portable, desktop-mac, desktop-win]', 'dist/AI-Miaoting-v*-mac-*.dmg', 'dist/AI-Miaoting-v*-win-*-setup.exe', 'sha256sum -c', 'action-gh-release@v2']) {
+  for (const part of ['needs: [portable, desktop-mac, desktop-win]', 'name: inkcast-release',
+    'dist/InkCast-v*-mac-*.dmg', 'dist/InkCast-v*-win-*-setup.exe', 'dist/InkCast-v*-portable.zip',
+    'dist/InkCast-v*-portable.tar.gz', 'sha256sum -c', 'action-gh-release@v2']) {
     assert.ok(workflow.includes(part), part);
   }
 });

@@ -393,7 +393,7 @@ async function statusPortable(options = {}) {
 function reportInstance(result, options, config) {
   const log = options.log ?? console.log;
   const url = localUrl(result.host, result.port);
-  log(`AI 妙听${result.reused ? '已在运行' : '已启动'}：${url}`);
+  log(`拾声集${result.reused ? '已在运行' : '已启动'}：${url}`);
   if (result.host === '0.0.0.0' || result.host === '::') {
     for (const address of getLanAddresses()) log(`局域网：http://${address}:${result.port}`);
     log('局域网设备默认禁止删除本地历史播客（无 ADMIN_TOKEN 时删除返回 403；浏览、播放与任务生成不受影响）');
@@ -465,15 +465,15 @@ async function startPortable(options = {}) {
     if (current.running) {
       if (config.explicitPort && current.port !== config.port) {
         await findAvailablePort(config.host, config.port, true);
-        throw new Error(`当前目录的 AI 妙听已在端口 ${current.port} 运行，请先停止后再指定新端口 ${config.port}`);
+        throw new Error(`当前目录的拾声集已在端口 ${current.port} 运行，请先停止后再指定新端口 ${config.port}`);
       }
       return { ...current, reused: true };
     }
     if (await isExpectedServerProcess(previous, processOptions)) {
-      throw new Error('已有 AI 妙听进程，但健康检查未通过，请停止后重试');
+      throw new Error('已有拾声集进程，但健康检查未通过，请停止后重试');
     }
     if (await isForeignManagedServerProcess(previous, processOptions)) {
-      throw new Error('当前数据目录正被另一个目录的 AI 妙听实例使用，请先停止该实例或指定独立的 --data-dir');
+      throw new Error('当前数据目录正被另一个目录的拾声集实例使用，请先停止该实例或指定独立的 --data-dir');
     }
     try {
       if (!(await fs.stat(path.join(config.projectDir, 'server.js'))).isFile()) throw new Error();
@@ -493,7 +493,7 @@ async function startPortable(options = {}) {
       try {
         const ready = await awaitListening(server);
         if (ready?.error === 'DATA_DIR_LOCKED') {
-          throw new Error('当前数据目录正被另一个运行中的 AI 妙听实例占用，请先停止该实例或指定独立的 --data-dir');
+          throw new Error('当前数据目录正被另一个运行中的拾声集实例占用，请先停止该实例或指定独立的 --data-dir');
         }
         if (ready?.error === 'EADDRINUSE' && candidate !== 0) {
           if (config.explicitPort) throw new Error(`指定端口 ${candidate} 已被其他服务占用，请选择其他端口`);
@@ -503,7 +503,7 @@ async function startPortable(options = {}) {
         const port = ready?.port;
         if (Number.isInteger(port) && port > 0 && port <= 65535) record.port = port;
         const health = record.port && await probeHealth(config.host, record.port, 2000);
-        if (!health) throw new Error('AI 妙听启动失败或超时，可用 --foreground 查看启动输出');
+        if (!health) throw new Error('拾声集启动失败或超时，可用 --foreground 查看启动输出');
 
         await writePidRecord(config.pidFile, record);
         if (options.foreground) foreground = { server, record };
@@ -556,7 +556,7 @@ async function stopPortable(options = {}) {
     try {
       (options.kill ?? process.kill)(record.pid, 'SIGTERM');
     } catch (error) {
-      if (error.code !== 'ESRCH') throw new Error('无法停止 AI 妙听进程');
+      if (error.code !== 'ESRCH') throw new Error('无法停止拾声集进程');
       await fs.rm(config.pidFile, { force: true });
       return { stopped: false, stale: true };
     }
@@ -564,7 +564,7 @@ async function stopPortable(options = {}) {
     // Windows may still report the PID after the termination request returns.
     while (processExists(record.pid) || await isExpectedServerProcess(record, processOptions)) {
       const remaining = deadline - performance.now();
-      if (remaining <= 0) throw new Error('AI 妙听尚未停止，请稍后重试');
+      if (remaining <= 0) throw new Error('拾声集尚未停止，请稍后重试');
       await delay(Math.min(50, remaining));
     }
     await fs.rm(config.pidFile, { force: true });
@@ -579,17 +579,17 @@ async function main() {
     if (result.completion) process.exitCode = await result.completion;
   } else if (options.action === 'stop') {
     const result = await stopPortable(options);
-    if (result.foreign) console.log('当前数据目录正由另一个目录的 AI 妙听实例使用，未停止且未删除其 PID 记录');
-    else console.log(result.stopped ? 'AI 妙听已停止'
+    if (result.foreign) console.log('当前数据目录正由另一个目录的拾声集实例使用，未停止且未删除其 PID 记录');
+    else console.log(result.stopped ? '拾声集已停止'
       : result.stale ? 'PID 未通过校验，未终止进程，已清理过期记录' : '没有正在运行的便携启动实例');
   } else {
     const result = await statusPortable(options);
-    if (result.running) console.log(`AI 妙听正在运行：${localUrl(result.host, result.port)}`);
+    if (result.running) console.log(`拾声集正在运行：${localUrl(result.host, result.port)}`);
     else if (result.unhealthy) {
-      console.log(`AI 妙听进程仍在运行但健康检查未通过（PID ${result.pid}，端口 ${result.port}）`);
+      console.log(`拾声集进程仍在运行但健康检查未通过（PID ${result.pid}，端口 ${result.port}）`);
       process.exitCode = 2;
     } else {
-      console.log('AI 妙听未在运行');
+      console.log('拾声集未在运行');
       process.exitCode = 1;
     }
   }

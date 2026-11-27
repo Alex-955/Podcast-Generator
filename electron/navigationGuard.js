@@ -1,13 +1,13 @@
 'use strict';
 
-const DESKTOP_ORIGIN = 'aimiaoting://app';
+const DESKTOP_ORIGIN = 'inkcast://app';
 
 function classify(raw, origin = DESKTOP_ORIGIN) {
   try {
     const url = new URL(raw);
     const allowed = new URL(origin);
     if (url.username || url.password) return 'deny';
-    if (['aimiaoting:', 'https:', 'http:'].includes(url.protocol) &&
+    if (['inkcast:', 'https:', 'http:'].includes(url.protocol) &&
         url.protocol === allowed.protocol && url.host === allowed.host) return 'local';
     return ['http:', 'https:'].includes(url.protocol) ? 'external' : 'deny';
   } catch { return 'deny'; }

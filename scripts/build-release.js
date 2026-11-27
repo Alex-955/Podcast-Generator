@@ -21,12 +21,12 @@ const SOURCE_FILES = Object.freeze([
   'src/services/ttsProvider.js', 'src/services/ttsService.js', 'src/services/validation.js',
   'src/services/volcengineTtsProvider.js',
 ]);
-const PUBLIC_FILES = ['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js'].map(file => 'public/' + file);
+const PUBLIC_FILES = ['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js', 'icon.png'].map(file => 'public/' + file);
 const SCRIPTS = ['scripts/start-portable.js', 'scripts/build-mac-launcher.sh'];
 const PLACEHOLDERS = ['public/podcasts/.gitkeep', 'data/.gitkeep'];
 const LAUNCHERS = {
-  'macos.command': 'AI 妙听.command',
-  'windows.bat': 'AI 妙听.bat',
+  'macos.command': '拾声集.command',
+  'windows.bat': '拾声集.bat',
 };
 const LAUNCHER_FILES = Object.entries(LAUNCHERS).flatMap(([source, target]) => ['scripts/launchers/' + source, target]);
 const REQUIRED_FILES = [...ROOT_FILES, ...SOURCE_FILES, ...PUBLIC_FILES, ...SCRIPTS, ...PLACEHOLDERS, ...LAUNCHER_FILES];
@@ -297,8 +297,8 @@ function forbiddenPath(relative) {
   const lower = relative.toLowerCase();
   const name = path.posix.basename(lower);
   return (name.startsWith('.env') && relative !== '.env.example') ||
-    ['.git', '.ds_store', '启动 ai 妙听.app', 'ai 妙听.app', 'roadmap.md', 'plan.md', 'agents.md'].includes(name) ||
-    /\.(?:log|pid)$/.test(name) || lower === 'plan' || lower.startsWith('plan/') ||
+    ['.git', '.ds_store', 'roadmap.md', 'plan.md', 'agents.md'].includes(name) ||
+    /\.(?:log|pid)$/.test(name) || name.endsWith('.app') || lower === 'plan' || lower.startsWith('plan/') ||
     lower === 'website' || lower.startsWith('website/') ||
     lower === 'test' || (lower.startsWith('data/') && relative !== 'data/.gitkeep') ||
     (lower.startsWith('public/podcasts/') && relative !== 'public/podcasts/.gitkeep');
@@ -651,7 +651,7 @@ function buildRelease({
   sourceDir = path.resolve(sourceDir);
   outDir = validateOutputPath(path.resolve(outDir), sourceDir, withDeps);
   const { version } = JSON.parse(fs.readFileSync(plainFile(sourceDir, 'package.json'), 'utf8'));
-  name ??= 'ai-podcast-generator-v' + version + '-portable';
+  name ??= 'InkCast-v' + version + '-portable';
   validateName(name);
   const formats = format === 'dir' ? [] : format === 'both' ? ['zip', 'tar.gz'] : [format];
   const archiveNames = formats.map(ext => name + '.' + ext);
