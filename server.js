@@ -58,7 +58,7 @@ function resolveDataDir(directory) {
   return path.resolve(directory || process.env.DATA_DIR || path.join(__dirname, 'data'));
 }
 
-function createApp(options = {}, ownerToken) {
+function createApp({ desktopSessionToken, ...options } = {}, ownerToken) {
   const app = express();
   const { adminToken = process.env.ADMIN_TOKEN?.trim() || '',
     isLoopbackRequest = req => isLoopbackAddress(req.socket?.remoteAddress) } = options;
@@ -112,6 +112,25 @@ function createApp(options = {}, ownerToken) {
     next();
   }
 
+  if (desktopSessionToken !== undefined) {
+    if (!desktopSessionToken || typeof desktopSessionToken !== 'string') throw new Error('桌面会话令牌无效');
+    const digest = tokenDigest(desktopSessionToken);
+    app.use((req, res, next) => {
+      const localHost = '127.0.0.1:' + req.socket.localPort;
+      const trusted = value => {
+        if (value === undefined) return true;
+        try {
+          const url = new URL(value);
+          if (url.username || url.password) return false;
+          return (url.protocol === 'http:' && url.host === localHost) ||
+            (url.protocol === 'aimiaoting:' && url.host === 'app');
+        } catch { return false; }
+      };
+      if (req.get('host') === localHost && trusted(req.get('origin')) && trusted(req.get('referer')) &&
+          timingSafeEqual(digest, tokenDigest(req.get('x-desktop-session') || ''))) return next();
+      res.status(403).json({ success: false, error: '仅允许通过 AI 妙听桌面应用访问本地接口', code: 'DESKTOP_AUTH_REQUIRED' });
+    });
+  }
   const origins = process.env.CORS_ORIGIN?.split(',').map(origin => origin.trim()).filter(Boolean);
   if (origins?.length) {
     app.use(cors({ origin: origins, preflightContinue: true }));
@@ -209,7 +228,7 @@ function createApp(options = {}, ownerToken) {
     if (err.type === 'entity.parse.failed') detail = '请求体必须是有效 JSON';
     const sensitive = [req.body?.apiKey, req.body?.baseURL, process.env.DEEPSEEK_API_KEY, process.env.LLM_BASE_URL,
       req.body?.visionApiKey, req.body?.visionBaseURL, process.env.VISION_API_KEY, process.env.VISION_BASE_URL,
-      ...ttsSecrets(req.body?.tts ?? {}), adminToken, req.get?.('x-admin-token'), bearerToken(req), dataDir, podcastsDir];
+      ...ttsSecrets(req.body?.tts ?? {}), desktopSessionToken, adminToken, req.get?.('x-admin-token'), bearerToken(req), dataDir, podcastsDir];
     const error = redactProviderDetail(detail, sensitive);
     const code = typeof err.code === 'string' ? redactProviderDetail(err.code, sensitive) : undefined;
     res.status(status).json({ success: false, error, code });
@@ -232,6 +251,7 @@ async function startServer({
   app, host = '127.0.0.1', port, allowPortFallback = port == null || String(port).trim() === '',
   maxFallbackPort = DEFAULT_PORT_FALLBACK_MAX, allowEphemeralFallback = true, ...createAppOptions
 } = {}) {
+  if (app && createAppOptions.desktopSessionToken !== undefined) throw new Error('请在 createApp 时配置桌面会话令牌');
   const preferredPort = parsePort(port);
   const lastPort = Math.min(65535, Math.floor(maxFallbackPort));
   let candidate = preferredPort;

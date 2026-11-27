@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test (${{ matrix.os }} / Node ${{ matrix.node-version }})
@@ -36,7 +39,7 @@ jobs:
             const path = require('node:path');
             const { execFileSync } = require('node:child_process');
             const targets = ['server.js'];
-            for (const dir of ['src/services', 'public', 'scripts']) {
+            for (const dir of ['src/services', 'public', 'scripts', 'electron']) {
               if (!fs.existsSync(dir)) continue;
               for (const entry of fs.readdirSync(dir)) {
                 if (entry.endsWith('.js')) targets.push(path.join(dir, entry));

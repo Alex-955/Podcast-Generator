@@ -357,3 +357,47 @@ test('多个 CLI 同时回收死进程的锁时只有一个实例进入监听', 
   assert.equal(results.filter(message => message.error === 'DATA_DIR_LOCKED').length, 2);
   assert.equal((await request(winners[0].port, 'health')).status, 200);
 });
+
+test('桌面鉴权覆盖探活、任务、播客和音频，并脱敏服务异常', async t => {
+  const options = settings();
+  const desktopSessionToken = require('node:crypto').randomBytes(32).toString('hex');
+  const running = await startServer({
+    ...options, port: 0, desktopSessionToken,
+    extractor() { throw Object.assign(new Error(desktopSessionToken), { status: 400, code: desktopSessionToken }); },
+  });
+  t.after(() => running.close());
+  const url = 'http://127.0.0.1:' + running.port;
+  const auth = { 'X-Desktop-Session': desktopSessionToken };
+  const denied = { success: false, error: '仅允许通过 AI 妙听桌面应用访问本地接口', code: 'DESKTOP_AUTH_REQUIRED' };
+  for (const route of ['/api/health', '/api/podcasts', '/api/tasks', '/podcasts/ep/full_podcast.mp3']) {
+    for (const headers of [{}, { 'X-Desktop-Session': 'wrong' }, { ...auth, Host: 'example.org' },
+      { ...auth, Origin: 'https://example.org' }, { ...auth, Referer: 'https://example.org/private' }]) {
+      // node:http preserves the supplied Host on all supported Node versions.
+      const res = await new Promise((resolve, reject) => {
+        http.request(url + route, { headers, method: route === '/api/tasks' ? 'POST' : 'GET' }, resolve)
+          .on('error', reject).end();
+      });
+      let text = '';
+      for await (const chunk of res) text += chunk;
+      assert.equal(res.statusCode, 403);
+      assert.deepEqual(JSON.parse(text), denied);
+    }
+  }
+  for (const headers of [auth, { ...auth, Origin: 'aimiaoting://app' }, { ...auth, Referer: url + '/' }]) {
+    const res = await fetch(url + '/api/podcasts', { headers });
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).success, true);
+  }
+  const audio = require('./helpers/mp3Fixtures').makeMp3(2);
+  fs.mkdirSync(path.join(options.podcastsDir, 'ep'), { recursive: true });
+  fs.writeFileSync(path.join(options.podcastsDir, 'ep/full_podcast.mp3'), audio);
+  const download = await fetch(url + '/podcasts/ep/full_podcast.mp3', { headers: auth });
+  assert.equal(download.status, 200);
+  assert.deepEqual(Buffer.from(await download.arrayBuffer()), audio);
+  const task = await fetch(url + '/api/tasks', { headers: auth, method: 'POST' });
+  assert.equal(task.status, 400);
+  const error = await fetch(url + '/api/extract-article', { method: 'POST',
+    headers: { ...auth, 'Content-Type': 'application/json' }, body: '{"rawText":"test"}' });
+  assert.equal(error.status, 400);
+  assert.ok(!(await error.text()).includes(desktopSessionToken));
+});

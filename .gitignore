@@ -4,7 +4,8 @@ node_modules/
 !.env.example
 .DS_Store
 /data/
-/public/podcasts/
+/public/podcasts/*
+!/public/podcasts/.gitkeep
 /启动 AI 妙听.app/
 /AI 妙听.app/
 /dist/

@@ -1,0 +1,65 @@
+appId: com.aimiaoting.desktop
+productName: AI 妙听
+asar: true
+files:
+  - electron/**/*
+  - server.js
+  - src/**/*
+  - public/**/*
+  - package.json
+  - LICENSE
+  - TRADEMARK.md
+  - '!public/podcasts/**'
+  - public/podcasts/.gitkeep
+  - '!data/**'
+  - '!plan/**'
+  - '!website/**'
+  - '!docs/**'
+  - '!test/**'
+  - '!scripts/**'
+  - '!build/**'
+  - '!.env*'
+  - '!AGENTS.md'
+  - '!Plan.md'
+  - '!ROADMAP.md'
+  - '!**/*.map'
+  - '!**/.DS_Store'
+  - '!**/test/**'
+  - '!**/tests/**'
+  # Match the portable production dependency exclusions used by the release gate.
+  - '!node_modules/**/{.bin,.cache,.github,.vscode,.nyc_output,__mocks__,__tests__,example,examples,doc,docs,benchmark,benchmarks,coverage}/**'
+  - '!node_modules/**/{test.js,tests.js,yarn.lock,pnpm-lock.yaml,package-lock.json,npm-shrinkwrap.json}'
+  - '!node_modules/**/*.{test,spec}.{js,cjs,mjs}'
+  - '!node_modules/**/{eslint,prettier,jest,vitest,rollup,babel}.config.*'
+  - '!node_modules/**/{.nycrc,.mocharc,.eslintrc,.prettierrc,.babelrc,Gruntfile,Gulpfile,karma.conf,webpack.config}*'
+  - '!node_modules/**/{.npmignore,.gitignore,.editorconfig,.travis.yml,Makefile,tsconfig*.json}'
+  - '!node_modules/**/*.{d.ts,d.mts,d.cts,tsbuildinfo}'
+  - '!node_modules/**/!(LICENSE*|LICENCE*|NOTICE*|License*|license*|notice*).{md,markdown,txt}'
+  - '!node_modules/**/{README,readme,HISTORY,History,CHANGELOG,CHANGES,SECURITY,CONTRIBUTING}{,.*}'
+# The builder's ASAR walker unconditionally omits .gitkeep. Copy only the
+# empty marker as a resource; never traverse the user's podcast library.
+extraResources:
+  - from: public/podcasts/.gitkeep
+    to: public/podcasts/.gitkeep
+mac:
+  icon: build/icon.icns
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  category: public.app-category.music
+  artifactName: AI-Miaoting-v${version}-mac-${arch}.dmg
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+win:
+  icon: build/icon.ico
+  forceCodeSigning: false
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  artifactName: AI-Miaoting-v${version}-win-${arch}-setup.exe

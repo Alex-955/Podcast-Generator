@@ -16,7 +16,7 @@ const { version } = require('../package.json');
 
 const PROJECT = path.resolve(__dirname, '..');
 const SOURCE_FILES = [
-  'server.js', 'package.json', 'package-lock.json', 'README.md', 'LICENSE', '.env.example', 'src',
+  'server.js', 'package.json', 'package-lock.json', 'README.md', 'LICENSE', 'TRADEMARK.md', '.env.example', 'src',
   'scripts/start-portable.js', 'scripts/build-mac-launcher.sh',
   'scripts/launchers/macos.command', 'scripts/launchers/windows.bat',
   ...['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js'].map(file => 'public/' + file),
@@ -277,6 +277,19 @@ test('白名单从混有个人数据的源码生成干净目录，暂存服务�
   await verifyStagedServer(stageDir, root, { nodePath: path.join(PROJECT, 'node_modules') });
 });
 
+test('源码白名单跳过游离源文件，暂存门禁拒绝多出或缺失的服务文件', t => {
+  const root = scratch(t), sourceDir = sourceFixture(root);
+  const stray = 'src/services/stray.js';
+  write(sourceDir, stray, 'fixture');
+  const { stageDir } = buildRelease({ sourceDir, outDir: path.join(root, 'out'), format: 'dir' });
+  assert.ok(!fs.existsSync(path.join(stageDir, stray)));
+  write(stageDir, stray, 'fixture');
+  assert.throws(() => runReleaseSecurityGate(stageDir), /src\/services\/stray\.js 不在源码白名单中/);
+  fs.unlinkSync(path.join(stageDir, stray));
+  fs.unlinkSync(path.join(stageDir, 'src/services/atomicWrite.js'));
+  assert.throws(() => runReleaseSecurityGate(stageDir), /缺少必需文件：src\/services\/atomicWrite\.js/);
+});
+
 test('发行门禁识别禁运路径、个人主目录、私钥和 API 密钥，同时避免打印凭据', t => {
   const root = scratch(t);
   const { stageDir } = buildRelease({ sourceDir: sourceFixture(root), outDir: path.join(root, 'out'), format: 'dir' });
@@ -293,7 +306,7 @@ test('发行门禁识别禁运路径、个人主目录、私钥和 API 密钥，
   write(stageDir, 'src/linuxHome.js', 'const home = "/home/alice";\n');
   write(stageDir, 'src/windowsHome.js', 'const home = "c:\\\\users\\\\alice";\n');
   write(stageDir, 'src/windowsPath.js', 'const path = "C:\\\\Users\\\\Offline User\\\\stuff";\n');
-  write(stageDir, 'src/routes.js', 'const route = "/users/delete";\n');
+  write(stageDir, 'src/services/mp3Utils.js', 'const route = "/users/delete";\n');
   write(stageDir, 'src/key.js', 'const secret = "' + key + '";\n');
   write(stageDir, 'src/privateKey.js', '-----BEGIN OPENSSH PRIVATE KEY-----\n');
   write(stageDir, 'node_modules/pkg/key.pem', '-----BEGIN PRIVATE KEY-----\n');
@@ -315,12 +328,12 @@ test('发行门禁识别禁运路径、个人主目录、私钥和 API 密钥，
       'AI 妙听.command 必须使用 LF', 'scripts/launchers/macos.command 必须使用 LF', '缺少必需文件：LICENSE']) {
       assert.ok(error.issues.some(issue => issue.includes(detail)), detail);
     }
-    assert.doesNotMatch(error.message, /alice|Offline User|sk-A{30}|=abc|routes\.js|EXAMPLE_SECRET/);
+    assert.doesNotMatch(error.message, /alice|Offline User|sk-A{30}|=abc|mp3Utils\.js|EXAMPLE_SECRET/);
     return true;
   });
 
   const sourceDir = sourceFixture(root);
-  write(sourceDir, 'src/private.js', 'module.exports = "' + key + '";\n');
+  write(sourceDir, 'src/services/extractor.js', 'module.exports = "' + key + '";\n');
   const outDir = path.join(root, 'aborted');
   assert.throws(() => buildRelease({ sourceDir, outDir, format: 'both' }), /发行包安全门禁未通过/);
   assert.deepEqual(fs.readdirSync(outDir), []);
@@ -350,7 +363,7 @@ test('发行暂存目录清理失败时保留安全门禁的原始错误', t => 
   const root = scratch(t);
   const sourceDir = sourceFixture(root);
   const outDir = path.join(fs.realpathSync.native(root), 'out');
-  write(sourceDir, 'src/unsafe.js', '-----BEGIN PRIVATE KEY-----\n');
+  write(sourceDir, 'src/services/audioMerger.js', '-----BEGIN PRIVATE KEY-----\n');
   const rmSync = fs.rmSync;
   const cleanup = t.mock.method(fs, 'rmSync', (target, options) => {
     if (path.dirname(target) === outDir && path.basename(target).startsWith('.podcast-release-')) {
@@ -361,7 +374,7 @@ test('发行暂存目录清理失败时保留安全门禁的原始错误', t => 
 
   assert.throws(() => buildRelease({ sourceDir, outDir, format: 'dir' }), error => {
     assert.match(error.message, /发行包安全门禁未通过/);
-    assert.ok(error.issues.includes('src/unsafe.js:1 包含私钥头'));
+    assert.ok(error.issues.includes('src/services/audioMerger.js:1 包含私钥头'));
     return true;
   });
   assert.equal(cleanup.mock.callCount(), 1);
@@ -377,7 +390,7 @@ test('发行门禁拦截非 ASCII 主目录、dotenv 冒号语法和不合法 UT
     ['windows.js', 'C:\\Users\\李四\n'],
     ['windowsForward.js', 'C:/Users/李四\n'],
     ['windowsEscaped.js', 'const home = "C:\\\\Users\\\\李四";\n'],
-    ['routes.js', 'const route = "/users/delete";\n'],
+    ['services/mp3Utils.js', 'const route = "/users/delete";\n'],
   ]) write(stageDir, 'src/' + file, contents);
   write(stageDir, '.env.example', 'ADMIN_TOKEN: secret\nADMIN_TOKEN=\nGROUP.ADMIN_TOKEN: secret\n');
   assert.throws(() => runReleaseSecurityGate(stageDir), error => {
@@ -386,7 +399,7 @@ test('发行门禁拦截非 ASCII 主目录、dotenv 冒号语法和不合法 UT
     }
     assert.ok(error.issues.includes('.env.example:1 凭据字段 ADMIN_TOKEN 必须为空'));
     assert.ok(error.issues.includes('.env.example 凭据字段 GROUP.ADMIN_TOKEN 必须为空'));
-    assert.doesNotMatch(error.message, /张三|测试用户|李四|routes\.js|secret/);
+    assert.doesNotMatch(error.message, /张三|测试用户|李四|mp3Utils\.js|secret/);
     return true;
   });
   write(stageDir, '.env.example', Buffer.concat([Buffer.from('ADMIN_TOKEN=secret\n'), Buffer.from([0xff])]));
@@ -490,6 +503,14 @@ test('真实便携 ZIP 和 tar.gz 包含白名单目录、匹配 SHA-256 并带�
     if (/^(?:licen[cs]e|notice)/i.test(path.posix.basename(entry))) continue;
     assert.doesNotMatch(entry, /\.(?:md|markdown)$|\/__tests__\//i);
   }
+  assert.ok(![...zip.keys()].some(file => /\/node_modules\/(?:electron|electron-builder)\//.test(file)));
+  assert.ok(zip.has(path.basename(stageDir) + '/TRADEMARK.md'));
+  const portablePkg = JSON.parse(fs.readFileSync(path.join(stageDir, 'package.json')));
+  const lock = JSON.parse(fs.readFileSync(path.join(stageDir, 'package-lock.json')));
+  assert.equal(portablePkg.main, 'server.js');
+  assert.equal(portablePkg.devDependencies, undefined);
+  assert.equal(lock.packages[''].devDependencies, undefined);
+  assert.ok(Object.values(lock.packages).every(pkg => !pkg.dev));
   const smoke = spawnSync(process.execPath, ['--input-type=module', '-e', `
     import assert from 'node:assert/strict';
     import express from 'express';
@@ -555,10 +576,11 @@ test('真实便携 ZIP 和 tar.gz 包含白名单目录、匹配 SHA-256 并带�
 test('tar.gz 使用 PAX 保留超过 USTAR 名称长度的 ASCII 路径', t => {
   const root = scratch(t);
   const sourceDir = sourceFixture(root);
-  const file = 'src/' + 'long-name-'.repeat(9) + '.js';
+  write(sourceDir, 'package-lock.json', JSON.stringify({ packages: { 'node_modules/pkg': {} } }));
+  const file = 'node_modules/pkg/' + 'long-name-'.repeat(9) + '.js';
   const contents = 'module.exports = "portable";\n';
   write(sourceDir, file, contents);
-  const { archives } = buildRelease({ sourceDir, outDir: path.join(root, 'archives'), name: 'pax-long', format: 'tar.gz' });
+  const { archives } = buildRelease({ sourceDir, outDir: path.join(root, 'archives'), name: 'pax-long', format: 'tar.gz', withDeps: true });
   const entry = tarEntries(archives[0]).get('pax-long/' + file);
   assert.equal(entry.pax, true);
   assert.equal(entry.contents.toString('utf8'), contents);

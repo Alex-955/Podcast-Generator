@@ -9,7 +9,18 @@ const dotenv = require('dotenv');
 
 const SOURCE_DIR = path.resolve(__dirname, '..');
 const FORMATS = ['zip', 'tar.gz', 'both', 'dir'];
-const ROOT_FILES = ['server.js', 'package.json', 'package-lock.json', 'README.md', 'LICENSE', '.env.example'];
+const ROOT_FILES = ['server.js', 'package.json', 'package-lock.json', 'README.md', 'LICENSE', 'TRADEMARK.md', '.env.example'];
+const SOURCE_FILES = Object.freeze([
+  'src/services/atomicWrite.js', 'src/services/audioMerger.js', 'src/services/connectionTests.js',
+  'src/services/edgeTtsAdapter.js', 'src/services/extractor.js', 'src/services/httpTts.js',
+  'src/services/imageExtractor.js', 'src/services/instanceLock.js', 'src/services/llmCredentials.js',
+  'src/services/llmModels.js', 'src/services/minimaxTtsProvider.js', 'src/services/mp3Utils.js',
+  'src/services/podcastPublication.js', 'src/services/providerHttp.js', 'src/services/scriptEngine.js',
+  'src/services/speechNormalize.js', 'src/services/styleRecommender.js', 'src/services/taskManager.js',
+  'src/services/textPolisher.js', 'src/services/ttsCache.js', 'src/services/ttsCredentials.js',
+  'src/services/ttsProvider.js', 'src/services/ttsService.js', 'src/services/validation.js',
+  'src/services/volcengineTtsProvider.js',
+]);
 const PUBLIC_FILES = ['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js'].map(file => 'public/' + file);
 const SCRIPTS = ['scripts/start-portable.js', 'scripts/build-mac-launcher.sh'];
 const PLACEHOLDERS = ['public/podcasts/.gitkeep', 'data/.gitkeep'];
@@ -18,7 +29,7 @@ const LAUNCHERS = {
   'windows.bat': 'AI 妙听.bat',
 };
 const LAUNCHER_FILES = Object.entries(LAUNCHERS).flatMap(([source, target]) => ['scripts/launchers/' + source, target]);
-const REQUIRED_FILES = [...ROOT_FILES, ...PUBLIC_FILES, ...SCRIPTS, ...PLACEHOLDERS, ...LAUNCHER_FILES];
+const REQUIRED_FILES = [...ROOT_FILES, ...SOURCE_FILES, ...PUBLIC_FILES, ...SCRIPTS, ...PLACEHOLDERS, ...LAUNCHER_FILES];
 const DEPENDENCY_DOC = /^(?:readme|history|changelog|changes|security|contributing)(?:\.[a-z]+)?$/i;
 const CREDENTIAL_FIELD = /(?:KEY|TOKEN|SECRET|PASSWORD|APP_ID)$/i;
 const ZIP_UTF8 = 0x0800;
@@ -134,14 +145,10 @@ function copyFile(from, to) {
   fs.copyFileSync(from, to);
 }
 
-function copySourceTree(from, to, relative = 'src') {
-  const directory = plainDirectory(from, relative);
-  fs.mkdirSync(path.join(to, relative), { recursive: true });
-  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-    const child = relative + '/' + entry.name;
-    if (entry.isDirectory()) copySourceTree(from, to, child);
-    else if (entry.name.endsWith('.js')) copyFile(plainFile(from, child), path.join(to, child));
-  }
+function copySourceTree(from, to) {
+  plainDirectory(from, 'src');
+  plainDirectory(from, 'src/services');
+  for (const relative of SOURCE_FILES) copyFile(plainFile(from, relative), path.join(to, relative));
 }
 
 const DEPENDENCY_DIRS = new Set([
@@ -250,9 +257,29 @@ function writeLaunchers(sourceDir, stageDir) {
   }
 }
 
+function writePortableManifests(stageDir) {
+  const manifestFile = path.join(stageDir, 'package.json');
+  const lockFile = path.join(stageDir, 'package-lock.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  manifest.main = 'server.js';
+  delete manifest.devDependencies;
+  for (const key of Object.keys(manifest.scripts ?? {})) {
+    if (key === 'desktop' || key.startsWith('desktop:')) delete manifest.scripts[key];
+  }
+  let lock;
+  try { lock = JSON.parse(fs.readFileSync(lockFile, 'utf8')); }
+  catch { throw new Error('package-lock.json 格式无效'); }
+  if (lock.packages?.['']) delete lock.packages[''].devDependencies;
+  for (const [name, entry] of Object.entries(lock.packages || {})) {
+    if (entry?.dev === true) delete lock.packages[name];
+  }
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
+  fs.writeFileSync(lockFile, JSON.stringify(lock, null, 2) + '\n');
+}
+
 function stageFiles(sourceDir, stageDir, withDeps) {
   for (const dir of ['public', 'scripts', 'scripts/launchers']) plainDirectory(sourceDir, dir);
-  for (const relative of [...ROOT_FILES, ...PUBLIC_FILES, ...SCRIPTS]) {
+  for (const relative of [...ROOT_FILES, ...SOURCE_FILES, ...PUBLIC_FILES, ...SCRIPTS]) {
     copyFile(plainFile(sourceDir, relative), path.join(stageDir, relative));
   }
   copySourceTree(sourceDir, stageDir);
@@ -263,6 +290,7 @@ function stageFiles(sourceDir, stageDir, withDeps) {
   }
   writeLaunchers(sourceDir, stageDir);
   if (withDeps) copyDependencies(sourceDir, stageDir);
+  writePortableManifests(stageDir);
 }
 
 function forbiddenPath(relative) {
@@ -324,7 +352,6 @@ function runReleaseSecurityGate(stageDir, manifest = new Set()) {
   const hasDeps = fs.existsSync(path.join(stageDir, 'node_modules'));
   const lock = fs.lstatSync(path.join(stageDir, 'package-lock.json'), { throwIfNoEntry: false });
   const packages = hasDeps || lock?.isFile() ? productionPackages(stageDir, hasDeps) : null;
-  let hasSource = false;
   function scan(dir, prefix = '') {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const relative = prefix + entry.name;
@@ -341,7 +368,6 @@ function runReleaseSecurityGate(stageDir, manifest = new Set()) {
         issues.push(relative + ' 不是常规文件或目录');
       } else {
         files.add(relative);
-        if (relative.startsWith('src/') && relative.endsWith('.js')) hasSource = true;
         const contents = fs.readFileSync(file);
         if (PLACEHOLDERS.includes(relative) && contents.length) issues.push(relative + ' 必须为空');
         if (LAUNCHER_FILES.includes(relative)) {
@@ -363,7 +389,9 @@ function runReleaseSecurityGate(stageDir, manifest = new Set()) {
   for (const relative of REQUIRED_FILES) {
     if (!files.has(relative)) issues.push('缺少必需文件：' + relative);
   }
-  if (!hasSource) issues.push('缺少 src/ 中的 JavaScript 源码');
+  for (const relative of files) {
+    if (relative.startsWith('src/') && !SOURCE_FILES.includes(relative)) issues.push(relative + ' 不在源码白名单中');
+  }
   if (issues.length) {
     throw Object.assign(new Error('发行包安全门禁未通过：\n' + issues.join('\n')), { issues });
   }
@@ -679,4 +707,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { buildRelease, runReleaseSecurityGate, parseArgs };
+module.exports = { SOURCE_FILES, buildRelease, runReleaseSecurityGate, parseArgs, scanContent, productionPackages, packageOwner, excludedDependency, forbiddenPath };
