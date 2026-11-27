@@ -12,7 +12,8 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { parseEnv } = require('node:util');
 
 const APP_NAME = 'ai-podcast-generator';
-const DEFAULT_PORT = 3000;
+const DEFAULT_PORT = 3456;
+const DEFAULT_PORT_FALLBACK_MAX = 3475;
 const DEFAULT_PROJECT_DIR = path.resolve(__dirname, '..');
 const PID_FILE = 'server.pid';
 const START_TIMEOUT_MS = 8000;
@@ -145,7 +146,7 @@ async function findAvailablePort(host = '127.0.0.1', port = DEFAULT_PORT, explic
     if (available === null) throw new Error(`指定端口 ${port} 已被其他服务占用，请选择其他端口`);
     return available;
   }
-  for (let candidate = port; candidate <= 3020; candidate++) {
+  for (let candidate = port; candidate <= DEFAULT_PORT_FALLBACK_MAX; candidate++) {
     const available = await tryPort(host, candidate);
     if (available !== null) return available;
   }
@@ -502,7 +503,7 @@ async function startPortable(options = {}) {
         const ready = await awaitListening(server);
         if (ready?.error === 'EADDRINUSE' && candidate !== 0) {
           if (config.explicitPort) throw new Error(`指定端口 ${candidate} 已被其他服务占用，请选择其他端口`);
-          candidate = candidate < 3020 ? await findAvailablePort(config.host, candidate + 1) : 0;
+          candidate = candidate < DEFAULT_PORT_FALLBACK_MAX ? await findAvailablePort(config.host, candidate + 1) : 0;
           continue;
         }
         const port = ready?.port;
@@ -608,6 +609,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  DEFAULT_PORT, DEFAULT_PORT_FALLBACK_MAX,
   supportsBundledCa, probeHealth, findAvailablePort, resolveBrowserCommand, getLanAddresses,
   readPidRecord, isExpectedServerProcess, startPortable, stopPortable, statusPortable, parseArgs,
 };

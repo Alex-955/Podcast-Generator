@@ -34,18 +34,35 @@
     }
   }
 
-  function findSentenceIndex(sentences, currentTime) {
+  function findSentenceIndex(sentences, currentTime, lastIndex = -1) {
     if (!Array.isArray(sentences) || !sentences.length) return -1;
-    let candidate = -1;
-    for (let i = 0; i < sentences.length; i += 1) {
-      const s = sentences[i];
-      if (currentTime >= s.startTime && currentTime < s.endTime) {
-        return i;
+    const len = sentences.length;
+    if (lastIndex >= 0 && lastIndex < len) {
+      const cur = sentences[lastIndex];
+      const next = lastIndex + 1 < len ? sentences[lastIndex + 1] : null;
+      if (currentTime >= cur.startTime && (!next || currentTime < next.startTime)) {
+        return lastIndex;
       }
+      if (next && currentTime >= next.startTime) {
+        const afterNext = lastIndex + 2 < len ? sentences[lastIndex + 2] : null;
+        if (!afterNext || currentTime < afterNext.startTime) {
+          return lastIndex + 1;
+        }
+      }
+    }
+    if (currentTime < sentences[0].startTime) return -1;
+    let lo = 0;
+    let hi = len - 1;
+    let candidate = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const s = sentences[mid];
       if (currentTime >= s.startTime) {
-        candidate = i;
+        if (currentTime < s.endTime) return mid;
+        candidate = mid;
+        lo = mid + 1;
       } else {
-        break;
+        hi = mid - 1;
       }
     }
     return candidate;
@@ -259,6 +276,10 @@
     let introTimer = null;
     let introStartTimer = null;
     let outroTimer = null;
+    let fadeOutTimer = null;
+    let fadingOutSource = null;
+    let analyzeAbortController = null;
+    let analyzingPodcastId = null;
     let playToken = 0;
 
     function setPhase(nextPhase) {
@@ -269,6 +290,27 @@
         isActive: phase === 'intro' || phase === 'playing' || phase === 'outro',
         bgmMode,
       });
+    }
+
+    function stopFadingOutSource() {
+      if (fadeOutTimer) {
+        window.clearTimeout(fadeOutTimer);
+        fadeOutTimer = null;
+      }
+      if (fadingOutSource) {
+        const src = fadingOutSource;
+        fadingOutSource = null;
+        try {
+          src.stop();
+        } catch {
+          // Already stopped
+        }
+        try {
+          src.disconnect();
+        } catch {
+          // Ignore
+        }
+      }
     }
 
     function clearTimers() {
@@ -284,6 +326,15 @@
         window.clearTimeout(outroTimer);
         outroTimer = null;
       }
+      stopFadingOutSource();
+    }
+
+    function cancelPendingAnalysis() {
+      if (analyzeAbortController) {
+        analyzeAbortController.abort();
+        analyzeAbortController = null;
+      }
+      analyzingPodcastId = null;
     }
 
     async function ensureContext() {
@@ -356,6 +407,7 @@
     }
 
     function stopBgmImmediate() {
+      stopFadingOutSource();
       if (bgmSource) {
         try {
           bgmSource.stop();
@@ -372,6 +424,7 @@
     }
 
     function fadeOutBgm(durationSec = 0.25) {
+      stopFadingOutSource();
       if (!audioCtx || !bgmGain || !bgmSource) {
         stopBgmImmediate();
         return;
@@ -379,6 +432,7 @@
       const now = audioCtx.currentTime;
       const sourceToStop = bgmSource;
       bgmSource = null;
+      fadingOutSource = sourceToStop;
       try {
         bgmGain.gain.cancelScheduledValues(now);
         bgmGain.gain.setValueAtTime(Math.max(0.0001, bgmGain.gain.value), now);
@@ -386,7 +440,9 @@
       } catch {
         // Ignore ramp failure
       }
-      window.setTimeout(() => {
+      fadeOutTimer = window.setTimeout(() => {
+        fadeOutTimer = null;
+        if (fadingOutSource === sourceToStop) fadingOutSource = null;
         try {
           sourceToStop.stop();
           sourceToStop.disconnect();
@@ -429,16 +485,30 @@
         }
         return;
       }
+      if (analyzingPodcastId === podcast.id) return;
+
+      cancelPendingAnalysis();
+      const controller = new AbortController();
+      analyzeAbortController = controller;
+      analyzingPodcastId = podcast.id;
 
       const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
       const decoder = audioCtx || (OfflineCtx ? new OfflineCtx(1, 1, 24000) : null);
-      if (!decoder) return;
+      if (!decoder) {
+        if (analyzeAbortController === controller) {
+          analyzeAbortController = null;
+          analyzingPodcastId = null;
+        }
+        return;
+      }
 
       try {
-        const res = await fetch(podcast.fullAudioUrl);
-        if (!res.ok) return;
+        const res = await fetch(podcast.fullAudioUrl, { signal: controller.signal });
+        if (!res.ok || controller.signal.aborted || currentPodcast?.id !== podcast.id) return;
         const arrayBuffer = await res.arrayBuffer();
+        if (controller.signal.aborted || currentPodcast?.id !== podcast.id) return;
         const decoded = await decoder.decodeAudioData(arrayBuffer);
+        if (controller.signal.aborted || currentPodcast?.id !== podcast.id) return;
         const gains = computeSentenceGains(decoded, podcast.sentences);
         if (!gains) return;
 
@@ -453,12 +523,18 @@
         }
       } catch {
         // Non-fatal: fallback to flat 1.0 vocal gain
+      } finally {
+        if (analyzeAbortController === controller) {
+          analyzeAbortController = null;
+          analyzingPodcastId = null;
+        }
       }
     }
 
     function loadPodcast(podcast) {
       playToken += 1;
       clearTimers();
+      cancelPendingAnalysis();
       stopBgmImmediate();
       setPhase('idle');
 
@@ -469,15 +545,11 @@
       if (audioCtx && sentenceGain) {
         sentenceGain.gain.setValueAtTime(1.0, audioCtx.currentTime);
       }
-
-      if (podcast && !currentSentenceGains) {
-        analyzePodcast(podcast);
-      }
     }
 
     function syncTime(currentTime) {
       if (!audioCtx || !sentenceGain || !currentPodcast?.sentences?.length) return;
-      const idx = findSentenceIndex(currentPodcast.sentences, currentTime);
+      const idx = findSentenceIndex(currentPodcast.sentences, currentTime, currentSentenceIdx);
       if (idx === -1) return;
       if (idx === currentSentenceIdx && currentSentenceGains) return;
       currentSentenceIdx = idx;
@@ -570,6 +642,9 @@
     function handleAudioPlay() {
       clearTimers();
       setPhase('playing');
+      if (currentPodcast && !currentSentenceGains) {
+        analyzePodcast(currentPodcast);
+      }
       syncTime(audioEl?.currentTime || 0);
       if (bgmMode !== 'off' && !bgmSource) {
         const token = playToken;
@@ -659,6 +734,34 @@
       return phase;
     }
 
+    function dispose() {
+      playToken += 1;
+      clearTimers();
+      cancelPendingAnalysis();
+      stopBgmImmediate();
+      bgmBuffers.clear();
+      bgmPromises.clear();
+      gainCache.clear();
+      currentPodcast = null;
+      currentSentenceGains = null;
+      currentSentenceIdx = -1;
+      phase = 'idle';
+      if (audioCtx) {
+        const ctxToClose = audioCtx;
+        audioCtx = null;
+        mediaSource = null;
+        sentenceGain = null;
+        vocalCompressor = null;
+        vocalMakeup = null;
+        bgmGain = null;
+        try {
+          ctxToClose.close().catch(() => {});
+        } catch {
+          // Ignore close errors on unload
+        }
+      }
+    }
+
     return {
       BGM_MODES,
       getBgmMode,
@@ -674,6 +777,7 @@
       handleAudioPlay,
       handleAudioPause,
       handleAudioEnded,
+      dispose,
     };
   }
 

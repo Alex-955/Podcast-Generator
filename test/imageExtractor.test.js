@@ -6,7 +6,7 @@ const path = require('node:path');
 const { getEventListeners } = require('node:events');
 const { Readable } = require('node:stream');
 const { extractTextFromImages } = require('../src/services/imageExtractor');
-const { httpStatusError, upstreamError } = require('../src/services/providerHttp');
+const { httpStatusError, upstreamError, withProviderResponse } = require('../src/services/providerHttp');
 const { DEFAULT_VOICES, synthesizeDialogueScript, synthesizeSentence } = require('../src/services/ttsService');
 const { buildCacheKey, createTtsCache } = require('../src/services/ttsCache');
 const { httpTtsFixture } = require('./helpers/httpTtsFixture');
@@ -90,6 +90,37 @@ test('图片校验拒绝无效数量、类型、编码、单图和总大小', as
   }
   assert.equal(llmRequest.mock.callCount(), 0);
   assert.equal((await extractTextFromImages({ ...payload, images: [atLimit] }, { llmRequest })).imageCount, 1);
+});
+
+test('识图传输拿到完整图片，等待响应时已释放传输对象的请求体', async t => {
+  configure(t);
+  const sent = Promise.withResolvers();
+  const received = Promise.withResolvers();
+  const input = Object.freeze({ ...payload, images: Object.freeze([...images]) });
+  const extraction = extractTextFromImages(input, {
+    llmRequest(_url, outbound) {
+      const body = JSON.parse(outbound.body);
+      assert.deepEqual(body.messages[1].content.slice(0, -1).map(item => item.image_url.url), images);
+      sent.resolve(outbound);
+      return received.promise;
+    },
+  });
+  const outbound = await Promise.race([sent.promise, extraction]);
+  assert.equal(outbound.body, null);
+  assert.deepEqual(input.images, images);
+  received.resolve(response(completion('转录成功')));
+  assert.equal((await extraction).imageCount, 2);
+
+  const request = Object.freeze({ method: 'POST', body: 'reusable body' });
+  for (let i = 0; i < 2; i++) {
+    await withProviderResponse('https://fixture.example', request, {
+      timeoutMs: 1000,
+      llmRequest(_url, { body }) {
+        assert.equal(body, request.body);
+        return response('fixture');
+      },
+    }, () => assert.equal(request.body, 'reusable body'));
+  }
 });
 
 test('视觉响应按正文上限截断并拒绝空正文、超限和无效响应', async t => {

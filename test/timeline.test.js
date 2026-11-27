@@ -130,8 +130,8 @@ test('单独调用拼接器时拒绝尾帧被截断的片段，已有成品保�
   assert.deepStrictEqual(fs.readFileSync(output), original);
 });
 
-test('多段带 ID3v2 头、ID3v1 尾的音频拼接后可逐帧解析，字幕与成品时长一致', t => {
-  const counts = [10, 15, 20];
+test('多段带 ID3v2 头、ID3v1 尾的 CBR 音频可跨缓冲区拼接，字幕与成品时长一致', t => {
+  const counts = [510, 15, 20];
   const { entries, dir } = setupEntries(t, counts);
   // 4096 字节元数据体超过旧时间轴从原始文件扫描首帧的范围。
   const header = Buffer.concat([Buffer.from([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 32, 0]), Buffer.alloc(4096)]);
@@ -143,28 +143,40 @@ test('多段带 ID3v2 头、ID3v1 尾的音频拼接后可逐帧解析，字幕�
   const file = path.join(dir, 'full_podcast.mp3');
   concatenateAudioFiles(entries.map(entry => entry.filePath), file);
   const combined = fs.readFileSync(file);
-  const expectedFrames = 10 + 15 + 20 + 2 * 18;
+  const expectedFrames = 510 + 15 + 20 + 2 * 18;
   assert.strictEqual(isValidMp3(combined), true);
   assert.strictEqual(analyzeMp3(combined).frameCount, expectedFrames);
-  assert.strictEqual(combined.length, expectedFrames * FRAME_SIZE_24K);
+  assert.deepEqual(combined, makeMp3(expectedFrames));
   approx(timeline.totalDuration, analyzeMp3(combined).durationSeconds);
 });
 
-test('同采样率的不同码率片段按实际帧数合并，与时间轴一致', t => {
+test('同采样率的不同码率片段保留逐字节的 Xing Seek Table，与时间轴一致', t => {
   const { dir, entries } = setupEntries(t, [5]);
   entries.push(writeEntry(dir, 1, 7, { header: Buffer.from([0xff, 0xf3, 0x84, 0xc0]), frameSize: 192 }));
   const timeline = buildSentenceTimeline(entries);
   const file = path.join(dir, 'full_podcast.mp3');
-  concatenateAudioFiles(entries.map(e => e.filePath), file);
+  const merged = concatenateAudioFiles(entries.map(e => e.filePath), file);
   const bytes = fs.readFileSync(file);
   const analysis = analyzeMp3(bytes);
   assert.equal(analysis.ok, true);
   assert.equal(bytes.toString('ascii', 13, 17), 'Xing');
   assert.equal(bytes.readUInt32BE(21), analysis.frameCount);
   assert.equal(bytes.readUInt32BE(25), bytes.length);
-  const toc = [...bytes.subarray(29, 129)];
-  assert.deepEqual(toc, [...toc].sort((a, b) => a - b));
-  assert.ok(toc.at(-1) > 0);
+  const tagBytes = 480;
+  const frameSizes = [...Array(5 + 18).fill(144), ...Array(7).fill(192)];
+  const expectedTag = Buffer.alloc(tagBytes);
+  Buffer.from([0xff, 0xf3, 0xe4, 0xc0]).copy(expectedTag);
+  expectedTag.write('Xing', 13);
+  expectedTag.writeUInt32BE(7, 17);
+  expectedTag.writeUInt32BE(frameSizes.length, 21);
+  expectedTag.writeUInt32BE(bytes.length, 25);
+  for (let i = 1; i < 100; i++) {
+    const offset = frameSizes.slice(0, Math.floor(frameSizes.length * i / 100)).reduce((sum, length) => sum + length, tagBytes);
+    expectedTag[29 + i] = Math.floor(256 * offset / bytes.length);
+  }
+  assert.equal(merged.fileSize, bytes.length);
+  assert.deepEqual(bytes.subarray(0, tagBytes), expectedTag);
+  assert.deepEqual(bytes.subarray(tagBytes), Buffer.concat([makeMp3(23), fs.readFileSync(entries[1].filePath)]));
   assert.equal(analysis.frameCount, 12 + timeline.sentenceGapFrames);
   approx(analysis.durationSeconds, timeline.totalDuration);
 });
@@ -188,4 +200,50 @@ test('Xing、Info 和 VBRI 单段统计不计入字幕与完整节目时长', t 
   const analysis = analyzeMp3(bytes);
   assert.equal(analysis.frameCount, 26 + 2 * timeline.sentenceGapFrames);
   approx(timeline.totalDuration, analysis.durationSeconds);
+});
+
+test('拼接器对缺失、无效或编码不兼容的片段抛出原有错误并且不创建产物', t => {
+  const { dir, entries } = setupEntries(t, [2]);
+  const missing = path.join(dir, 'missing.mp3');
+  const bad = path.join(dir, 'invalid.mp3');
+  const incompatible = writeEntry(dir, 1, 2, { header: HEADER_48K, frameSize: FRAME_SIZE_48K });
+  fs.writeFileSync(bad, '无效片段');
+  const out = path.join(dir, 'full.mp3');
+  const before = fs.readdirSync(dir);
+  for (const [file, message] of [
+    [missing, '音频片段缺失，拒绝拼接：missing.mp3'],
+    [bad, '音频片段不是有效 MP3，拒绝拼接：invalid.mp3'],
+    [incompatible.filePath, '音频片段编码格式与其他片段不一致，拒绝拼接：sentence_001.mp3'],
+  ]) {
+    assert.throws(() => concatenateAudioFiles([entries[0].filePath, file], out), { message });
+    assert.deepEqual(fs.readdirSync(dir), before);
+  }
+});
+
+test('拼接器循环处理短写，写失败后清理临时文件并保留已有成品', t => {
+  const { dir, entries } = setupEntries(t, [5, 7]);
+  const out = path.join(dir, 'full.mp3');
+  const files = entries.map(entry => entry.filePath);
+  const write = fs.writeSync;
+  const shortWrite = t.mock.method(fs, 'writeSync', (fd, buffer, offset, length) =>
+    write(fd, buffer, offset, Math.min(length, 200)));
+  concatenateAudioFiles(files, out);
+  shortWrite.mock.restore();
+  const complete = fs.readFileSync(out);
+  assert.deepEqual(complete, makeMp3(30));
+
+  const before = fs.readdirSync(dir);
+  let calls = 0;
+  const error = new Error('模拟音频写失败');
+  const failedWrite = t.mock.method(fs, 'writeSync', (...args) => {
+    if (++calls === 2) throw error;
+    return write(...args);
+  });
+  try {
+    assert.throws(() => concatenateAudioFiles(files, out), error);
+  } finally {
+    failedWrite.mock.restore();
+  }
+  assert.deepEqual(fs.readdirSync(dir), before);
+  assert.deepEqual(fs.readFileSync(out), complete);
 });

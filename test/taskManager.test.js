@@ -1371,3 +1371,80 @@ test('豆包已知音色版本错配在创建与续跑时同步拒绝', async t 
     assert.throws(() => manager.resumeTask(id, { ...payload, tts }), { statusCode: 400 });
   }
 });
+
+test('关闭中止当前合成，落盘续跑状态，并在重启时沿用已完成分段', { timeout: 10000 }, async t => {
+  const secondStarted = Promise.withResolvers();
+  const calls = [];
+  let hold = true, interruptedSignal;
+  const ttsProvider = {
+    id: 'offline', model: 'test', defaultVoices: DEFAULT_VOICES,
+    synthesizeToFile({ text, signal, outputPath }) {
+      calls.push(text);
+      if (hold && text === dialogue[1].text) {
+        interruptedSignal = signal;
+        secondStarted.resolve();
+        return new Promise((_, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      }
+      const audio = makeMp3(5);
+      fs.writeFileSync(outputPath, audio);
+      return { bytes: audio.length, duration: 0.12 };
+    },
+  };
+  const { root, config, manager } = setup(t, { ttsProvider });
+  const { id } = manager.createTask(payload);
+  await secondStarted.promise;
+  const work = path.join(config.podcastsDir, id);
+  const firstSegment = path.join(work, 'sentence_000.mp3');
+  const audio = fs.readFileSync(firstSegment);
+  const closing = manager.shutdown();
+  assert.equal(manager.shutdown(), closing);
+  const unavailable = { statusCode: 503, code: 'SERVER_SHUTTING_DOWN' };
+  assert.throws(() => manager.createTask(), unavailable);
+  assert.throws(() => manager.resumeTask(id), unavailable);
+  assert.equal(interruptedSignal.aborted, true);
+  await closing;
+
+  const record = JSON.parse(fs.readFileSync(path.join(config.tasksDir, id + '.json')));
+  assert.equal(record.status, 'failed');
+  assert.deepEqual(record.error, {
+    stage: 'tts', retryable: true, failedSegmentIndex: null,
+    message: '服务已关闭，上次生成被中断，可点击「从断点继续生成」恢复',
+  });
+  assert.equal(record.script.dialogue.length, 3);
+  noLeaks(record, root);
+  assert.deepEqual(fs.readFileSync(firstSegment), audio);
+
+  hold = false;
+  const restarted = createTaskManager(config);
+  restarted.resumeTask(id);
+  await waitFor(() => restarted.getTask(id), task => task.status === 'completed');
+  assert.deepEqual(calls, [dialogue[0].text, dialogue[1].text, dialogue[1].text, dialogue[2].text]);
+});
+
+test('关闭等待可超时，明确取消的状态仍保留', { timeout: 10000 }, async t => {
+  const entered = Promise.withResolvers();
+  const finish = Promise.withResolvers();
+  const { manager } = setup(t, {
+    scriptGenerator() {
+      entered.resolve();
+      return finish.promise;
+    },
+  });
+  const { id } = manager.createTask(payload);
+  await entered.promise;
+  assert.equal(manager.cancelTask(id).status, 'cancelled');
+  const watchdog = new AbortController();
+  try {
+    await Promise.race([
+      manager.shutdown({ timeoutMs: 30 }),
+      delay(1000, undefined, { signal: watchdog.signal }).then(() => assert.fail('关闭未按限时返回')),
+    ]);
+    assert.equal(manager.getTask(id).status, 'cancelled');
+    assert.equal(manager.getTask(id).error, null);
+  } finally {
+    watchdog.abort();
+    finish.resolve(script);
+  }
+});

@@ -421,6 +421,22 @@ test('离线复制依赖时跳过缓存，只允许指向依赖目录内的符�
   assert.equal(fs.existsSync(path.join(stageDir, 'node_modules/pkg/index.js')), true);
 });
 
+test('复制依赖跳过各层 .DS_Store，门禁仍拦截暂存目录中的同名文件', t => {
+  const root = scratch(t);
+  const sourceDir = sourceFixture(root);
+  const files = ['node_modules/.DS_Store', 'node_modules/pkg/.dS_sToRe'];
+  for (const name of files) write(sourceDir, name, 'synthetic Finder metadata');
+  write(sourceDir, 'node_modules/pkg/index.js', 'module.exports = {};');
+  const { stageDir } = buildRelease({ sourceDir, outDir: path.join(root, 'out'), format: 'dir', withDeps: true });
+  for (const file of files) {
+    assert.equal(fs.existsSync(path.join(sourceDir, file)), true);
+    assert.equal(fs.existsSync(path.join(stageDir, file)), false);
+    write(stageDir, file, 'synthetic Finder metadata');
+  }
+  assert.throws(() => runReleaseSecurityGate(stageDir),
+    error => files.every(file => error.issues.includes(file + ' 属于禁运路径')));
+});
+
 test('真实便携 ZIP 和 tar.gz 包含白名单目录、匹配 SHA-256 并带可启动依赖', async t => {
   const root = scratch(t);
   const outDir = path.join(root, 'archives');

@@ -86,9 +86,9 @@ async function request(route, status, body, method = body === undefined ? 'GET' 
   return json;
 }
 
-test('监听端口在未设置或空白时取 3000，保留显式的 0 和指定端口', () => {
+test('监听端口在未设置或空白时取 3456，保留显式的 0 和指定端口', () => {
   const { parsePort } = require('../server');
-  for (const value of [undefined, '', '   ']) assert.equal(parsePort(value), 3000);
+  for (const value of [undefined, '', '   ']) assert.equal(parsePort(value), 3456);
   assert.equal(parsePort('0'), 0);
   assert.equal(parsePort('4000'), 4000);
   for (const value of ['-1', '3.5', 'abc', '65536']) assert.throws(() => parsePort(value), RangeError);

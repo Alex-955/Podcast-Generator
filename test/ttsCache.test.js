@@ -313,3 +313,89 @@ test('官方预置音色共享缓存，自定义服务只使用实际选中的�
   assert.notEqual(hash(pair), hash({ ...pair, appId: 'app-B' }));
   assert.notEqual(hash(pair), hash({ ...pair, accessKey: 'access-B' }));
 });
+
+function cacheFixture(t, options) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tts-cache-prune-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const cacheDir = path.join(root, 'cache');
+  fs.mkdirSync(cacheDir);
+  const audio = makeMp3(2);
+  const source = path.join(root, 'source.mp3');
+  fs.writeFileSync(source, audio);
+  let time = Date.UTC(2026, 0, 1);
+  const cache = createTtsCache(cacheDir, { ...options(audio), now: () => time });
+  return {
+    cacheDir, cache, source, audio, root,
+    keys: ['a', 'b', 'c'].map(value => value.repeat(64)),
+    files: () => fs.readdirSync(cacheDir).sort(),
+    advance: ms => { time += ms; },
+  };
+}
+
+test('缓存按字节与文件数淘汰最旧条目，命中保活，重写原键不增加数量', t => {
+  for (const limit of ['maxBytes', 'maxFiles']) {
+    const { cache, source, root, keys: [a, b, c], files, advance } = cacheFixture(t,
+      audio => limit === 'maxBytes' ? { maxBytes: audio.length * 2 } : { maxFiles: 2 });
+    cache.put(a, source);
+    advance(1000);
+    cache.put(b, source);
+    advance(1000);
+    assert.equal(cache.get(a, path.join(root, 'hit.mp3')).hit, true);
+    advance(1000);
+    cache.put(c, source);
+    assert.deepEqual(files(), [a + '.mp3', c + '.mp3']);
+    cache.put(c, source);
+    assert.deepEqual(files(), [a + '.mp3', c + '.mp3']);
+  }
+});
+
+test('缓存过期、同时间按文件名淘汰，并保护当前写入或显式保护的键', t => {
+  const { cache, source, keys: [a, b, c], root, files, advance } = cacheFixture(t,
+    () => ({ maxFiles: 2, maxAgeMs: 1000 }));
+  cache.put(b, source);
+  cache.put(a, source);
+  cache.put(c, source);
+  assert.deepEqual(files(), [b + '.mp3', c + '.mp3']);
+  advance(1001);
+  assert.equal(cache.get(b, path.join(root, 'expired.mp3')).hit, false);
+  cache.prune({ protectKey: c });
+  assert.deepEqual(files(), [c + '.mp3']);
+  cache.put(a, source);
+  assert.deepEqual(files(), [a + '.mp3']);
+  advance(1001);
+  cache.put(b, source);
+  assert.deepEqual(files(), [b + '.mp3']);
+
+  const tiny = cacheFixture(t, () => ({ maxBytes: 1 }));
+  tiny.cache.put(a, tiny.source);
+  assert.deepEqual(tiny.files(), [a + '.mp3']);
+  tiny.cache.prune();
+  assert.deepEqual(tiny.files(), []);
+});
+
+test('缓存清理只处理顶层普通缓存文件，跳过目录、链接和非缓存文件', t => {
+  const { cache, cacheDir, source, audio, keys: [a, b, c], root, files } = cacheFixture(t, () => ({ maxFiles: 0 }));
+  const outside = path.join(root, 'outside');
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, c + '.mp3'), audio);
+  const link = cache.getPath(a);
+  fs.symlinkSync(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+  if (process.platform !== 'win32') {
+    const fileLink = cache.getPath(c);
+    fs.symlinkSync(source, fileLink);
+    assert.equal(cache.get(c, path.join(root, 'link-hit.mp3')).hit, false);
+  }
+  fs.mkdirSync(cache.getPath(b));
+  fs.writeFileSync(path.join(cache.getPath(b), 'child.mp3'), audio);
+  fs.writeFileSync(path.join(cacheDir, 'notes.mp3'), '保留');
+  const before = files();
+  cache.prune();
+  assert.deepEqual(files(), before);
+  assert.deepEqual(fs.readFileSync(path.join(outside, c + '.mp3')), audio);
+
+  const linkedCache = createTtsCache(link, { maxFiles: 0 });
+  linkedCache.prune();
+  assert.equal(linkedCache.get(c, path.join(root, 'root-link-hit.mp3')).hit, false);
+  assert.throws(() => linkedCache.put(c, source), /缓存目录无效/);
+  assert.deepEqual(fs.readFileSync(path.join(outside, c + '.mp3')), audio);
+});

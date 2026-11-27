@@ -56,6 +56,7 @@ async function requestProvider(endpoint, { method, headers, body, signal, allowP
     }, resolve);
     req.on('error', reject);
     req.end(body);
+    body = null;
   });
 }
 
@@ -139,7 +140,16 @@ async function withProviderResponse(endpoint, request, {
     signal?.throwIfAborted();
     signal?.addEventListener('abort', cancel, { once: true });
     timer = setTimeout(() => controller.abort(), timeoutMs);
-    response = await llmRequest(endpoint, { ...request, signal: controller.signal, lookup });
+    const outbound = { ...request, signal: controller.signal, lookup };
+    request = null;
+    let pending;
+    try {
+      // The transport takes ownership of the body when invoked, before waiting for headers.
+      pending = llmRequest(endpoint, outbound);
+    } finally {
+      outbound.body = null;
+    }
+    response = await pending;
     controller.signal.throwIfAborted();
     const result = await readResponse(response);
     controller.signal.throwIfAborted();

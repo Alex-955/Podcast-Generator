@@ -150,6 +150,7 @@ function isCapabilityRejection(value) {
 
 async function extractTextFromImages(payload = {}, options = {}) {
   const images = validateImages(payload.images);
+  const imageCount = images.length;
   const { apiKey, baseURL, model, sensitive, allowPrivateEndpoint } = resolveVisionCredentials(payload);
   return withProviderResponse(baseURL + '/chat/completions', {
     method: 'POST',
@@ -184,7 +185,7 @@ async function extractTextFromImages(payload = {}, options = {}) {
     const truncated = rawOverflow || safeContent.length > MAX_CONTENT_LENGTH;
     const result = safeContent.slice(0, MAX_CONTENT_LENGTH);
     return { title: redactProviderDetail(title, sensitive), content: result, length: result.length, truncated,
-      imageCount: images.length, hasIssues, issueHint };
+      imageCount, hasIssues, issueHint };
   });
 }
 

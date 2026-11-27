@@ -146,13 +146,13 @@ function copySourceTree(from, to, relative = 'src') {
 
 function copyDependencies(sourceDir, stageDir) {
   const source = fs.realpathSync(plainDirectory(sourceDir, 'node_modules'));
-  const skipDirectory = name => name.toLowerCase() === '.bin' || name.toLowerCase() === '.cache';
+  const skipEntry = name => ['.bin', '.cache', '.ds_store'].includes(name.toLowerCase());
   function copyEntry(from, to, relative, ancestors) {
     const real = fs.realpathSync(from);
     if (!isWithin(source, real)) {
       throw new Error('依赖符号链接指向 node_modules 之外：' + relative);
     }
-    if (path.relative(source, real).split(path.sep).some(skipDirectory)) return;
+    if (path.relative(source, real).split(path.sep).some(skipEntry)) return;
     const stat = fs.statSync(real);
     if (stat.isFile()) {
       if (!DEPENDENCY_DOC.test(path.basename(real))) copyFile(real, to);
@@ -161,7 +161,7 @@ function copyDependencies(sourceDir, stageDir) {
       fs.mkdirSync(to, { recursive: true });
       const parents = new Set([...ancestors, real]);
       for (const entry of fs.readdirSync(real, { withFileTypes: true })) {
-        if (skipDirectory(entry.name) || (!entry.isDirectory() && DEPENDENCY_DOC.test(entry.name))) continue;
+        if (skipEntry(entry.name) || (!entry.isDirectory() && DEPENDENCY_DOC.test(entry.name))) continue;
         copyEntry(path.join(real, entry.name), path.join(to, entry.name), relative + '/' + entry.name, parents);
       }
     } else {
