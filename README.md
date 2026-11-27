@@ -16,11 +16,21 @@
 
 <a id="first-launch"></a>
 
-**macOS 首次打开**　打开 DMG，把「拾声集」拖入「应用程序」。若 Gatekeeper 拦截，请先确认文件来自官方 Release，并与同页的 `SHA256SUMS.txt` 核对。尝试打开应用后，到「系统设置 → 隐私与安全性 → 仍要打开」。也可在核对来源后，单独对已安装的应用执行 `xattr -cr "/Applications/拾声集.app"`。
+> [!NOTE]
+> **开源未签名安装包首次打开指南**
+> 桌面安装包由 GitHub Actions 自动构建，暂未购买商业开发者代码签名证书。该提示既可能是未签名触发的系统拦截，也可能表示文件损坏或被篡改；**在执行任何放行操作前**，请确认安装包来自[官方 Releases](https://github.com/Alex-955/Podcast-Generator/releases)，并核对其哈希值与同版本 `SHA256SUMS.txt` 一致。
 
-**Windows 首次安装**　运行安装程序，选择安装目录。若 SmartScreen 显示保护提示，核对官方来源及校验和后，点击「更多信息 → 仍要运行」。
+**macOS 首次打开（如提示「“拾声集”已损坏，无法打开」或「无法验证开发者」）**
+1. 确认 DMG 来自官方 Release 且 `SHA256SUMS.txt` 校验一致后，打开 DMG 将「拾声集」拖入「应用程序」（`Applications`）；
+2. 若首次双击被拦截，请先取消提示，打开系统自带的 **「终端（Terminal）」**，复制执行下面命令以递归清除该应用包的扩展属性（含系统隔离标记）：
 
-桌面安装包未使用开发者证书签名。[官方 Releases](https://github.com/Alex-955/Podcast-Generator/releases) 同时提供便携 ZIP、tar.gz 与 SHA-256 校验文件。
+   ```bash
+   xattr -cr "/Applications/拾声集.app"
+   ```
+
+3. 再次双击「拾声集」即可正常打开（若提示「无法验证开发者」，也可在核验通过后到「系统设置 → 隐私与安全性 → 仍要打开」放行）。
+
+**Windows 首次安装**　核对官方来源及 `SHA256SUMS.txt` 校验和后运行安装程序；若 SmartScreen 显示「Windows 已保护你的电脑」，且当前设备策略允许、界面提供放行入口时，点击 **「更多信息 → 仍要运行」** 即可。
 
 ![拾声集双人播客工作台](docs/images/studio-desktop.png)
 
