@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
+const { createHash } = require('node:crypto');
 const path = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
 const { createTaskManager } = require('../src/services/taskManager');
@@ -1641,7 +1642,10 @@ test('元数据写入和回滚均失败时阻断访问，恢复后不会撤销�
   await waitFor(() => manager.getTask(a.id), task => task.status === 'failed');
   const transaction = path.join(target, '.tmp-publish-' + a.id);
   const info = JSON.parse(fs.readFileSync(path.join(transaction, 'prepared')));
-  assert.deepEqual(info, { taskId: a.id, previousVersion: null, targetVersion: info.targetVersion, dialogueCount: 1 });
+  const originals = Object.fromEntries(Object.entries(original)
+    .filter(([name]) => name === 'meta.json' || name.endsWith('.mp3'))
+    .map(([name, bytes]) => [name, createHash('sha256').update(bytes).digest('hex')]));
+  assert.deepEqual(info, { taskId: a.id, previousVersion: null, targetVersion: info.targetVersion, dialogueCount: 1, originals });
   assert.match(info.targetVersion, /^[a-f0-9]{32}$/);
   assert.equal(fs.existsSync(extra), false);
   for (const operation of [() => manager.resynthesizePodcast(id, edit), () => manager.getPodcast(id),

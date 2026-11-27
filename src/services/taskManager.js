@@ -465,8 +465,10 @@ function createTaskManager({
     };
   }
 
-  function assertIdle() {
-    if (active) throw httpError(409, '当前已有任务正在生成，请等待完成或先取消当前任务', 'TASK_ALREADY_RUNNING');
+  function assertIdle(targetPodcastId) {
+    if (!active) return;
+    if (targetPodcastId) reconcilePodcast(targetPodcastId);
+    throw httpError(409, '当前已有任务正在生成，请等待完成或先取消当前任务', 'TASK_ALREADY_RUNNING');
   }
 
   function assertAcceptingTasks() {
@@ -673,15 +675,16 @@ function createTaskManager({
 
   function resynthesizePodcast(podcastId, payload = {}) {
     assertAcceptingTasks();
-    assertIdle();
-    const previous = targetMetadata(podcastId);
-    const source = podcastDTO(podcastId, previous);
-    if (payload.baseVersion === undefined) {
+    checkId(podcastId);
+    if (payload?.baseVersion === undefined) {
       throw new InputError('缺少播客版本号，请刷新最新剧本后再微调');
     }
     if (payload.baseVersion !== null && !isSafeVersion(payload.baseVersion)) throw new InputError('无效的播客版本号');
-    assertPodcastVersion(source.audioVersion, payload.baseVersion);
     const dialogue = validateEditedDialogue(payload.dialogue);
+    const previous = targetMetadata(podcastId);
+    const source = podcastDTO(podcastId, previous);
+    assertPodcastVersion(source.audioVersion, payload.baseVersion);
+    assertIdle();
     const creds = {};
     const speech = resolveSpeech(payload, creds, previous);
     const sensitive = metadataSecrets(previous, [...storedSecrets, ...speech.secrets]);
@@ -717,7 +720,7 @@ function createTaskManager({
     const requestedStyle = payload.podcastStyle === undefined ? undefined : normalizePodcastStyle(payload.podcastStyle);
     const task = readTask(id);
     const drainingSameTask = active?.task.id === id && active.controller.signal.aborted;
-    if (!drainingSameTask) assertIdle();
+    if (!drainingSameTask) assertIdle(task.targetPodcastId);
     if (!['failed', 'cancelled'].includes(task.status)) throw httpError(409, '当前任务状态无法续跑');
     const podcastStyle = requestedStyle ?? task.podcastStyle;
     const styleChanged = podcastStyle !== task.podcastStyle;

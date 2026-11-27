@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { once } = require('node:events');
+const { createHash } = require('node:crypto');
 const { Readable } = require('node:stream');
 const { setTimeout: delay } = require('node:timers/promises');
 const { extractArticle } = require('../src/services/extractor');
@@ -917,34 +918,63 @@ test('微调接口只合成改写的一句，清空缓存后复用归档并保�
   await request('podcasts/..%2Fprivate/resynthesize', 400, { baseVersion: null, dialogue: lines });
 });
 
-test('单期缺失发布备份时服务可启动，健康播客仍可列出和播放', async t => {
+test('启动时隔离不完整或损坏的备份，其他任务运行期间仍返回准确的错误', async t => {
   const podcastsDir = path.join(root, 'recovery-podcasts');
   const dataDir = path.join(root, 'recovery-data');
-  const audio = makeMp3(2);
-  for (const id of ['broken', 'healthy']) {
-    const dir = path.join(podcastsDir, id);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ podcastTitle: id }));
-    fs.writeFileSync(path.join(dir, 'full_podcast.mp3'), audio);
-  }
-  const edit = { baseVersion: null, dialogue: [{ speaker: '阿泽', text: '离线微调' }] };
   const tasksDir = path.join(dataDir, 'tasks');
   fs.mkdirSync(tasksDir, { recursive: true });
-  fs.writeFileSync(path.join(tasksDir, 'edit.json'), JSON.stringify({
-    id: 'edit', targetPodcastId: 'broken', baseVersion: null, status: 'failed', stage: 'tts',
-    input: { mode: 'text' }, progress: {}, script: { dialogue: edit.dialogue },
-  }));
-  const transaction = path.join(podcastsDir, 'broken', '.tmp-publish-edit');
-  fs.mkdirSync(transaction);
-  fs.writeFileSync(path.join(transaction, 'prepared'), JSON.stringify({
-    taskId: 'edit', previousVersion: null, targetVersion: 'target', dialogueCount: 1,
-  }));
+  const audio = makeMp3(2);
+  const product = { 'meta.json': Buffer.from('{"podcastTitle":"现有成品"}'), 'full_podcast.mp3': audio, 'sentence_000.mp3': audio };
+  const backup = { 'meta.json': Buffer.from('{"podcastTitle":"备份"}'), 'full_podcast.mp3': makeMp3(3), 'sentence_000.mp3': makeMp3(1) };
+  const originals = Object.fromEntries(Object.entries(backup)
+    .map(([name, bytes]) => [name, createHash('sha256').update(bytes).digest('hex')]));
+  const edit = { baseVersion: null, dialogue: [{ speaker: '阿泽', text: '离线微调' }] };
+  const faults = {
+    'missing-dir': () => {},
+    'changed-audio': dir => fs.writeFileSync(path.join(dir, 'full_podcast.mp3'), makeMp3(4)),
+    'changed-meta': dir => fs.writeFileSync(path.join(dir, 'meta.json'), '{"podcastTitle":"篡改"}'),
+    'extra-segment': dir => fs.writeFileSync(path.join(dir, 'sentence_001.mp3'), audio),
+    'missing-segment': dir => fs.unlinkSync(path.join(dir, 'sentence_000.mp3')),
+    'legacy-meta': dir => fs.writeFileSync(path.join(dir, 'meta.json'), '{'),
+    'legacy-audio': dir => fs.writeFileSync(path.join(dir, 'full_podcast.mp3'), audio.subarray(0, -1)),
+    'legacy-segment': dir => fs.writeFileSync(path.join(dir, 'sentence_000.mp3'), 'invalid'),
+  };
+  for (const id of ['healthy', ...Object.keys(faults)]) {
+    const dir = path.join(podcastsDir, id);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [name, bytes] of Object.entries(product)) fs.writeFileSync(path.join(dir, name), bytes);
+    if (id === 'healthy') continue;
+    const taskId = 'edit-' + id;
+    fs.writeFileSync(path.join(tasksDir, taskId + '.json'), JSON.stringify({
+      id: taskId, targetPodcastId: id, baseVersion: null, status: 'failed', stage: 'tts',
+      input: { mode: 'text' }, progress: {}, script: { dialogue: edit.dialogue },
+    }));
+    const transaction = path.join(dir, '.tmp-publish-' + taskId);
+    fs.mkdirSync(transaction);
+    fs.writeFileSync(path.join(transaction, 'prepared'), JSON.stringify({
+      taskId, previousVersion: null, targetVersion: 'target', dialogueCount: 1,
+      originals: id.startsWith('legacy-') ? undefined : originals,
+    }));
+    if (id === 'missing-dir') continue;
+    const saved = path.join(transaction, 'originals');
+    fs.mkdirSync(saved);
+    for (const [name, bytes] of Object.entries(backup)) fs.writeFileSync(path.join(saved, name), bytes);
+    faults[id](saved);
+  }
 
   const warnings = t.mock.method(console, 'warn', () => {});
-  const local = await require('../server').startServer({ port: 0, publicDir, podcastsDir, dataDir });
-  t.after(() => local.close());
-  assert.equal(warnings.mock.callCount(), 1);
-  assert.ok(!JSON.stringify(warnings.mock.calls[0].arguments).includes(root));
+  const gate = Promise.withResolvers();
+  const local = await require('../server').startServer({
+    port: 0, publicDir, podcastsDir, dataDir,
+    ttsProvider: { id: 'edge', model: 'offline', async synthesizeToFile({ outputPath }) {
+      await gate.promise;
+      fs.writeFileSync(outputPath, audio);
+      return { bytes: audio.length, duration: 1 };
+    } },
+  });
+  t.after(() => { gate.resolve(); return local.close(); });
+  assert.equal(warnings.mock.callCount(), Object.keys(faults).length);
+  for (const call of warnings.mock.calls) assert.ok(!JSON.stringify(call.arguments).includes(root));
   const url = 'http://127.0.0.1:' + local.port;
   const list = await fetch(url + '/api/podcasts');
   assert.equal(list.status, 200);
@@ -955,17 +985,40 @@ test('单期缺失发布备份时服务可启动，健康播客仍可列出和�
   assert.equal(playback.status, 200);
   assert.deepEqual(Buffer.from(await playback.arrayBuffer()), audio);
 
-  for (const [route, options] of [
-    ['/api/podcasts/broken'], ['/podcasts/broken/full_podcast.mp3'],
-    ['/api/podcasts/broken/resynthesize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(edit) }],
-    ['/api/tasks/edit/resume', { method: 'POST' }],
-    ['/api/podcasts/broken', { method: 'DELETE' }],
-  ]) {
-    const res = await fetch(url + route, options);
-    assert.equal(res.status, 503, route);
-    assert.equal((await res.json()).code, 'PODCAST_RECOVERY_FAILED');
+  const post = body => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const healthyEdit = url + '/api/podcasts/healthy/resynthesize';
+  assert.equal((await fetch(healthyEdit, post(edit))).status, 202);
+  for (const invalid of [{ dialogue: edit.dialogue }, { ...edit, baseVersion: false }, { ...edit, dialogue: [] }]) {
+    assert.equal((await fetch(healthyEdit, post(invalid))).status, 400);
   }
-  assert.ok(fs.existsSync(path.join(transaction, 'prepared')));
+  assert.equal((await fetch(url + '/api/podcasts/absent/resynthesize', post(edit))).status, 404);
+  for (const [baseVersion, code] of [['older', 'PODCAST_VERSION_CONFLICT'], [null, 'TASK_ALREADY_RUNNING']]) {
+    const res = await fetch(healthyEdit, post({ ...edit, baseVersion }));
+    assert.equal(res.status, 409);
+    assert.equal((await res.json()).code, code);
+  }
+  for (const id of Object.keys(faults)) {
+    const taskId = 'edit-' + id;
+    for (const [route, options] of [
+      ['/api/podcasts/' + id], ['/podcasts/' + id + '/full_podcast.mp3'],
+      ['/api/podcasts/' + id + '/resynthesize', post(edit)], ['/api/tasks/' + taskId + '/resume', post({})],
+      ['/api/podcasts/' + id, { method: 'DELETE' }],
+    ]) {
+      const res = await fetch(url + route, options);
+      assert.equal(res.status, 503, route);
+      assert.equal((await res.json()).code, 'PODCAST_RECOVERY_FAILED');
+    }
+    const dir = path.join(podcastsDir, id);
+    assert.ok(fs.existsSync(path.join(dir, '.tmp-publish-' + taskId, 'prepared')));
+    for (const [name, bytes] of Object.entries(product)) assert.deepEqual(fs.readFileSync(path.join(dir, name)), bytes);
+  }
+
+  const legacy = path.join(podcastsDir, 'legacy-segment');
+  const transaction = path.join(legacy, '.tmp-publish-edit-legacy-segment');
+  fs.writeFileSync(path.join(transaction, 'originals', 'sentence_000.mp3'), backup['sentence_000.mp3']);
+  assert.equal((await fetch(url + '/api/podcasts/legacy-segment')).status, 200);
+  for (const [name, bytes] of Object.entries(backup)) assert.deepEqual(fs.readFileSync(path.join(legacy, name)), bytes);
+  assert.equal(fs.existsSync(transaction), false);
 });
 
 test('局域网微调及其续跑、取消都验证管理令牌', async t => {

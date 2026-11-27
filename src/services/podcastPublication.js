@@ -1,11 +1,43 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 const { atomicWrite } = require('./atomicWrite');
+const { isValidMp3 } = require('./mp3Utils');
 const { sentenceFileName } = require('./ttsService');
 const { MAX_DIALOGUE_LINES } = require('./validation');
 
 const transactionDir = (target, taskId) => path.join(target, '.tmp-publish-' + taskId);
 const segment = /^sentence_([0-9]{3})\.mp3$/;
+
+function backupDigest(bytes) {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+function recoveryFailed() {
+  return Object.assign(new Error('无法恢复中断的播客发布，请检查数据目录'), {
+    statusCode: 503, code: 'PODCAST_RECOVERY_FAILED',
+  });
+}
+
+function verifyOriginals(dir, digests) {
+  if (!fs.lstatSync(dir).isDirectory()) throw new Error('微调备份目录无效');
+  const names = fs.readdirSync(dir);
+  if (!names.includes('meta.json') || !names.includes('full_podcast.mp3')) throw new Error('微调备份不完整');
+  if (digests !== undefined && (!digests || typeof digests !== 'object' || Array.isArray(digests) ||
+      Object.keys(digests).length !== names.length)) throw new Error('微调备份清单无效');
+  for (const name of names) {
+    const file = path.join(dir, name);
+    if (!(name === 'meta.json' || name === 'full_podcast.mp3' || segment.test(name)) ||
+        !fs.lstatSync(file).isFile()) throw new Error('微调备份文件无效');
+    const bytes = fs.readFileSync(file);
+    if (digests !== undefined) {
+      if (digests[name] !== backupDigest(bytes)) throw new Error('微调备份校验失败');
+    } else if (name === 'meta.json') {
+      JSON.parse(bytes);
+    } else if (!isValidMp3(bytes)) throw new Error('微调备份音频无效');
+  }
+  return names;
+}
 
 function restoreFile(originals, transaction, target, name) {
   const temp = path.join(transaction, '.restore');
@@ -58,12 +90,10 @@ function reconcileTransaction(target, dir, taskId, resolveTaskStatus) {
   const current = readVersion(target);
   // Metadata is renamed last. Both the committed target and a newer publication win.
   if (isSafeVersion(current) && (current === info.targetVersion || current !== info.previousVersion)) return;
-  if (!Number.isSafeInteger(info.dialogueCount) || info.dialogueCount < 1 || info.dialogueCount > MAX_DIALOGUE_LINES ||
-      !fs.lstatSync(originals).isDirectory()) throw new Error('微调备份目录无效');
-  const names = fs.readdirSync(originals);
-  if (!names.includes('meta.json') || !names.includes('full_podcast.mp3') || names.some(name =>
-    !(name === 'meta.json' || name === 'full_podcast.mp3' || segment.test(name)) ||
-    !fs.lstatSync(path.join(originals, name)).isFile())) throw new Error('微调备份不完整');
+  if (!Number.isSafeInteger(info.dialogueCount) || info.dialogueCount < 1 || info.dialogueCount > MAX_DIALOGUE_LINES) {
+    throw new Error('微调事务句数无效');
+  }
+  const names = verifyOriginals(originals, info.originals);
   for (const name of names) restoreFile(originals, dir, target, name);
   for (let index = 0; index < info.dialogueCount; index++) {
     const name = sentenceFileName(index);
@@ -84,9 +114,7 @@ function reconcilePendingPublications(target, resolveTaskStatus) {
       fs.rmSync(dir, { recursive: true });
     }
   } catch {
-    throw Object.assign(new Error('无法恢复中断的播客发布，请检查数据目录'), {
-      statusCode: 503, code: 'PODCAST_RECOVERY_FAILED',
-    });
+    throw recoveryFailed();
   }
 }
 
@@ -100,7 +128,7 @@ function publishEditedPodcast(target, work, baseVersion, meta, taskId, finish, r
   const marker = path.join(transaction, 'prepared');
   const originals = path.join(transaction, 'originals');
   const replaced = [];
-  const existed = new Set();
+  const digests = {};
   let cleanup = true;
   try {
     fs.mkdirSync(originals);
@@ -120,19 +148,22 @@ function publishEditedPodcast(target, work, baseVersion, meta, taskId, finish, r
       const stat = fs.lstatSync(original, { throwIfNoEntry: false });
       if (!stat) continue;
       if (!stat.isFile()) throw new Error('播客音频目录包含无效文件');
-      fs.copyFileSync(original, path.join(originals, name), fs.constants.COPYFILE_FICLONE);
-      existed.add(name);
+      const backup = path.join(originals, name);
+      fs.copyFileSync(original, backup, fs.constants.COPYFILE_FICLONE);
+      digests[name] = backupDigest(fs.readFileSync(backup));
     }
     for (const name of fresh) {
       fs.copyFileSync(path.join(work, name), path.join(transaction, name), fs.constants.COPYFILE_FICLONE);
     }
-    atomicWrite(marker, JSON.stringify({ taskId, previousVersion, targetVersion: meta.audioVersion, dialogueCount: meta.sentences.length }));
+    atomicWrite(marker, JSON.stringify({
+      taskId, previousVersion, targetVersion: meta.audioVersion, dialogueCount: meta.sentences.length, originals: digests,
+    }));
     for (const name of fresh) {
       fs.renameSync(path.join(transaction, name), path.join(target, name));
       replaced.push(name);
     }
     for (const name of obsolete) {
-      if (existed.has(name)) {
+      if (Object.hasOwn(digests, name)) {
         fs.unlinkSync(path.join(target, name));
         replaced.push(name);
       }
@@ -142,8 +173,12 @@ function publishEditedPodcast(target, work, baseVersion, meta, taskId, finish, r
     finish();
   } catch (error) {
     cleanup = false;
+    if (replaced.length) {
+      try { verifyOriginals(originals, digests); }
+      catch { throw recoveryFailed(); }
+    }
     for (const name of replaced.reverse()) {
-      if (existed.has(name)) restoreFile(originals, transaction, target, name);
+      if (Object.hasOwn(digests, name)) restoreFile(originals, transaction, target, name);
       else fs.unlinkSync(path.join(target, name));
     }
     fs.rmSync(marker, { force: true });
