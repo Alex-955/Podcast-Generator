@@ -10,6 +10,7 @@ const {
   requireText,
   validateScriptRequest,
   validateDialogueList,
+  validateEditedDialogue,
   validateVoiceMapping,
   redactSecrets,
 } = require('../src/services/validation');
@@ -107,4 +108,18 @@ test('商业服务允许自定义音色且限定角色与字符；服务商凭�
 
 test('空串和纯空白不会破坏正文，带空格的凭据按实际值脱敏', () => {
   assert.equal(redactSecrets('连接失败：test-credential', ['', '   ', '\t', ' test-credential ']), '连接失败：***');
+});
+
+test('微调台词只接受有效的角色、文本和单行情绪，返回全新的公开字段', () => {
+  const line = { speaker: ' 小晓 ', text: ' 正文 ', emotion: ' 温和 ', index: 7, audioUrl: '/wrong' };
+  assert.deepStrictEqual(validateEditedDialogue([line]), [{ speaker: '小晓', text: '正文', emotion: '温和' }]);
+  for (const emotion of [null, undefined, '', '   ']) {
+    assert.deepStrictEqual(validateEditedDialogue([{ ...line, emotion }]), [{ speaker: '小晓', text: '正文' }]);
+  }
+  for (const lines of [null, [], Array(301).fill(line), Array(1), [null], [[]], [{}], ['text'],
+    [{ ...line, speaker: '嘉宾' }], [{ ...line, text: false }], [{ ...line, text: ' ' }],
+    [{ ...line, text: '字'.repeat(2001) }], ...[0, '字'.repeat(21), '温和\n', 'a\u007fb', 'a\u2028b'].map(emotion => [{ ...line, emotion }])]) {
+    assert.throws(() => validateEditedDialogue(lines), { statusCode: 400 });
+  }
+  assert.strictEqual(validateEditedDialogue(Array(300).fill({ ...line, text: ' ' + '字'.repeat(2000) } )).length, 300);
 });

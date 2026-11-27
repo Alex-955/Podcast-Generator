@@ -279,8 +279,14 @@
     let fadeOutTimer = null;
     let fadingOutSource = null;
     let analyzeAbortController = null;
-    let analyzingPodcastId = null;
+    let analyzingPodcastKey = null;
     let playToken = 0;
+
+    function getPodcastCacheKey(podcast) {
+      if (!podcast?.id) return '';
+      const version = podcast.audioVersion || podcast.updatedAt || '';
+      return version ? `${podcast.id}:${version}` : podcast.id;
+    }
 
     function setPhase(nextPhase) {
       if (phase === nextPhase) return;
@@ -334,7 +340,7 @@
         analyzeAbortController.abort();
         analyzeAbortController = null;
       }
-      analyzingPodcastId = null;
+      analyzingPodcastKey = null;
     }
 
     async function ensureContext() {
@@ -478,37 +484,38 @@
     }
 
     async function analyzePodcast(podcast) {
-      if (!podcast?.id || !podcast?.fullAudioUrl || !Array.isArray(podcast?.sentences)) return;
-      if (gainCache.has(podcast.id)) {
-        if (currentPodcast?.id === podcast.id) {
-          currentSentenceGains = gainCache.get(podcast.id);
+      const cacheKey = getPodcastCacheKey(podcast);
+      if (!cacheKey || !podcast?.fullAudioUrl || !Array.isArray(podcast?.sentences)) return;
+      if (gainCache.has(cacheKey)) {
+        if (getPodcastCacheKey(currentPodcast) === cacheKey) {
+          currentSentenceGains = gainCache.get(cacheKey);
         }
         return;
       }
-      if (analyzingPodcastId === podcast.id) return;
+      if (analyzingPodcastKey === cacheKey) return;
 
       cancelPendingAnalysis();
       const controller = new AbortController();
       analyzeAbortController = controller;
-      analyzingPodcastId = podcast.id;
+      analyzingPodcastKey = cacheKey;
 
       const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
       const decoder = audioCtx || (OfflineCtx ? new OfflineCtx(1, 1, 24000) : null);
       if (!decoder) {
         if (analyzeAbortController === controller) {
           analyzeAbortController = null;
-          analyzingPodcastId = null;
+          analyzingPodcastKey = null;
         }
         return;
       }
 
       try {
         const res = await fetch(podcast.fullAudioUrl, { signal: controller.signal });
-        if (!res.ok || controller.signal.aborted || currentPodcast?.id !== podcast.id) return;
+        if (!res.ok || controller.signal.aborted || getPodcastCacheKey(currentPodcast) !== cacheKey) return;
         const arrayBuffer = await res.arrayBuffer();
-        if (controller.signal.aborted || currentPodcast?.id !== podcast.id) return;
+        if (controller.signal.aborted || getPodcastCacheKey(currentPodcast) !== cacheKey) return;
         const decoded = await decoder.decodeAudioData(arrayBuffer);
-        if (controller.signal.aborted || currentPodcast?.id !== podcast.id) return;
+        if (controller.signal.aborted || getPodcastCacheKey(currentPodcast) !== cacheKey) return;
         const gains = computeSentenceGains(decoded, podcast.sentences);
         if (!gains) return;
 
@@ -516,8 +523,8 @@
           const oldestKey = gainCache.keys().next().value;
           gainCache.delete(oldestKey);
         }
-        gainCache.set(podcast.id, gains);
-        if (currentPodcast?.id === podcast.id) {
+        gainCache.set(cacheKey, gains);
+        if (getPodcastCacheKey(currentPodcast) === cacheKey) {
           currentSentenceGains = gains;
           currentSentenceIdx = -1;
           syncTime(audioEl?.currentTime || 0);
@@ -527,7 +534,7 @@
       } finally {
         if (analyzeAbortController === controller) {
           analyzeAbortController = null;
-          analyzingPodcastId = null;
+          analyzingPodcastKey = null;
         }
       }
     }
@@ -541,7 +548,8 @@
 
       currentPodcast = podcast || null;
       currentSentenceIdx = -1;
-      currentSentenceGains = podcast?.id ? (gainCache.get(podcast.id) || null) : null;
+      const cacheKey = getPodcastCacheKey(podcast);
+      currentSentenceGains = cacheKey ? (gainCache.get(cacheKey) || null) : null;
 
       if (audioCtx && sentenceGain) {
         sentenceGain.gain.setValueAtTime(1.0, audioCtx.currentTime);

@@ -182,6 +182,10 @@
                 <span>轻松对谈</span>
                 <span class="style-ai-tag hidden" data-style-ai-tag="dialogue">AI 推荐</span>
               </button>
+              <button type="button" class="style-pill" data-podcast-style="debate" role="radio" aria-checked="false" title="阿泽力挺原文 × 小晓理性挑刺 · 5:5 克制思辨">
+                <span>正反交锋</span>
+                <span class="style-ai-tag hidden" data-style-ai-tag="debate">AI 推荐</span>
+              </button>
             </div>
             <span id="confirmStyleDesc" class="confirm-style-desc">7:3 主讲拆解 + 主持追问 · 贴近 AI 妙听</span>
           </div>
@@ -426,9 +430,30 @@
         <!-- 下半部：双人同步对话字幕流 -->
         <div class="transcript-area">
           <div class="transcript-header">
-            <h3 class="transcript-heading">对话字幕</h3>
-            <span class="transcript-hint hint-desktop">点击或按回车跳转对应句 · 按 MP3 帧计数时间轴同步</span>
-            <span class="transcript-hint hint-mobile">点击句段跳转播放 · 按 MP3 帧时间轴同步</span>
+            <div class="transcript-title-group">
+              <h3 class="transcript-heading">对话字幕</h3>
+              <span class="transcript-hint hint-desktop">点击或按回车跳转对应句 · 按 MP3 帧计数时间轴同步</span>
+              <span class="transcript-hint hint-mobile">点击句段跳转播放 · 按 MP3 帧时间轴同步</span>
+            </div>
+            <button type="button" id="btnEditScript" class="btn btn-subtle btn-sm" title="逐句微调台词或说话人，未改动句子秒级复用缓存重拼" disabled>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+              <span>微调剧本</span>
+            </button>
+          </div>
+
+          <div id="scriptEditorBar" class="script-editor-bar hidden" aria-live="polite">
+            <div class="script-editor-summary">
+              <span id="scriptEditorStatus" class="script-editor-status">点击任意句子修改台词或切换说话人</span>
+              <span id="scriptEditorCacheHint" class="meta-pill is-success hidden"></span>
+            </div>
+            <div class="script-editor-actions">
+              <button type="button" id="btnResetScriptEdits" class="btn btn-ghost btn-sm" disabled>还原全部</button>
+              <button type="button" id="btnCancelScriptEdit" class="btn btn-subtle btn-sm">取消</button>
+              <button type="button" id="btnResynthesizeScript" class="btn btn-primary btn-sm" disabled>重新合成</button>
+            </div>
           </div>
 
           <div id="subtitlesList" class="subtitles-list" role="region" aria-label="双人对话字幕">

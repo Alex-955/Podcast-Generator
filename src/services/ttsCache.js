@@ -149,12 +149,10 @@ function createTtsCache(directory, {
     return { hit: true, filePath: targetPath, bytes: buffer.length, duration: durationSeconds };
   }
 
-  function put(key, sourcePath) {
+  function store(key, buffer) {
     const cached = getPath(key);
     const directory = statEntry(cacheDir);
     if (directory && !directory.isDirectory()) throw new Error('音频缓存目录无效');
-    const buffer = fs.readFileSync(sourcePath);
-    if (!isValidMp3(buffer)) throw new Error('无法缓存无效的 MP3');
     const previous = usage && statEntry(cached);
     atomicWrite(cached, buffer);
     const time = now();
@@ -170,7 +168,23 @@ function createTtsCache(directory, {
     }
   }
 
-  return { get, put, getPath, prune };
+  function put(key, sourcePath) {
+    const buffer = fs.readFileSync(sourcePath);
+    if (!isValidMp3(buffer)) throw new Error('无法缓存无效的 MP3');
+    store(key, buffer);
+  }
+
+  function seed(key, sourcePath, targetPath) {
+    if (!sourcePath || !statEntry(sourcePath)?.isFile()) return { hit: false };
+    const buffer = fs.readFileSync(sourcePath);
+    const { ok, durationSeconds } = analyzeMp3(buffer);
+    if (!ok) return { hit: false };
+    store(key, buffer);
+    atomicWrite(targetPath, buffer);
+    return { hit: true, filePath: targetPath, bytes: buffer.length, duration: durationSeconds };
+  }
+
+  return { get, put, seed, getPath, prune };
 }
 
 module.exports = { buildCacheKey, createTtsCache, speechScopeHash };
