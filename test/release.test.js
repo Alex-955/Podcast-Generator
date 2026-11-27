@@ -10,7 +10,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const { once } = require('node:events');
 const { setTimeout: delay } = require('node:timers/promises');
-const { gunzipSync } = require('node:zlib');
+const { gunzipSync, inflateRawSync } = require('node:zlib');
 const { buildRelease, runReleaseSecurityGate, parseArgs } = require('../scripts/build-release');
 const { version } = require('../package.json');
 
@@ -104,7 +104,9 @@ async function verifyStagedServer(stageDir, tmpDir, { nodePath = '' } = {}) {
     });
     const health = await fetch(ready + '/api/health');
     assert.equal(health.status, 200);
-    assert.equal((await health.json()).version, version);
+    const body = await health.json();
+    assert.equal(body.version, version);
+    assert.equal(body.status, 'ok');
     const html = await fetch(ready + '/');
     assert.equal(html.status, 200);
     assert.match(await html.text(), /AI 妙听/);
@@ -115,7 +117,7 @@ async function verifyStagedServer(stageDir, tmpDir, { nodePath = '' } = {}) {
   assert.equal(runReleaseSecurityGate(stageDir), true, '启动时只应写入隔离目录');
 }
 
-function zipEntries(archive) {
+function zipEntries(archive, extractDir) {
   const zip = fs.readFileSync(archive);
   const end = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
   assert.ok(end >= 0, 'ZIP 应包含中央目录结束记录');
@@ -140,6 +142,13 @@ function zipEntries(archive) {
     assert.equal(zip.readUInt16LE(offset + 10), method);
     assert.equal(zip.readUInt16LE(local + 8), method);
     if (name.endsWith('/')) assert.equal(attributes, ((0o040755 << 16) | 0x10) >>> 0);
+    if (extractDir && !name.endsWith('/')) {
+      assert.ok(name.split('/').every(part => part && part !== '..' && !/[\\:]/.test(part)));
+      const start = local + 30 + length + zip.readUInt16LE(local + 28);
+      const data = zip.subarray(start, start + zip.readUInt32LE(offset + 20));
+      write(extractDir, name, method ? inflateRawSync(data) : data);
+      if (process.platform !== 'win32') fs.chmodSync(path.join(extractDir, name), (attributes >>> 16) & 0o777);
+    }
     entries.set(name, attributes >>> 16);
     offset += 46 + length + zip.readUInt16LE(offset + 30) + zip.readUInt16LE(offset + 32);
   }
@@ -388,9 +397,33 @@ test('发行门禁拦截非 ASCII 主目录、dotenv 冒号语法和不合法 UT
   });
 });
 
+test('带依赖构建与暂存门禁都要求有效且非空的生产包索引', t => {
+  const root = scratch(t);
+  const sourceDir = sourceFixture(root);
+  const outDir = path.join(root, 'out');
+  write(sourceDir, 'node_modules/pkg/index.js', 'module.exports = 1;');
+  const { stageDir } = buildRelease({ sourceDir, outDir, format: 'dir' });
+  write(stageDir, 'node_modules/pkg/index.js', 'module.exports = 1;');
+  const invalidPackages = [null, [], true, 'pkg', {}, { '': {} },
+    { 'node_modules/pkg': null }, { 'node_modules/pkg': { dev: true } }];
+  const invalidLocks = [undefined, '{}', 'invalid', ...invalidPackages.map(packages => JSON.stringify({ packages }))];
+  for (const index of invalidLocks) {
+    for (const dir of [sourceDir, stageDir]) {
+      if (index === undefined) fs.unlinkSync(path.join(dir, 'package-lock.json'));
+      else write(dir, 'package-lock.json', index);
+    }
+    assert.throws(() => buildRelease({ sourceDir, outDir, name: 'invalid', withDeps: true }), /package-lock\.json/);
+    assert.throws(() => runReleaseSecurityGate(stageDir), /package-lock\.json/);
+  }
+  assert.deepEqual(fs.readdirSync(outDir), [path.basename(stageDir)]);
+});
+
 test('离线复制依赖时跳过缓存，只允许指向依赖目录内的符号链接', t => {
   const root = scratch(t);
   const sourceDir = sourceFixture(root);
+  write(sourceDir, 'package-lock.json', JSON.stringify({ packages: {
+    'node_modules/pkg': {}, 'node_modules/alias': {}, 'node_modules/outside': { optional: true },
+  } }));
   const packages = path.join(sourceDir, 'node_modules');
   write(packages, 'pkg/package.json', '{}');
   write(packages, 'pkg/.cache/do-not-ship', 'synthetic cached data');
@@ -421,6 +454,23 @@ test('离线复制依赖时跳过缓存，只允许指向依赖目录内的符�
   assert.equal(fs.existsSync(path.join(stageDir, 'node_modules/pkg/index.js')), true);
 });
 
+test('复制依赖跳过各层 .DS_Store，门禁仍拦截暂存目录中的同名文件', t => {
+  const root = scratch(t);
+  const sourceDir = sourceFixture(root);
+  write(sourceDir, 'package-lock.json', JSON.stringify({ packages: { 'node_modules/pkg': {} } }));
+  const files = ['node_modules/.DS_Store', 'node_modules/pkg/.dS_sToRe'];
+  for (const name of files) write(sourceDir, name, 'synthetic Finder metadata');
+  write(sourceDir, 'node_modules/pkg/index.js', 'module.exports = {};');
+  const { stageDir } = buildRelease({ sourceDir, outDir: path.join(root, 'out'), format: 'dir', withDeps: true });
+  for (const file of files) {
+    assert.equal(fs.existsSync(path.join(sourceDir, file)), true);
+    assert.equal(fs.existsSync(path.join(stageDir, file)), false);
+    write(stageDir, file, 'synthetic Finder metadata');
+  }
+  assert.throws(() => runReleaseSecurityGate(stageDir),
+    error => files.every(file => error.issues.includes(file + ' 属于禁运路径')));
+});
+
 test('真实便携 ZIP 和 tar.gz 包含白名单目录、匹配 SHA-256 并带可启动依赖', async t => {
   const root = scratch(t);
   const outDir = path.join(root, 'archives');
@@ -432,7 +482,33 @@ test('真实便携 ZIP 和 tar.gz 包含白名单目录、匹配 SHA-256 并带�
     return createHash('sha256').update(bytes).digest('hex') + '  ' + path.basename(filename);
   });
   assert.equal(fs.readFileSync(checksumFile, 'utf8'), actual.join('\n') + '\n');
-  const zip = zipEntries(archives[0]);
+  const extracted = path.join(root, 'unzipped');
+  const zip = zipEntries(archives[0], extracted);
+  for (const entry of zip.keys()) {
+    if (!entry.includes('/node_modules/')) continue;
+    assert.doesNotMatch(entry, /\/(?:tests?\.js|eslint\.config\.[^/]+|yarn\.lock)$|\.map$|\/(?:tests?|\.github)\/|\/\.ds_store$/i);
+    if (/^(?:licen[cs]e|notice)/i.test(path.posix.basename(entry))) continue;
+    assert.doesNotMatch(entry, /\.(?:md|markdown)$|\/__tests__\//i);
+  }
+  const smoke = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import express from 'express';
+    import axios from 'axios';
+    import { load } from 'cheerio';
+    import cors from 'cors';
+    import dotenv from 'dotenv';
+    import { v4, validate } from 'uuid';
+    import { WebSocketServer } from 'ws';
+    assert.equal(typeof express().get, 'function');
+    assert.equal(axios.getUri({ url: '/check', params: { q: 1 } }), '/check?q=1');
+    assert.equal(load('<p>ok</p>')('p').text(), 'ok');
+    assert.equal(typeof cors(), 'function');
+    assert.equal(dotenv.parse('X=ok').X, 'ok');
+    assert.ok(validate(v4()));
+    new WebSocketServer({ noServer: true }).close();
+  `], { cwd: path.join(extracted, path.basename(stageDir)), encoding: 'utf8', env: { ...process.env, NODE_PATH: '' } });
+  assert.ifError(smoke.error);
+  assert.equal(smoke.status, 0, smoke.stderr);
   const tar = tarEntries(archives[1]);
   assert.deepEqual([...tar.keys()].sort(), [...zip.keys()].sort());
   if (process.platform !== 'win32') {
@@ -473,7 +549,7 @@ test('真实便携 ZIP 和 tar.gz 包含白名单目录、匹配 SHA-256 并带�
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stderr);
   }
-  await verifyStagedServer(stageDir, root);
+  await verifyStagedServer(path.join(extracted, path.basename(stageDir)), root);
 });
 
 test('tar.gz 使用 PAX 保留超过 USTAR 名称长度的 ASCII 路径', t => {
@@ -486,4 +562,55 @@ test('tar.gz 使用 PAX 保留超过 USTAR 名称长度的 ASCII 路径', t => {
   const entry = tarEntries(archives[0]).get('pax-long/' + file);
   assert.equal(entry.pax, true);
   assert.equal(entry.contents.toString('utf8'), contents);
+});
+
+test('锁文件排除开发依赖和额外安装的包，嵌套生产包与归属声明可进入发行包', t => {
+  const root = scratch(t);
+  const sourceDir = sourceFixture(root);
+  const prod = 'node_modules/@org/pkg';
+  const nested = prod + '/node_modules/nested';
+  const dev = prod + '/node_modules/dev-only';
+  write(sourceDir, 'package-lock.json', JSON.stringify({ packages: {
+    '': {}, [prod]: {}, [nested]: {}, [dev]: { dev: true }, 'node_modules/build-tool': { dev: true },
+  } }));
+  for (const pkg of [prod, nested, dev, 'node_modules/build-tool', 'node_modules/extraneous']) {
+    write(sourceDir, pkg + '/index.js', 'module.exports = 1;');
+  }
+  const omit = ['TeSt/index.js', '__mocks__/mock.js', '.github/workflows/x.yml', 'index.js.map', 'index.d.mts',
+    'GUIDE.markdown', 'migration.txt', 'tsconfig.build.json', 'webpack.config.js', 'test.js', 'TESTS.JS',
+    'a.test.js', 'b.spec.js', 'c.test.cjs', 'd.spec.cjs', 'e.test.mjs', 'f.spec.mjs',
+    'ESLint.config.mjs', 'prettier.config.cjs', 'jest.config.js', 'vitest.config.ts', 'rollup.config.mjs',
+    'babel.config.json', 'Yarn.Lock', 'pnpm-lock.yaml', 'package-lock.json', 'npm-shrinkwrap.json', '.nycrc', '.mocharc.yml'];
+  for (const file of [...omit, 'LICENSE.md', 'NOTICE.txt']) write(sourceDir, prod + '/' + file, 'fixture');
+  const { stageDir, archives } = buildRelease({ sourceDir, outDir: path.join(root, 'out'), name: 'demo', withDeps: true });
+  const names = zipEntries(archives[0]);
+  for (const file of [prod + '/index.js', nested + '/index.js', prod + '/LICENSE.md', prod + '/NOTICE.txt']) {
+    assert.ok(names.has('demo/' + file), file);
+  }
+  for (const file of [dev + '/index.js', 'node_modules/build-tool/index.js', 'node_modules/extraneous/index.js',
+    ...omit.map(file => prod + '/' + file)]) assert.ok(!names.has('demo/' + file), file);
+  write(stageDir, dev + '/index.js', 'fixture');
+  write(stageDir, 'node_modules/extraneous/index.js', 'fixture');
+  for (const file of omit) write(stageDir, prod + '/' + file, 'fixture');
+  assert.throws(() => runReleaseSecurityGate(stageDir), error =>
+    error.issues.includes(dev + ' 不在生产依赖清单中') &&
+    error.issues.includes('node_modules/extraneous 不在生产依赖清单中') &&
+    omit.every(file => error.issues.includes(prod + '/' + file.split('/')[0] + ' 属于禁运路径')));
+});
+
+test('归档条目与门禁清单不符时不发布 ZIP 和校验清单', t => {
+  const root = scratch(t);
+  const sourceDir = sourceFixture(root);
+  const outDir = path.join(root, 'out');
+  const writeSync = fs.writeSync;
+  t.mock.method(fs, 'writeSync', (fd, bytes, ...args) => {
+    // Simulate a ZIP writer emitting an incorrect central-directory filename.
+    if (bytes.length >= 46 && bytes.readUInt32LE(0) === 0x02014b50 && bytes.toString('utf8', 46) === 'demo/server.js') {
+      bytes = Buffer.from(bytes);
+      bytes.write('demo/unused.js', 46);
+    }
+    return writeSync(fd, bytes, ...args);
+  });
+  assert.throws(() => buildRelease({ sourceDir, outDir, name: 'demo' }), /ZIP 本地文件名与目录不符/);
+  assert.deepEqual(fs.readdirSync(outDir), []);
 });

@@ -8,12 +8,15 @@ const { getTtsProvider, resolveDefaultProviderId } = require('./ttsProvider');
 const { ProviderError, chatStatusError, redactProviderDetail, requestProvider, readJson, upstreamError } = require('./providerHttp');
 const { analyzeMp3 } = require('./mp3Utils');
 
-async function testLlmConnection(payload, { llmRequest = requestProvider, lookup } = {}) {
+async function testLlmConnection(payload, { llmRequest = requestProvider, lookup, signal } = {}) {
   const creds = getCredentials(payload);
   if (!creds.apiKey) throw new InputError('请先配置模型 API Key');
   const { baseURL, model, sensitive, allowPrivateEndpoint } = validateLlmSettings(payload, creds);
   const started = Date.now();
   const controller = new AbortController();
+  const cancel = () => controller.abort(signal.reason);
+  signal?.throwIfAborted();
+  signal?.addEventListener('abort', cancel, { once: true });
   const timer = setTimeout(() => controller.abort(), 10000);
   async function probe(route, body) {
     const response = await llmRequest(baseURL + route, {
@@ -48,10 +51,13 @@ async function testLlmConnection(payload, { llmRequest = requestProvider, lookup
       throw error;
     }
     throw upstreamError(controller.signal.aborted ? '模型接口连接超时' : '模型接口连接失败');
-  } finally { clearTimeout(timer); }
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', cancel);
+  }
 }
 
-async function testTtsConnection(payload, { getTtsProviderById = getTtsProvider } = {}) {
+async function testTtsConnection(payload, { getTtsProviderById = getTtsProvider, signal } = {}) {
   const tts = payload.tts || {};
   if (typeof tts !== 'object' || Array.isArray(tts)) throw new InputError('语音配置格式无效');
   let provider;
@@ -67,11 +73,16 @@ async function testTtsConnection(payload, { getTtsProviderById = getTtsProvider 
   let dir;
   const started = Date.now();
   const controller = new AbortController();
+  const cancel = () => controller.abort(signal.reason);
+  signal?.throwIfAborted();
+  signal?.addEventListener('abort', cancel, { once: true });
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
     dir = await fs.mkdtemp(path.join(os.tmpdir(), 'podcast-probe-'));
+    controller.signal.throwIfAborted();
     const outputPath = path.join(dir, 'probe.mp3');
     await provider.synthesizeToFile({ text: '你好', voice: voices.阿泽, outputPath, signal: controller.signal, adapterOptions: credentials });
+    controller.signal.throwIfAborted();
     const analysis = analyzeMp3(await fs.readFile(outputPath));
     if (!analysis.ok) throw upstreamError('语音接口返回了无效音频');
     return { ...result, latencyMs: Date.now() - started, duration: analysis.durationSeconds, message: '连接成功，语音合成可用' };
@@ -80,6 +91,7 @@ async function testTtsConnection(payload, { getTtsProviderById = getTtsProvider 
     throw upstreamError(controller.signal.aborted ? '语音接口连接超时' : '语音接口连接失败');
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', cancel);
     if (dir) await fs.rm(dir, { recursive: true, force: true });
   }
 }

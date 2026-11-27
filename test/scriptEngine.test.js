@@ -37,10 +37,14 @@ test('归一化节目风格，只有未提供和空白文本使用默认深度�
 
 test('两种剧本请求发送各自的节奏要求和相同的忠实性及格式规则', async t => {
   configureLlm(t);
-  const llmRequest = t.mock.fn(async () => response(completion(JSON.stringify(dialogueFixture))));
+  const prompts = [];
+  const llmRequest = async (_url, { body }) => {
+    prompts.push(JSON.parse(body).messages[0].content);
+    return response(completion(JSON.stringify(dialogueFixture)));
+  };
   await generatePodcastScript({ ...SCRIPT_INPUT, llmRequest });
   await generatePodcastScript({ ...SCRIPT_INPUT, podcastStyle: ' Dialogue ', llmRequest });
-  const [deepDive, dialogue] = llmRequest.mock.calls.map(call => JSON.parse(call.arguments[1].body).messages[0].content);
+  const [deepDive, dialogue] = prompts;
 
   assert.match(deepDive, /7:3.*小晓.*65%–75%.*80~170/);
   assert.match(deepDive, /阿泽.*25%–35%.*25~65/);

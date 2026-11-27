@@ -1385,6 +1385,7 @@ button {
   border-radius: var(--radius-sm);
   padding-right: 4px;
   position: relative;
+  contain: layout style;
   transition: background-color 160ms ease;
 }
 
@@ -2070,6 +2071,7 @@ button {
   border-radius: var(--radius-md);
   cursor: pointer;
   scroll-margin-top: 72px;
+  contain: layout style;
   transition: background-color 180ms ease;
   outline: none;
 }

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { isUtf8 } = require('node:buffer');
 const { createHash } = require('node:crypto');
-const { deflateRawSync, gzipSync } = require('node:zlib');
+const { deflateRawSync, gzipSync, gunzipSync } = require('node:zlib');
 const dotenv = require('dotenv');
 
 const SOURCE_DIR = path.resolve(__dirname, '..');
@@ -144,31 +144,96 @@ function copySourceTree(from, to, relative = 'src') {
   }
 }
 
+const DEPENDENCY_DIRS = new Set([
+  '.bin', '.cache', '.github', '.vscode', '.nyc_output', 'test', 'tests', '__tests__', '__mocks__',
+  'example', 'examples', 'doc', 'docs', 'benchmark', 'benchmarks', 'coverage',
+]);
+
+function excludedDependency(relative, directory) {
+  const parts = relative.toLowerCase().split('/');
+  const name = parts.pop();
+  if (parts.some(part => DEPENDENCY_DIRS.has(part)) || name === '.ds_store') return true;
+  if (directory) return DEPENDENCY_DIRS.has(name);
+  if (/^(?:tests?\.js|yarn\.lock|pnpm-lock\.yaml|package-lock\.json|npm-shrinkwrap\.json)$/.test(name) ||
+      /\.(?:test|spec)\.(?:js|cjs|mjs)$/.test(name) ||
+      /^(?:(?:eslint|prettier|jest|vitest|rollup|babel)\.config\.|\.nycrc|\.mocharc)/.test(name)) return true;
+  if (/^(?:licen[cs]e|notice)/.test(name)) return false;
+  return DEPENDENCY_DOC.test(name) ||
+    /\.(?:map|d\.(?:ts|mts|cts)|tsbuildinfo|md|markdown|txt)$/.test(name) ||
+    /^(?:\.npmignore|\.gitignore|\.editorconfig|\.travis\.yml|makefile|tsconfig.*\.json)$/.test(name) ||
+    /^(?:\.eslintrc|\.prettierrc|\.babelrc|gruntfile|gulpfile|karma\.conf|webpack\.config)/.test(name);
+}
+
+function productionPackages(root, required = true) {
+  const contents = fs.readFileSync(plainFile(root, 'package-lock.json'), 'utf8');
+  let packages;
+  try {
+    ({ packages } = JSON.parse(contents));
+  } catch {
+    throw new Error('package-lock.json 格式无效');
+  }
+  if (!required) return null;
+  const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!isRecord(packages)) throw new Error('package-lock.json 缺少有效的 packages 索引');
+  const production = new Map();
+  for (const [relative, pkg] of Object.entries(packages)) {
+    if (!isRecord(pkg) || (pkg.dev !== undefined && typeof pkg.dev !== 'boolean')) {
+      throw new Error('package-lock.json 的 packages 条目无效');
+    }
+    if (!relative.startsWith('node_modules/')) continue;
+    if (!/^(?:node_modules\/(?:@[\w.-]+\/)?[\w-][\w.-]*)(?:\/node_modules\/(?:@[\w.-]+\/)?[\w-][\w.-]*)*$/.test(relative)) {
+      throw new Error('锁文件包含无效依赖路径');
+    }
+    if (!pkg.dev) production.set(relative, pkg);
+  }
+  if (!production.size) throw new Error('package-lock.json 的 packages 索引缺少生产依赖');
+  return production;
+}
+
+function packageOwner(relative) {
+  if (!relative.startsWith('node_modules/')) return null;
+  const boundary = relative.lastIndexOf('/node_modules/') + 1;
+  const suffix = relative.slice(boundary + 'node_modules/'.length).split('/');
+  const count = suffix[0].startsWith('@') ? 2 : 1;
+  if (suffix.length < count) return null; // Scope container.
+  return relative.slice(0, boundary) + 'node_modules/' + suffix.slice(0, count).join('/');
+}
+
 function copyDependencies(sourceDir, stageDir) {
   const source = fs.realpathSync(plainDirectory(sourceDir, 'node_modules'));
-  const skipDirectory = name => name.toLowerCase() === '.bin' || name.toLowerCase() === '.cache';
-  function copyEntry(from, to, relative, ancestors) {
+  const packages = productionPackages(sourceDir);
+  function copyEntry(from, relative, ancestors) {
     const real = fs.realpathSync(from);
-    if (!isWithin(source, real)) {
-      throw new Error('依赖符号链接指向 node_modules 之外：' + relative);
-    }
-    if (path.relative(source, real).split(path.sep).some(skipDirectory)) return;
+    if (!isWithin(source, real)) throw new Error('依赖符号链接指向 node_modules 之外：' + relative);
+    const physical = path.relative(source, real).split(path.sep).join('/');
     const stat = fs.statSync(real);
+    if (excludedDependency(relative, stat.isDirectory()) || excludedDependency(physical, stat.isDirectory())) return;
+    if (physical) {
+      const owner = packageOwner('node_modules/' + physical);
+      if (!packages.has(owner)) throw new Error('依赖链接目标不在生产依赖清单中：' + relative);
+    }
+    const to = path.join(stageDir, relative);
     if (stat.isFile()) {
-      if (!DEPENDENCY_DOC.test(path.basename(real))) copyFile(real, to);
+      copyFile(real, to);
     } else if (stat.isDirectory()) {
       if (ancestors.has(real)) throw new Error('依赖符号链接存在循环：' + relative);
       fs.mkdirSync(to, { recursive: true });
       const parents = new Set([...ancestors, real]);
       for (const entry of fs.readdirSync(real, { withFileTypes: true })) {
-        if (skipDirectory(entry.name) || (!entry.isDirectory() && DEPENDENCY_DOC.test(entry.name))) continue;
-        copyEntry(path.join(real, entry.name), path.join(to, entry.name), relative + '/' + entry.name, parents);
+        if (entry.name === 'node_modules') continue; // Nested packages have their own lock entries.
+        const child = relative + '/' + entry.name;
+        if (!excludedDependency(child, entry.isDirectory())) copyEntry(path.join(real, entry.name), child, parents);
       }
     } else {
       throw new Error('依赖目录包含非常规文件：' + relative);
     }
   }
-  copyEntry(source, path.join(stageDir, 'node_modules'), 'node_modules', new Set());
+  for (const [relative, pkg] of packages) {
+    const from = path.join(sourceDir, relative);
+    if (pkg.optional && !fs.existsSync(from)) continue;
+    if (!fs.statSync(from, { throwIfNoEntry: false })?.isDirectory()) throw new Error('缺少生产依赖：' + relative);
+    copyEntry(from, relative, new Set());
+  }
 }
 
 function writeLaunchers(sourceDir, stageDir) {
@@ -253,15 +318,22 @@ function scanContent(contents, relative, issues) {
   }
 }
 
-function runReleaseSecurityGate(stageDir) {
+function runReleaseSecurityGate(stageDir, manifest = new Set()) {
   const issues = [];
   const files = new Set();
+  const hasDeps = fs.existsSync(path.join(stageDir, 'node_modules'));
+  const lock = fs.lstatSync(path.join(stageDir, 'package-lock.json'), { throwIfNoEntry: false });
+  const packages = hasDeps || lock?.isFile() ? productionPackages(stageDir, hasDeps) : null;
   let hasSource = false;
   function scan(dir, prefix = '') {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const relative = prefix + entry.name;
       const file = path.join(dir, entry.name);
-      if (forbiddenPath(relative)) {
+      if (packages && packageOwner(relative) === relative && !packages.has(relative)) {
+        issues.push(relative + ' 不在生产依赖清单中');
+      }
+      manifest.add(relative + (entry.isDirectory() ? '/' : ''));
+      if (forbiddenPath(relative) || (relative.startsWith('node_modules/') && excludedDependency(relative, entry.isDirectory()))) {
         issues.push(relative + ' 属于禁运路径');
       } else if (entry.isDirectory()) {
         scan(file, relative + '/');
@@ -454,6 +526,47 @@ function tarGzBundle(dir, name, archive) {
   fs.writeFileSync(archive, gzipSync(Buffer.concat(chunks)), { flag: 'wx' });
 }
 
+// Read the names serialized by our ZIP32 and PAX writers back before publication.
+function verifyArchive(archive, format, name, manifest) {
+  const expected = new Set([name + '/', ...Array.from(manifest, entry => name + '/' + entry)]);
+  function check(entry) {
+    if (!expected.delete(entry)) throw new Error('发行归档包含未通过门禁的条目');
+  }
+  const bytes = fs.readFileSync(archive);
+  if (format === 'zip') {
+    const end = bytes.length - 22;
+    if (bytes.readUInt32LE(end) !== 0x06054b50) throw new Error('无效的 ZIP 结束记录');
+    let offset = bytes.readUInt32LE(end + 16);
+    for (let i = 0; i < bytes.readUInt16LE(end + 10); i++) {
+      if (bytes.readUInt32LE(offset) !== 0x02014b50) throw new Error('无效的 ZIP 目录条目');
+      const length = bytes.readUInt16LE(offset + 28);
+      const entry = bytes.toString('utf8', offset + 46, offset + 46 + length);
+      const local = bytes.readUInt32LE(offset + 42);
+      if (bytes.readUInt16LE(local + 26) !== length || bytes.toString('utf8', local + 30, local + 30 + length) !== entry) {
+        throw new Error('ZIP 本地文件名与目录不符');
+      }
+      check(entry);
+      offset += 46 + length + bytes.readUInt16LE(offset + 30) + bytes.readUInt16LE(offset + 32);
+    }
+  } else {
+    const tar = gunzipSync(bytes);
+    let paxName;
+    for (let offset = 0; offset < tar.length && tar[offset];) {
+      const size = parseInt(tar.toString('ascii', offset + 124, offset + 136), 8);
+      const data = offset + TAR_BLOCK_SIZE;
+      if (tar[offset + 156] === 120) { // PAX extended header, a single UTF-8 path record.
+        paxName = tar.toString('utf8', data, data + size).match(/^\d+ path=([\s\S]+)\n$/)?.[1];
+        if (!paxName) throw new Error('无效的 PAX 路径');
+      } else {
+        check(paxName ?? tar.toString('ascii', offset, offset + 100).split('\0', 1)[0]);
+        paxName = undefined;
+      }
+      offset = data + Math.ceil(size / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
+    }
+  }
+  if (expected.size) throw new Error('发行归档缺少已通过门禁的条目');
+}
+
 function sha256(file) {
   const hash = createHash('sha256');
   const fd = fs.openSync(file, 'r');
@@ -530,11 +643,13 @@ function buildRelease({
   let published = false;
   try {
     stageFiles(sourceDir, stage, withDeps);
-    runReleaseSecurityGate(stage);
+    const manifest = new Set();
+    runReleaseSecurityGate(stage, manifest);
     for (let i = 0; i < formats.length; i++) {
       const target = path.join(scratch, archiveNames[i]);
       if (formats[i] === 'zip') zipBundle(scratch, name, target);
       else tarGzBundle(scratch, name, target);
+      verifyArchive(target, formats[i], name, manifest);
     }
     if (archiveNames.length) checksumFile = writeChecksums(outDir, scratch, sumsName, archiveNames);
     fs.renameSync(stage, stageDir);

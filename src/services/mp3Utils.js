@@ -34,7 +34,7 @@ function stripID3(buffer) {
       (buffer[9] & 0x7f);
     const headerTotal = 10 + size;
     if (buffer.length > headerTotal) {
-      return buffer.slice(headerTotal);
+      return buffer.subarray(headerTotal);
     }
   }
   return buffer;
@@ -124,7 +124,7 @@ function compatibleFrameFormat(frame, format) {
  *
  * @returns {{ok: boolean, reason: string|null, durationSeconds: number, frameCount: number, format: object|null}}
  */
-function analyzeMp3(buffer) {
+function analyzeMp3(buffer, { onFrame } = {}) {
   const fail = (reason) => ({ ok: false, reason, durationSeconds: 0, frameCount: 0, format: null });
   if (!buffer || buffer.length < 4) return fail('too-short');
 
@@ -152,6 +152,7 @@ function analyzeMp3(buffer) {
       return fail('mixed-format');
     }
     if (frame.bitrateIdx !== format.bitrateIdx) variableBitrate = true;
+    onFrame?.(frame.frameLength);
     totalSamples += frame.samplesPerFrame;
     frameCount += 1;
     offset += frame.frameLength;

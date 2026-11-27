@@ -86,7 +86,7 @@ test('便携启动参数与运行时 CA 能力检测', () => {
 });
 
 test('只将通过校验的本机和局域网 URL 传给系统浏览器命令', () => {
-  const url = 'http://127.0.0.1:3000';
+  const url = 'http://127.0.0.1:3456';
   assert.deepEqual(resolveBrowserCommand(url, 'darwin'), { command: 'open', args: [url] });
   assert.deepEqual(resolveBrowserCommand(url, 'win32'), { command: 'cmd.exe', args: ['/c', 'start', '', url] });
   assert.deepEqual(resolveBrowserCommand(url, 'linux'), { command: 'xdg-open', args: [url] });
@@ -260,22 +260,22 @@ test('默认端口被其他服务占用时自动顺延', async t => {
   let other;
   for (const host of ['127.0.0.1', '::1', '127.0.0.2']) {
     try {
-      other = await listen(3000, { status: 'ok', app: 'other-service' }, host);
+      other = await listen(3456, { status: 'ok', app: 'other-service' }, host);
       break;
     } catch (error) {
       if (!['EADDRINUSE', 'EADDRNOTAVAIL', 'EAFNOSUPPORT'].includes(error.code)) throw error;
     }
   }
-  if (!other) return t.skip('本机没有可隔离的 3000 回环端口');
+  if (!other) return t.skip('本机没有可隔离的 3456 回环端口');
   const host = other.address().address;
   t.after(() => new Promise(resolve => other.close(resolve)));
   const { options } = fixture(t);
   const expectedPort = await findAvailablePort(host);
   const result = await startPortable({ ...options, host });
-  assert.notEqual(result.port, 3000);
-  if (expectedPort <= 3020) assert.equal(result.port, expectedPort);
+  assert.notEqual(result.port, 3456);
+  if (expectedPort <= 3475) assert.equal(result.port, expectedPort);
   assert.equal((await statusPortable(options)).port, result.port);
-  assert.equal(await probeHealth(host, 3000), null);
+  assert.equal(await probeHealth(host, 3456), null);
 });
 
 test('显式 --port、PORT 和 .env 中的 PORT 被占用时报错', async t => {
@@ -579,4 +579,12 @@ test('两个原生启动器换行与权限，Shell 语法及 macOS 应用查找�
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stderr);
   }
+});
+
+test('便携启动器将数据目录占用 IPC 转为独立目录指引', async t => {
+  const { options, pidFile } = fixture(t);
+  fs.mkdirSync(options.dataDir);
+  fs.writeFileSync(path.join(options.dataDir, '.server.lock'), JSON.stringify({ pid: process.pid }));
+  await assert.rejects(startPortable({ ...options, port: 0 }), /当前数据目录正被另一个运行中的 AI 妙听实例占用.*--data-dir/);
+  assert.equal(fs.existsSync(pidFile), false);
 });

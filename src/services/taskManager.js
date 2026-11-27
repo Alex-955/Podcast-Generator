@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { setTimeout: delay } = require('node:timers/promises');
 const { atomicWrite } = require('./atomicWrite');
 const { extractArticle, assertValidUrl, assertSafeFetchTarget } = require('./extractor');
 const { generatePodcastScript, normalizePodcastStyle, PODCAST_STYLES } = require('./scriptEngine');
@@ -219,6 +220,7 @@ function createTaskManager({
   const cache = createTtsCache(cacheDir);
   const storedSecrets = [...llmSecrets({}, {}, { includeDefaultBase: false }), podcastsDir, cacheDir, tasksDir];
   let active = null;
+  let closing;
 
   function resolveSpeech(payload, creds, task) {
     const tts = payload.tts ?? {};
@@ -418,6 +420,10 @@ function createTaskManager({
     if (active) throw httpError(409, '当前已有任务正在生成，请等待完成或先取消当前任务', 'TASK_ALREADY_RUNNING');
   }
 
+  function assertAcceptingTasks() {
+    if (closing) throw httpError(503, '服务正在关闭，暂不接收新任务', 'SERVER_SHUTTING_DOWN');
+  }
+
   async function runPipeline(task, creds, speech, signal) {
     const workDir = path.join(podcastsDir, task.id);
     const scriptSecrets = [...speech.secrets, creds.baseURL, workDir, cacheDir, tasksDir];
@@ -504,7 +510,7 @@ function createTaskManager({
       enter('done');
     } catch (error) {
       // An immediate resume owns the new checkpoint while this cancelled run drains.
-      if (active?.task !== task) return;
+      if (active?.task !== task || active.interruptedForShutdown) return;
       if (signal.aborted || error.name === 'AbortError') {
         task.status = 'cancelled';
         task.error = null;
@@ -533,6 +539,7 @@ function createTaskManager({
   }
 
   function createTask(payload = {}) {
+    assertAcceptingTasks();
     const podcastStyle = normalizePodcastStyle(payload.podcastStyle);
     const sourceType = resolveSourceType(payload);
     assertIdle();
@@ -561,6 +568,7 @@ function createTaskManager({
   }
 
   function resumeTask(id, payload = {}) {
+    assertAcceptingTasks();
     const requestedStyle = payload.podcastStyle === undefined ? undefined : normalizePodcastStyle(payload.podcastStyle);
     const task = readTask(id);
     const drainingSameTask = active?.task.id === id && active.controller.signal.aborted;
@@ -594,7 +602,33 @@ function createTaskManager({
     return start(task, creds, speech);
   }
 
-  return { createTask, getTask: id => toDTO(readTask(id)), cancelTask, resumeTask, listPodcasts, getPodcast, deletePodcast };
+  function shutdown({ timeoutMs = 5000 } = {}) {
+    if (closing) return closing;
+    const run = active;
+    if (!run) return (closing = Promise.resolve());
+    const { task, controller, finished } = run;
+    const wait = new AbortController();
+    closing = Promise.race([finished, delay(timeoutMs, undefined, { ref: false, signal: wait.signal })])
+      .finally(() => wait.abort());
+    if (task.status === 'queued' || task.status === 'running') {
+      run.interruptedForShutdown = true;
+      task.status = 'failed';
+      task.error = {
+        stage: task.stage, retryable: true, failedSegmentIndex: null,
+        message: '服务已关闭，上次生成被中断，可点击「从断点继续生成」恢复',
+      };
+      try {
+        save(task);
+      } catch {
+        console.error('关闭时未能保存任务状态，请检查数据目录');
+      } finally {
+        controller.abort();
+      }
+    }
+    return closing;
+  }
+
+  return { createTask, getTask: id => toDTO(readTask(id)), cancelTask, resumeTask, listPodcasts, getPodcast, deletePodcast, shutdown };
 }
 
 module.exports = { createTaskManager };

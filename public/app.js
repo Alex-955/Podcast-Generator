@@ -287,6 +287,13 @@
     playbackRate: 1.0,
     isSeeking: false,
     subtitleElements: [],
+    lastSpeakerRole: 'none',
+    lastRenderedTimeText: '',
+    lastRenderedMiniTimeText: '',
+    lastRenderedSeekPct: -1,
+    subtitleScrollRaf: 0,
+    mobileMiniRaf: 0,
+    userScrollingSubtitlesUntil: 0,
   };
 
   const dom = {
@@ -1157,60 +1164,69 @@
     const canvas = document.createElement('canvas');
     canvas.width = outW;
     canvas.height = outH;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, outW, outH);
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
-    return canvas.toDataURL('image/jpeg', 0.82);
+    try {
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, outW, outH);
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+      return canvas.toDataURL('image/jpeg', 0.82);
+    } finally {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
   }
 
   async function sliceImageFile(file, remainingQuota) {
     const img = await loadImageFromFile(file);
-    const natW = img.naturalWidth || img.width;
-    const natH = img.naturalHeight || img.height;
-    if (!natW || !natH) throw new Error('图片尺寸无效');
+    try {
+      const natW = img.naturalWidth || img.width;
+      const natH = img.naturalHeight || img.height;
+      if (!natW || !natH) throw new Error('图片尺寸无效');
 
-    const targetW = Math.min(natW, 1120);
-    const scale = targetW / natW;
-    const scaledH = Math.max(1, Math.round(natH * scale));
-    const slices = [];
+      const targetW = Math.min(natW, 1120);
+      const scale = targetW / natW;
+      const scaledH = Math.max(1, Math.round(natH * scale));
+      const slices = [];
 
-    if (natH / natW > 2.2 && remainingQuota > 1) {
-      const targetSliceOutH = Math.round(targetW * 1.45);
-      const overlapOutH = Math.round(targetW * 0.14);
-      let stepOut = Math.max(200, targetSliceOutH - overlapOutH);
-      const estimatedCount = Math.ceil((scaledH - overlapOutH) / stepOut);
+      if (natH / natW > 2.2 && remainingQuota > 1) {
+        const targetSliceOutH = Math.round(targetW * 1.45);
+        const overlapOutH = Math.round(targetW * 0.14);
+        let stepOut = Math.max(200, targetSliceOutH - overlapOutH);
+        const estimatedCount = Math.ceil((scaledH - overlapOutH) / stepOut);
 
-      if (estimatedCount > remainingQuota) {
-        stepOut = Math.ceil((scaledH - overlapOutH) / remainingQuota);
+        if (estimatedCount > remainingQuota) {
+          stepOut = Math.ceil((scaledH - overlapOutH) / remainingQuota);
+        }
+
+        const sliceSrcH = Math.min(natH, Math.round(Math.max(targetSliceOutH, stepOut + overlapOutH) / scale));
+        const stepSrc = Math.max(100, Math.round(stepOut / scale));
+
+        for (let sy = 0; sy < natH && slices.length < remainingQuota; sy += stepSrc) {
+          const sh = Math.min(sliceSrcH, natH - sy);
+          const outH = Math.max(1, Math.round(sh * scale));
+          slices.push({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            dataUrl: encodeCanvasSlice(img, 0, sy, natW, sh, targetW, outH),
+            sourceName: file.name || '截图',
+            autoSliced: true,
+          });
+          if (sy + sh >= natH) break;
+        }
+        return slices;
       }
 
-      const sliceSrcH = Math.min(natH, Math.round(Math.max(targetSliceOutH, stepOut + overlapOutH) / scale));
-      const stepSrc = Math.max(100, Math.round(stepOut / scale));
-
-      for (let sy = 0; sy < natH && slices.length < remainingQuota; sy += stepSrc) {
-        const sh = Math.min(sliceSrcH, natH - sy);
-        const outH = Math.max(1, Math.round(sh * scale));
-        slices.push({
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          dataUrl: encodeCanvasSlice(img, 0, sy, natW, sh, targetW, outH),
-          sourceName: file.name || '截图',
-          autoSliced: true,
-        });
-        if (sy + sh >= natH) break;
-      }
+      const cappedOutH = Math.min(scaledH, 3200);
+      const cappedW = cappedOutH < scaledH ? Math.max(1, Math.round(targetW * (cappedOutH / scaledH))) : targetW;
+      slices.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        dataUrl: encodeCanvasSlice(img, 0, 0, natW, natH, cappedW, cappedOutH),
+        sourceName: file.name || '截图',
+        autoSliced: false,
+      });
       return slices;
+    } finally {
+      img.src = '';
     }
-
-    const cappedOutH = Math.min(scaledH, 3200);
-    const cappedW = cappedOutH < scaledH ? Math.max(1, Math.round(targetW * (cappedOutH / scaledH))) : targetW;
-    slices.push({
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      dataUrl: encodeCanvasSlice(img, 0, 0, natW, natH, cappedW, cappedOutH),
-      sourceName: file.name || '截图',
-      autoSliced: false,
-    });
-    return slices;
   }
 
   function renderImageSelection() {
@@ -1876,9 +1892,15 @@
   }
 
   function resetPlayerToEmptyState() {
+    cancelScheduledSubtitleScroll();
     state.currentPodcast = null;
+    state.lastSpeakerRole = 'none';
+    state.lastRenderedTimeText = '00:00';
+    state.lastRenderedMiniTimeText = '00:00 / 00:00';
+    state.lastRenderedSeekPct = -1;
+    state.userScrollingSubtitlesUntil = 0;
     window.InputSource.resetPlaybackHighlight(state.input);
-    state.audioEngine?.requestPause?.();
+    state.audioEngine?.loadPodcast?.(null);
     dom.mainAudio.pause();
     dom.mainAudio.removeAttribute('src');
     dom.mainAudio.load();
@@ -1967,6 +1989,29 @@
     }
   }
 
+  function updateHistoryActiveSelection() {
+    const activeId = state.currentPodcast?.id || '';
+    const rows = dom.historyList.querySelectorAll('.history-row');
+    if (!rows.length && state.historyItems.length > 0) {
+      renderHistoryList();
+      return;
+    }
+    let matched = false;
+    rows.forEach((row) => {
+      const isCurrent = Boolean(activeId && row.dataset.podcastId === activeId);
+      if (isCurrent) matched = true;
+      row.classList.toggle('is-active', isCurrent);
+      const itemBtn = row.querySelector('.history-item');
+      if (itemBtn) {
+        if (isCurrent) itemBtn.setAttribute('aria-current', 'true');
+        else itemBtn.removeAttribute('aria-current');
+      }
+    });
+    if (activeId && !matched && state.historyItems.some((item) => item.id === activeId)) {
+      renderHistoryList();
+    }
+  }
+
   function renderHistoryList() {
     const items = state.historyItems;
     dom.historyCount.textContent = `${items.length} 集`;
@@ -1980,15 +2025,19 @@
       return;
     }
 
+    const fragment = document.createDocumentFragment();
     items.forEach((item) => {
       const row = document.createElement('div');
       row.className = 'history-row';
+      row.dataset.podcastId = item.id;
       const isCurrent = state.currentPodcast?.id === item.id;
       if (isCurrent) row.classList.add('is-active');
 
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'history-item';
+      btn.dataset.action = 'select';
+      btn.dataset.podcastId = item.id;
       if (isCurrent) btn.setAttribute('aria-current', 'true');
 
       const title = document.createElement('span');
@@ -2014,46 +2063,46 @@
       meta.appendChild(textSpan);
 
       btn.append(title, meta);
-      btn.addEventListener('click', () => {
-        state.pendingDeleteId = null;
-        handleSelectHistory(item.id);
-      });
       row.appendChild(btn);
 
       if (state.pendingDeleteId === item.id) {
         const confirmGroup = document.createElement('div');
         confirmGroup.className = 'history-delete-confirm';
         const deletingNow = state.deletingPodcastId === item.id;
-        const confirmBtn = createActionBtn(
-          deletingNow ? '删除中…' : '删除',
-          'btn btn-danger-ghost btn-sm',
-          () => handleDeletePodcast(item.id)
-        );
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.type = 'button';
+        confirmBtn.className = 'btn btn-danger-ghost btn-sm';
+        confirmBtn.textContent = deletingNow ? '删除中…' : '删除';
+        confirmBtn.dataset.action = 'confirm-delete';
+        confirmBtn.dataset.podcastId = item.id;
         confirmBtn.disabled = deletingNow;
-        const cancelBtn = createActionBtn('取消', 'btn btn-ghost btn-sm', () => {
-          state.pendingDeleteId = null;
-          renderHistoryList();
-        });
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'btn btn-ghost btn-sm';
+        cancelBtn.textContent = '取消';
+        cancelBtn.dataset.action = 'cancel-delete';
+        cancelBtn.dataset.podcastId = item.id;
         cancelBtn.disabled = deletingNow;
+
         confirmGroup.append(confirmBtn, cancelBtn);
         row.appendChild(confirmGroup);
       } else {
         const delBtn = document.createElement('button');
         delBtn.type = 'button';
         delBtn.className = 'history-delete-btn';
+        delBtn.dataset.action = 'request-delete';
+        delBtn.dataset.podcastId = item.id;
         delBtn.title = `删除《${item.podcastTitle || '未命名播客'}》`;
         delBtn.setAttribute('aria-label', `删除播客 ${item.podcastTitle || '未命名播客'}`);
         delBtn.appendChild(createDeleteIconSvg());
-        delBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          state.pendingDeleteId = item.id;
-          renderHistoryList();
-        });
         row.appendChild(delBtn);
       }
 
-      dom.historyList.appendChild(row);
+      fragment.appendChild(row);
     });
+    dom.historyList.appendChild(fragment);
   }
 
   async function handleSelectHistory(podcastId) {
@@ -2091,7 +2140,12 @@
   }
 
   function loadPodcast(podcast, { autoplay = false } = {}) {
+    cancelScheduledSubtitleScroll();
     state.currentPodcast = podcast;
+    state.lastSpeakerRole = 'none';
+    state.lastRenderedTimeText = '00:00';
+    state.lastRenderedSeekPct = -1;
+    state.userScrollingSubtitlesUntil = 0;
     window.InputSource.resetPlaybackHighlight(state.input);
 
     const sentences = Array.isArray(podcast.sentences) ? podcast.sentences : [];
@@ -2112,8 +2166,9 @@
     dom.mainAudio.playbackRate = state.playbackRate;
     dom.mainAudio.load();
 
+    const totalText = formatTime(podcast.totalDuration || 0);
     dom.currentTime.textContent = '00:00';
-    dom.totalDuration.textContent = formatTime(podcast.totalDuration || 0);
+    dom.totalDuration.textContent = totalText;
     setSeekProgress(0);
 
     dom.seekSlider.disabled = false;
@@ -2132,14 +2187,15 @@
     setDeckPlaying(false);
     dom.playerDeck.dataset.speaker = 'none';
     dom.miniTitle.textContent = podcast.podcastTitle || 'AI 妙听双人播客';
-    dom.miniTime.textContent = `00:00 / ${formatTime(podcast.totalDuration || 0)}`;
+    state.lastRenderedMiniTimeText = `00:00 / ${totalText}`;
+    dom.miniTime.textContent = state.lastRenderedMiniTimeText;
     if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.speaker = 'none';
 
     state.audioEngine?.loadPodcast(podcast);
     updateBgmButton();
 
     renderSubtitles(sentences);
-    renderHistoryList();
+    updateHistoryActiveSelection();
     updateMobileMiniVisibility();
 
     if (autoplay) {
@@ -2151,7 +2207,67 @@
     }
   }
 
+  function cancelScheduledSubtitleScroll() {
+    if (state.subtitleScrollRaf) {
+      window.cancelAnimationFrame(state.subtitleScrollRaf);
+      state.subtitleScrollRaf = 0;
+    }
+  }
+
+  function scrollActiveSubtitleIntoView(activeEl, { force = false } = {}) {
+    if (!activeEl) return;
+    cancelScheduledSubtitleScroll();
+    state.subtitleScrollRaf = window.requestAnimationFrame(() => {
+      state.subtitleScrollRaf = 0;
+      if (!activeEl.isConnected) return;
+      if (!force && Date.now() < state.userScrollingSubtitlesUntil) return;
+
+      const container = dom.subtitlesList;
+      if (container && container.scrollHeight > container.clientHeight + 2) {
+        const containerRect = container.getBoundingClientRect();
+        const itemRect = activeEl.getBoundingClientRect();
+        const topMargin = 16;
+        const bottomMargin = 24;
+        const isAbove = itemRect.top < containerRect.top + topMargin;
+        const isBelow = itemRect.bottom > containerRect.bottom - bottomMargin;
+        if (!isAbove && !isBelow) return;
+
+        const targetTop = Math.max(
+          0,
+          container.scrollTop + (itemRect.top - containerRect.top) - Math.round((container.clientHeight - itemRect.height) * 0.34)
+        );
+        container.scrollTo({ top: targetTop, behavior: 'smooth' });
+        return;
+      }
+
+      const rect = activeEl.getBoundingClientRect();
+      const viewHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+      if (force || rect.top < 110 || rect.bottom > viewHeight - 96) {
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    });
+  }
+
+  function jumpToSubtitleIndex(idx) {
+    const sentences = state.currentPodcast?.sentences;
+    if (!dom.mainAudio.src || !Array.isArray(sentences)) return;
+    const s = sentences[idx];
+    if (!s) return;
+    state.userScrollingSubtitlesUntil = 0;
+    const target = Math.max(0, Number(s.startTime) || 0);
+    syncHighlightToTime(target, { forceScroll: true });
+    if (state.audioEngine) {
+      state.audioEngine.seekAndPlay(target).catch(() => {});
+    } else {
+      dom.mainAudio.currentTime = target;
+      if (dom.mainAudio.paused) {
+        dom.mainAudio.play().catch(() => {});
+      }
+    }
+  }
+
   function renderSubtitles(sentences) {
+    cancelScheduledSubtitleScroll();
     dom.subtitlesList.textContent = '';
     state.subtitleElements = [];
 
@@ -2165,20 +2281,27 @@
       return;
     }
 
-    sentences.forEach((s, idx) => {
+    const fragment = document.createDocumentFragment();
+    const elements = new Array(sentences.length);
+    for (let idx = 0; idx < sentences.length; idx += 1) {
+      const s = sentences[idx];
       const isHost = isHostSpeaker(s.speaker);
+      const speakerLabel = displaySpeakerName(s.speaker);
+      const startLabel = formatTime(s.startTime);
+
       const row = document.createElement('div');
       row.className = `subtitle-item ${isHost ? 'is-host' : 'is-guest'}`;
+      row.dataset.index = String(idx);
       row.tabIndex = 0;
       row.setAttribute('role', 'button');
-      row.setAttribute('aria-label', `${displaySpeakerName(s.speaker)} ${formatTime(s.startTime)}：${s.text}`);
+      row.setAttribute('aria-label', `${speakerLabel} ${startLabel}：${s.text}`);
 
       const meta = document.createElement('div');
       meta.className = 'subtitle-meta';
 
       const speaker = document.createElement('span');
       speaker.className = 'subtitle-speaker';
-      speaker.textContent = displaySpeakerName(s.speaker);
+      speaker.textContent = speakerLabel;
       meta.appendChild(speaker);
 
       if (s.emotion) {
@@ -2190,7 +2313,7 @@
 
       const time = document.createElement('span');
       time.className = 'subtitle-time';
-      time.textContent = formatTime(s.startTime);
+      time.textContent = startLabel;
       meta.appendChild(time);
 
       const text = document.createElement('p');
@@ -2198,65 +2321,64 @@
       text.textContent = s.text;
 
       row.append(meta, text);
-
-      const jumpAndPlay = () => {
-        if (!dom.mainAudio.src) return;
-        const target = Math.max(0, Number(s.startTime) || 0);
-        syncHighlightToTime(target);
-        if (state.audioEngine) {
-          state.audioEngine.seekAndPlay(target).catch(() => {});
-        } else {
-          dom.mainAudio.currentTime = target;
-          if (dom.mainAudio.paused) {
-            dom.mainAudio.play().catch(() => {});
-          }
-        }
-      };
-
-      row.addEventListener('click', jumpAndPlay);
-      row.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          jumpAndPlay();
-        }
-      });
-
-      dom.subtitlesList.appendChild(row);
-      state.subtitleElements.push(row);
-    });
+      fragment.appendChild(row);
+      elements[idx] = row;
+    }
+    dom.subtitlesList.appendChild(fragment);
+    state.subtitleElements = elements;
   }
 
-  /** 兼容 0.36s 句间静音间隙：落入间隔时保持上一句高亮不闪烁 */
-  function findActiveSentenceIndex(sentences, currentTime) {
-    if (!sentences.length) return -1;
-    let candidate = -1;
-    for (let i = 0; i < sentences.length; i += 1) {
-      const s = sentences[i];
-      if (currentTime >= s.startTime && currentTime < s.endTime) {
-        return i;
+  /** 兼容句间静音间隙：落入间隔时保持上一句高亮不闪烁，顺序快路径 + 二分查找 */
+  function findActiveSentenceIndex(sentences, currentTime, hintIndex = -1) {
+    const len = sentences.length;
+    if (!len) return -1;
+    if (hintIndex >= 0 && hintIndex < len) {
+      const cur = sentences[hintIndex];
+      const next = hintIndex + 1 < len ? sentences[hintIndex + 1] : null;
+      if (currentTime >= cur.startTime && (!next || currentTime < next.startTime)) {
+        return hintIndex;
       }
+      if (next && currentTime >= next.startTime) {
+        const afterNext = hintIndex + 2 < len ? sentences[hintIndex + 2] : null;
+        if (!afterNext || currentTime < afterNext.startTime) {
+          return hintIndex + 1;
+        }
+      }
+    }
+    if (currentTime < sentences[0].startTime) return -1;
+    let lo = 0;
+    let hi = len - 1;
+    let candidate = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const s = sentences[mid];
       if (currentTime >= s.startTime) {
-        candidate = i;
+        if (currentTime < s.endTime) return mid;
+        candidate = mid;
+        lo = mid + 1;
       } else {
-        break;
+        hi = mid - 1;
       }
     }
     return candidate;
   }
 
-  function syncHighlightToTime(curTime) {
+  function syncHighlightToTime(curTime, { forceScroll = false } = {}) {
     const sentences = state.currentPodcast?.sentences;
     if (!sentences?.length) return;
-    const idx = findActiveSentenceIndex(sentences, curTime);
+    const prevIdx = state.input.activeSentenceIndex;
+    const idx = findActiveSentenceIndex(sentences, curTime, prevIdx);
     if (idx === -1) return;
 
     const activeSentence = sentences[idx];
     const speakerRole = isHostSpeaker(activeSentence.speaker) ? 'host' : 'guest';
-    dom.playerDeck.dataset.speaker = speakerRole;
-    if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.speaker = speakerRole;
+    if (speakerRole !== state.lastSpeakerRole) {
+      state.lastSpeakerRole = speakerRole;
+      dom.playerDeck.dataset.speaker = speakerRole;
+      if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.speaker = speakerRole;
+    }
 
-    if (idx !== state.input.activeSentenceIndex) {
-      const prevIdx = state.input.activeSentenceIndex;
+    if (idx !== prevIdx) {
       if (prevIdx >= 0 && state.subtitleElements[prevIdx]) {
         state.subtitleElements[prevIdx].classList.remove('is-active');
       }
@@ -2264,16 +2386,21 @@
       const activeEl = state.subtitleElements[idx];
       if (activeEl) {
         activeEl.classList.add('is-active');
-        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        scrollActiveSubtitleIntoView(activeEl, { force: forceScroll });
       }
+    } else if (forceScroll && state.subtitleElements[idx]) {
+      scrollActiveSubtitleIntoView(state.subtitleElements[idx], { force: true });
     }
   }
 
   function setSeekProgress(percent) {
     const clamped = Math.max(0, Math.min(100, percent));
-    dom.seekSlider.value = String(clamped);
-    dom.seekSlider.style.setProperty('--seek-pct', `${clamped}%`);
-    if (dom.miniProgressFill) dom.miniProgressFill.style.width = `${clamped}%`;
+    const rounded = Math.round(clamped * 10) / 10;
+    if (rounded === state.lastRenderedSeekPct) return;
+    state.lastRenderedSeekPct = rounded;
+    dom.seekSlider.value = String(rounded);
+    dom.seekSlider.style.setProperty('--seek-pct', `${rounded}%`);
+    if (dom.miniProgressFill) dom.miniProgressFill.style.width = `${rounded}%`;
   }
 
   function setDeckPlaying(playing) {
@@ -2315,7 +2442,8 @@
     if (!dom.mainAudio.src) return;
     const duration = dom.mainAudio.duration || state.currentPodcast?.totalDuration || 0;
     const target = Math.max(0, Math.min(duration, dom.mainAudio.currentTime + delta));
-    syncHighlightToTime(target);
+    state.userScrollingSubtitlesUntil = 0;
+    syncHighlightToTime(target, { forceScroll: true });
     if (state.audioEngine?.getPhase?.() === 'intro') {
       state.audioEngine.seekAndPlay(target).catch(() => {});
       return;
@@ -2346,6 +2474,18 @@
     const deckRect = dom.playerDeck.getBoundingClientRect();
     const shouldShow = deckRect.bottom < 72;
     dom.mobileMiniPlayer.classList.toggle('hidden', !shouldShow);
+  }
+
+  function scheduleMobileMiniVisibility() {
+    if (!dom.mobileMiniPlayer || window.innerWidth > 900 || !state.currentPodcast) {
+      dom.mobileMiniPlayer?.classList.add('hidden');
+      return;
+    }
+    if (state.mobileMiniRaf) return;
+    state.mobileMiniRaf = window.requestAnimationFrame(() => {
+      state.mobileMiniRaf = 0;
+      updateMobileMiniVisibility();
+    });
   }
 
   async function handleCopyMarkdown() {
@@ -2625,7 +2765,14 @@
       const targetBase = isVision
         ? (dom.settingVisionBaseUrl?.value.trim() || llmSnap.baseURL)
         : llmSnap.baseURL;
-      state.llmModelsCache.set(modelCacheKey(scope, targetBase), data.models || []);
+      const cacheKey = modelCacheKey(scope, targetBase);
+      if (state.llmModelsCache.has(cacheKey)) {
+        state.llmModelsCache.delete(cacheKey);
+      } else if (state.llmModelsCache.size >= 20) {
+        const oldestKey = state.llmModelsCache.keys().next().value;
+        state.llmModelsCache.delete(oldestKey);
+      }
+      state.llmModelsCache.set(cacheKey, data.models || []);
 
       if (isVision) {
         renderVisionModelOptions();
@@ -3281,6 +3428,53 @@
       await loadHistoryList();
     });
 
+    dom.historyList.addEventListener('click', (e) => {
+      const target = e.target.closest('[data-action]');
+      if (!target || !dom.historyList.contains(target)) return;
+      const action = target.dataset.action;
+      const podcastId = target.dataset.podcastId;
+      if (!podcastId) return;
+      if (action === 'select') {
+        const hadPending = state.pendingDeleteId !== null;
+        state.pendingDeleteId = null;
+        if (hadPending) renderHistoryList();
+        handleSelectHistory(podcastId);
+      } else if (action === 'request-delete') {
+        e.stopPropagation();
+        state.pendingDeleteId = podcastId;
+        renderHistoryList();
+      } else if (action === 'confirm-delete') {
+        e.stopPropagation();
+        handleDeletePodcast(podcastId);
+      } else if (action === 'cancel-delete') {
+        e.stopPropagation();
+        state.pendingDeleteId = null;
+        renderHistoryList();
+      }
+    });
+
+    dom.subtitlesList.addEventListener('click', (e) => {
+      const row = e.target.closest('.subtitle-item');
+      if (!row || !dom.subtitlesList.contains(row)) return;
+      const idx = Number(row.dataset.index);
+      if (Number.isInteger(idx)) jumpToSubtitleIndex(idx);
+    });
+
+    dom.subtitlesList.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const row = e.target.closest('.subtitle-item');
+      if (!row || !dom.subtitlesList.contains(row)) return;
+      e.preventDefault();
+      const idx = Number(row.dataset.index);
+      if (Number.isInteger(idx)) jumpToSubtitleIndex(idx);
+    });
+
+    const markUserScrollingSubtitles = () => {
+      state.userScrollingSubtitlesUntil = Date.now() + 2500;
+    };
+    dom.subtitlesList.addEventListener('wheel', markUserScrollingSubtitles, { passive: true });
+    dom.subtitlesList.addEventListener('touchstart', markUserScrollingSubtitles, { passive: true });
+
     dom.btnPlayPause.addEventListener('click', togglePlayPause);
     dom.btnRewind10.addEventListener('click', () => seekRelative(-10));
     dom.btnForward10.addEventListener('click', () => seekRelative(10));
@@ -3295,17 +3489,30 @@
     dom.btnCopyMarkdown.addEventListener('click', handleCopyMarkdown);
     if (dom.btnMiniPlayPause) dom.btnMiniPlayPause.addEventListener('click', togglePlayPause);
     if (dom.btnMiniSpeed) dom.btnMiniSpeed.addEventListener('click', cyclePlaybackSpeed);
-    window.addEventListener('scroll', updateMobileMiniVisibility, { passive: true });
-    window.addEventListener('resize', updateMobileMiniVisibility, { passive: true });
+    window.addEventListener('scroll', scheduleMobileMiniVisibility, { passive: true });
+    window.addEventListener('resize', scheduleMobileMiniVisibility, { passive: true });
 
     dom.seekSlider.addEventListener('input', () => {
       state.isSeeking = true;
       const pct = Number(dom.seekSlider.value) || 0;
-      dom.seekSlider.style.setProperty('--seek-pct', `${pct}%`);
+      const clamped = Math.max(0, Math.min(100, pct));
+      const rounded = Math.round(clamped * 10) / 10;
+      state.lastRenderedSeekPct = rounded;
+      dom.seekSlider.style.setProperty('--seek-pct', `${rounded}%`);
+      if (dom.miniProgressFill) dom.miniProgressFill.style.width = `${rounded}%`;
       const dur = dom.mainAudio.duration || state.currentPodcast?.totalDuration || 0;
-      const curStr = formatTime((pct / 100) * dur);
-      dom.currentTime.textContent = curStr;
-      if (dom.miniTime) dom.miniTime.textContent = `${curStr} / ${formatTime(dur)}`;
+      const curStr = formatTime((clamped / 100) * dur);
+      if (curStr !== state.lastRenderedTimeText) {
+        state.lastRenderedTimeText = curStr;
+        dom.currentTime.textContent = curStr;
+      }
+      if (dom.miniTime) {
+        const miniStr = `${curStr} / ${formatTime(dur)}`;
+        if (miniStr !== state.lastRenderedMiniTimeText) {
+          state.lastRenderedMiniTimeText = miniStr;
+          dom.miniTime.textContent = miniStr;
+        }
+      }
     });
 
     dom.seekSlider.addEventListener('change', () => {
@@ -3313,7 +3520,8 @@
       const dur = dom.mainAudio.duration || state.currentPodcast?.totalDuration || 0;
       const target = (pct / 100) * dur;
       state.isSeeking = false;
-      syncHighlightToTime(target);
+      state.userScrollingSubtitlesUntil = 0;
+      syncHighlightToTime(target, { forceScroll: true });
       if (state.audioEngine?.getPhase?.() === 'intro') {
         state.audioEngine.seekAndPlay(target).catch(() => {});
         return;
@@ -3324,8 +3532,13 @@
 
     dom.mainAudio.addEventListener('loadedmetadata', () => {
       const dur = dom.mainAudio.duration || state.currentPodcast?.totalDuration || 0;
-      dom.totalDuration.textContent = formatTime(dur);
-      if (dom.miniTime) dom.miniTime.textContent = `${formatTime(dom.mainAudio.currentTime || 0)} / ${formatTime(dur)}`;
+      const durStr = formatTime(dur);
+      dom.totalDuration.textContent = durStr;
+      if (dom.miniTime) {
+        const miniStr = `${formatTime(dom.mainAudio.currentTime || 0)} / ${durStr}`;
+        state.lastRenderedMiniTimeText = miniStr;
+        dom.miniTime.textContent = miniStr;
+      }
     });
 
     dom.mainAudio.addEventListener('timeupdate', () => {
@@ -3333,8 +3546,17 @@
       const cur = dom.mainAudio.currentTime || 0;
       const dur = dom.mainAudio.duration || state.currentPodcast?.totalDuration || 0;
       const curStr = formatTime(cur);
-      dom.currentTime.textContent = curStr;
-      if (dom.miniTime) dom.miniTime.textContent = `${curStr} / ${formatTime(dur)}`;
+      if (curStr !== state.lastRenderedTimeText) {
+        state.lastRenderedTimeText = curStr;
+        dom.currentTime.textContent = curStr;
+      }
+      if (dom.miniTime) {
+        const miniStr = `${curStr} / ${formatTime(dur)}`;
+        if (miniStr !== state.lastRenderedMiniTimeText) {
+          state.lastRenderedMiniTimeText = miniStr;
+          dom.miniTime.textContent = miniStr;
+        }
+      }
       if (dur > 0) {
         setSeekProgress((cur / dur) * 100);
       }
@@ -3361,8 +3583,45 @@
       if (!state.audioEngine || state.audioEngine.getPhase() !== 'outro') {
         setDeckPlaying(false);
       }
+      state.lastSpeakerRole = 'none';
       dom.playerDeck.dataset.speaker = 'none';
       if (dom.mobileMiniPlayer) dom.mobileMiniPlayer.dataset.speaker = 'none';
+    });
+
+    window.addEventListener('pagehide', (e) => {
+      stopPolling();
+      stopElapsedTimer();
+      cancelScheduledSubtitleScroll();
+      if (state.mobileMiniRaf) {
+        window.cancelAnimationFrame(state.mobileMiniRaf);
+        state.mobileMiniRaf = 0;
+      }
+      if (state.extractTimer) {
+        window.clearInterval(state.extractTimer);
+        state.extractTimer = null;
+      }
+      if (state.polishTimer) {
+        window.clearInterval(state.polishTimer);
+        state.polishTimer = null;
+      }
+      state.extractAbortController?.abort();
+      state.styleRecommendAbortController?.abort();
+      state.polishAbortController?.abort();
+      dom.mainAudio.pause();
+      if (e.persisted) {
+        state.audioEngine?.suspend?.();
+      } else {
+        state.audioEngine?.dispose?.();
+      }
+    });
+
+    window.addEventListener('pageshow', (e) => {
+      if (!e.persisted) return;
+      updateMobileMiniVisibility();
+      if (hasActiveRunningTask()) {
+        startPolling();
+        pollCurrentTask();
+      }
     });
 
     dom.btnSettings.addEventListener('click', () => openSettingsModal('llm'));

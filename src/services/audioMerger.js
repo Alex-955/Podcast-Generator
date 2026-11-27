@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { randomUUID } = require('node:crypto');
 const {
   extractMp3Body, parseFrameHeader, xingOffset,
   analyzeMp3,
@@ -10,7 +11,7 @@ const {
 } = require('./mp3Utils');
 
 // Give VBR players one seek table for the whole programme, including sentence gaps.
-function withSeekTable(audio, format, frames) {
+function buildSeekTable(format, frames, audioBytes, frameLengths) {
   const header = Buffer.from(format.rawHeader);
   header[1] |= 1; // no CRC
   header[2] = (14 << 4) | (header[2] & 0x0c); // a legal frame large enough for the TOC
@@ -20,18 +21,57 @@ function withSeekTable(audio, format, frames) {
   tag.write('Xing', pos);
   tag.writeUInt32BE(7, pos + 4); // frames, bytes, TOC
   tag.writeUInt32BE(frames, pos + 8);
-  const bytes = audio.length + tag.length;
+  const bytes = audioBytes + tag.length;
   tag.writeUInt32BE(bytes, pos + 12);
   let offset = 0, index = 0;
   for (let percent = 1; percent < 100; percent++) {
     const target = Math.floor(frames * percent / 100);
     while (index < target) {
-      offset += parseFrameHeader(audio, offset).frameLength;
+      offset += frameLengths.next().value;
       index++;
     }
     tag[pos + 16 + percent] = Math.floor(256 * (tag.length + offset) / bytes);
   }
-  return Buffer.concat([tag, audio]);
+  return tag;
+}
+
+function* mergedFrameLengths(segments, gapFrames, silenceFrameLength) {
+  for (const [index, segment] of segments.entries()) {
+    if (index > 0) {
+      for (let i = 0; i < gapFrames; i++) yield silenceFrameLength;
+    }
+    yield* segment.frameLengths;
+  }
+}
+
+function writeAll(fd, buffer, length = buffer.length) {
+  for (let offset = 0; offset < length;) {
+    const written = fs.writeSync(fd, buffer, offset, length - offset);
+    if (!written) throw new Error('无法写入完整拼接音频');
+    offset += written;
+  }
+}
+
+function copySegment(segment, output, buffer) {
+  const input = fs.openSync(segment.filePath, 'r');
+  try {
+    const verifySegment = () => {
+      const current = fs.fstatSync(input, { bigint: true });
+      if (['dev', 'ino', 'size', 'mtimeNs'].some(key => current[key] !== segment.stat[key])) {
+        throw new Error(`音频片段在拼接时已改变：${path.basename(segment.filePath)}`);
+      }
+    };
+    verifySegment();
+    for (let offset = 0; offset < segment.bodyLength;) {
+      const read = fs.readSync(input, buffer, 0, Math.min(buffer.length, segment.bodyLength - offset), segment.frameOffset + offset);
+      if (!read) throw new Error(`音频片段在拼接时被截断：${path.basename(segment.filePath)}`);
+      writeAll(output, buffer, read);
+      offset += read;
+    }
+    verifySegment();
+  } finally {
+    fs.closeSync(input);
+  }
 }
 
 /**
@@ -49,14 +89,24 @@ function concatenateAudioFiles(filePaths, outputFilePath, { gapSeconds = SENTENC
     throw new Error('没有可拼接的音频片段');
   }
 
-  const cleanedBuffers = [];
-  let format = null, variableBitrate = false, frames = 0;
+  const segments = [];
+  let format = null, variableBitrate = false, frames = 0, audioBytes = 0;
   for (const filePath of filePaths) {
     if (!fs.existsSync(filePath)) {
       throw new Error(`音频片段缺失，拒绝拼接：${path.basename(filePath)}`);
     }
-    const raw = fs.readFileSync(filePath);
-    const { ok, format: frame, variableBitrate: segmentVbr, frameCount } = analyzeMp3(raw);
+    const input = fs.openSync(filePath, 'r');
+    let raw, stat;
+    try {
+      stat = fs.fstatSync(input, { bigint: true });
+      raw = fs.readFileSync(input);
+    } finally {
+      fs.closeSync(input);
+    }
+    const frameLengths = [];
+    const { ok, format: frame, variableBitrate: segmentVbr, frameCount } = analyzeMp3(raw, {
+      onFrame: length => frameLengths.push(length),
+    });
     if (!ok) {
       throw new Error(`音频片段不是有效 MP3，拒绝拼接：${path.basename(filePath)}`);
     }
@@ -67,28 +117,44 @@ function concatenateAudioFiles(filePaths, outputFilePath, { gapSeconds = SENTENC
     }
     frames += frameCount;
     if (segmentVbr || format.bitrateIdx !== frame.bitrateIdx) variableBitrate = true;
-    cleanedBuffers.push(extractMp3Body(raw).subarray(frame.frameOffset));
+    const body = extractMp3Body(raw);
+    const bodyLength = body.length - frame.frameOffset;
+    const frameOffset = body.byteOffset - raw.byteOffset + frame.frameOffset;
+    segments.push({ filePath, stat, frameOffset, bodyLength, frameLengths });
+    audioBytes += bodyLength;
   }
 
   const gap = computeGap(format, gapSeconds);
   const silence = gap.frameCount > 0 ? buildSilenceFrames(format, gapSeconds) : null;
 
-  const chunks = [];
-  cleanedBuffers.forEach((buf, i) => {
-    if (i > 0 && silence) {
-      chunks.push(silence);
-    }
-    chunks.push(buf);
-  });
+  const gaps = segments.length - 1;
+  audioBytes += (silence?.length ?? 0) * gaps;
+  const xing = variableBitrate ? buildSeekTable(format, frames + gap.frameCount * gaps, audioBytes,
+    mergedFrameLengths(segments, gap.frameCount, silence && silence.length / gap.frameCount)) : null;
 
-  let combined = Buffer.concat(chunks);
-  if (variableBitrate) combined = withSeekTable(combined, format, frames + gap.frameCount * (filePaths.length - 1));
-  fs.writeFileSync(outputFilePath, combined);
+  // Publish only after every write succeeds, preserving any existing output on failure.
+  const temp = path.join(path.dirname(outputFilePath), `.tmp-${randomUUID()}`);
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  const output = fs.openSync(temp, 'wx');
+  try {
+    try {
+      if (xing) writeAll(output, xing);
+      for (const [index, segment] of segments.entries()) {
+        if (index > 0 && silence) writeAll(output, silence);
+        copySegment(segment, output, buffer);
+      }
+    } finally {
+      fs.closeSync(output);
+    }
+    fs.renameSync(temp, outputFilePath);
+  } finally {
+    fs.rmSync(temp, { force: true });
+  }
 
   return {
     success: true,
     filePath: outputFilePath,
-    fileSize: combined.length,
+    fileSize: audioBytes + (xing?.length ?? 0),
     skippedCount: 0,
     totalFiles: filePaths.length,
     sentenceGap: gap.seconds,
