@@ -324,8 +324,11 @@ function createTaskManager({
   }
 
   for (const entry of readDirectory(podcastsDir)) {
-    if (entry.isDirectory() && SAFE_ID.test(entry.name)) {
+    if (!entry.isDirectory() || !SAFE_ID.test(entry.name)) continue;
+    try {
       reconcilePodcast(entry.name);
+    } catch {
+      console.warn('启动恢复时跳过了一期无法恢复的播客');
     }
   }
   for (const entry of readDirectory(tasksDir)) {
@@ -386,7 +389,8 @@ function createTaskManager({
         items.push({ id, podcastTitle, summary, podcastStyle, sourceType, createAt, totalDuration, sentenceCount: sentences.length, fullAudioUrl,
           ...(ttsProvider && { ttsProvider }), ...(ttsModel && { ttsModel }), ...(voiceMapping && { voiceMapping }), speechSpeed });
       } catch (error) {
-        if (error.statusCode !== 404) throw error;
+        if (error.statusCode === 404 || (error.statusCode === 503 && error.code === 'PODCAST_RECOVERY_FAILED')) continue;
+        throw error;
       }
     }
     return { items: items.sort((a, b) => (Date.parse(b.createAt) || 0) - (Date.parse(a.createAt) || 0)) };
@@ -672,12 +676,11 @@ function createTaskManager({
     assertIdle();
     const previous = targetMetadata(podcastId);
     const source = podcastDTO(podcastId, previous);
-    if (payload.baseVersion !== undefined) {
-      if (payload.baseVersion !== null && !isSafeVersion(payload.baseVersion)) {
-        throw new InputError('无效的播客版本号');
-      }
-      assertPodcastVersion(source.audioVersion, payload.baseVersion);
+    if (payload.baseVersion === undefined) {
+      throw new InputError('缺少播客版本号，请刷新最新剧本后再微调');
     }
+    if (payload.baseVersion !== null && !isSafeVersion(payload.baseVersion)) throw new InputError('无效的播客版本号');
+    assertPodcastVersion(source.audioVersion, payload.baseVersion);
     const dialogue = validateEditedDialogue(payload.dialogue);
     const creds = {};
     const speech = resolveSpeech(payload, creds, previous);

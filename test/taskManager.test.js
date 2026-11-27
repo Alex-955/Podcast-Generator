@@ -1490,7 +1490,7 @@ for (const fault of ['tts', 'cancel', 'merge', 'publish']) {
       });
     }
     inject = true;
-    const edit = manager.resynthesizePodcast(id, { dialogue: dialogue.slice(0, 2).map((line, i) => ({
+    const edit = manager.resynthesizePodcast(id, { baseVersion: null, dialogue: dialogue.slice(0, 2).map((line, i) => ({
       ...line, text: ['改写一', '改写二'][i],
     })), tts: { apiKey: secret, endpoint } });
     assert.throws(() => manager.deletePodcast(id), { statusCode: 409 });
@@ -1538,7 +1538,7 @@ test('缓存淘汰后，换音色、语速、服务商或声源作用域均不�
     scope = 'second';
     fs.rmSync(config.cacheDir, { recursive: true });
     calls.length = 0;
-    const edit = manager.resynthesizePodcast(id, { dialogue, tts });
+    const edit = manager.resynthesizePodcast(id, { baseVersion: manager.getPodcast(id).audioVersion ?? null, dialogue, tts });
     const done = await waitFor(() => manager.getTask(edit.id), v => v.status === 'completed');
     assert.equal(calls.length, dialogue.length);
     assert.equal(done.progress.cachedSegments, 0);
@@ -1554,7 +1554,7 @@ test('失败微调的目标已删除时拒绝续跑', async t => {
   const { id } = manager.createTask(payload);
   await waitFor(() => manager.getTask(id), v => v.status === 'completed');
   fail = true;
-  const edit = manager.resynthesizePodcast(id, { dialogue: [{ speaker: '阿泽', text: '改写' }] });
+  const edit = manager.resynthesizePodcast(id, { baseVersion: null, dialogue: [{ speaker: '阿泽', text: '改写' }] });
   await waitFor(() => manager.getTask(edit.id), v => v.status === 'failed');
   manager.deletePodcast(id);
   assert.throws(() => manager.resumeTask(edit.id), { statusCode: 404 });
@@ -1584,7 +1584,7 @@ test('发布中进程退出，启动恢复后整套旧成品可读并可继续�
       rename(src, dest);
       if (dest === path.join(target, 'full_podcast.mp3')) process.exit(37);
     };
-    const edit = manager.resynthesizePodcast(id, { dialogue: [{ speaker: '小晓', text: '改后' }] });
+    const edit = manager.resynthesizePodcast(id, { baseVersion: null, dialogue: [{ speaker: '小晓', text: '改后' }] });
     fs.writeFileSync(1, edit.id);
   `, require.resolve('../src/services/taskManager'), JSON.stringify({ config, id, target })],
   { encoding: 'utf8', timeout: 5000 });
@@ -1731,7 +1731,7 @@ for (const scenario of ['换账号', '同账号', '缺少旧账号证明']) {
       fs.rmSync(config.cacheDir, { recursive: true });
       calls.length = 0;
       lines[0] = { ...lines[0], text: lines[0].text + '改' };
-      const edit = manager.resynthesizePodcast(id, { dialogue: lines, tts: tts(key) });
+      const edit = manager.resynthesizePodcast(id, { baseVersion: manager.getPodcast(id).audioVersion ?? null, dialogue: lines, tts: tts(key) });
       const done = await completed(edit.id);
       assert.deepEqual(calls, lines.slice(0, expectedCalls).map(line => [key, line.text]));
       assert.equal(fs.readdirSync(config.cacheDir).length, expectedCalls);
