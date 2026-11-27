@@ -94,7 +94,7 @@ test('便携导入兼容两种入口，保留既有目标和源文件，忽略�
   });
   const before = snapshot();
   const result = await importLegacyPodcasts(source, target);
-  assert.deepEqual(result, { sourcePodcastsDir: fs.realpathSync(podcasts), importedCount: 2, skippedCount: 1, invalidCount: 3 });
+  assert.deepEqual(result, { sourcePodcastsDir: await fs.promises.realpath(podcasts), importedCount: 2, skippedCount: 1, invalidCount: 3 });
   assert.deepEqual(fs.readdirSync(path.join(target, 'first')).sort(), ['full_podcast.mp3', 'meta.json', 'sentence_001.mp3']);
   assert.deepEqual(fs.readdirSync(path.join(target, 'existing')), ['keep']);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(target, 'private/meta.json'))), { summary: '***' });
