@@ -12,7 +12,7 @@ const { classify, guardNavigation, allowDownload } = require('../electron/naviga
 const { importLegacyPodcasts } = require('../electron/migration');
 const { makeMp3 } = require('./helpers/mp3Fixtures');
 const { execFileSync } = require('node:child_process');
-const { applicationFiles, verifyBundle, locate } = require('../scripts/verify-desktop-bundle');
+const { applicationFiles, verifyBundle, verifyTarget, locate } = require('../scripts/verify-desktop-bundle');
 const root = path.resolve(__dirname, '..');
 
 function scratch(t) {
@@ -155,10 +155,83 @@ function asar(files) {
   return Buffer.concat([header, ...data]);
 }
 
+function macRuntime(app) {
+  write(app, 'Contents/Info.plist', '<plist version="1.0"><dict/></plist>');
+  write(app, 'Contents/MacOS/AI 妙听', 'fixture');
+  write(app, 'Contents/PkgInfo', 'APPL????');
+  fs.mkdirSync(path.join(app, 'Contents/Frameworks'));
+}
+
+function installedResources(dir) {
+  write(dir, 'app.asar', asar(fixture));
+  write(dir, 'public/podcasts/.gitkeep', '');
+}
+
+test('完整 macOS 应用拒绝游离条目、禁运文件和 plist 中的本机路径与凭据', t => {
+  const app = path.join(scratch(t), 'AI 妙听.app');
+  macRuntime(app);
+  installedResources(path.join(app, 'Contents/Resources'));
+  assert.deepEqual(verifyTarget(app), [applicationFiles.size]);
+  for (const name of ['leak.txt', 'Contents/leak.txt', 'Contents/MacOS/.env', 'Contents/Frameworks/stray.map',
+    'Contents/_CodeSignature/AGENTS.md']) {
+    write(app, name, 'extra');
+    assert.throws(() => verifyTarget(app), /白名单以外/);
+    fs.unlinkSync(path.join(app, name));
+  }
+  for (const [key, value] of [['home', '/Users/fixture/private'], ['apiKey', 'synthetic-fixture']]) {
+    write(app, 'Contents/Info.plist', '<plist><dict><key>' + key + '</key><string>' + value + '</string></dict></plist>');
+    assert.throws(() => verifyTarget(app), /安全扫描/);
+  }
+});
+
+function nsisFixture(t) {
+  const root = scratch(t), exe = path.join(root, 'setup.exe');
+  const outer = path.join(root, 'outer'), inner = path.join(root, 'inner');
+  write(root, 'setup.exe', 'offline NSIS fixture');
+  write(outer, '$PLUGINSDIR/System.dll', 'plugin');
+  write(inner, 'AI 妙听.exe', 'runtime');
+  installedResources(path.join(inner, 'resources'));
+  // Replace only 7-Zip extraction. Both archive layers use the production verifier.
+  t.mock.method(require('node:child_process'), 'execFileSync', (command, args) => {
+    assert.equal(command, '7z');
+    const isOuter = args[1] === '-tNsis';
+    assert.equal(args[1], isOuter ? '-tNsis' : '-t7z');
+    if (isOuter) assert.ok(args.at(-1).endsWith('setup.exe'));
+    else assert.equal(path.basename(args.at(-1)), 'app-64.7z');
+    fs.cpSync(isOuter ? outer : inner, args.find(arg => arg.startsWith('-o')).slice(2), { recursive: true });
+  });
+  return { exe, outer, inner };
+}
+
+test('NSIS 即使外层含合法资源也必须有内层归档', t => {
+  const { exe, outer } = nsisFixture(t);
+  installedResources(path.join(outer, 'resources'));
+  assert.throws(() => verifyTarget(exe), /必须包含唯一的内层安装负载/);
+});
+
+test('NSIS 检查外层插件、内层运行时及 locales 中的所有条目', t => {
+  const { exe, outer, inner } = nsisFixture(t);
+  write(outer, '$PLUGINSDIR/app-64.7z', 'fixture payload');
+  write(inner, 'locales/zh-CN.pak', 'fixture locale');
+  assert.deepEqual(verifyTarget(exe), [applicationFiles.size]);
+  for (const [dir, name] of [[outer, 'stray.txt'], [outer, '$PLUGINSDIR/private.dll'],
+    [inner, 'stray.txt'], [inner, '.env'], [inner, 'locales/private.txt']]) {
+    write(dir, name, 'extra');
+    assert.throws(() => verifyTarget(exe), /白名单以外/);
+    fs.unlinkSync(path.join(dir, name));
+  }
+  fs.renameSync(path.join(outer, '$PLUGINSDIR/app-64.7z'), path.join(outer, '$PLUGINSDIR/app-arm64.7z'));
+  const x64Exe = path.join(path.dirname(exe), 'AI-Miaoting-v1.0.0-win-x64-setup.exe');
+  fs.renameSync(exe, x64Exe);
+  assert.throws(() => verifyTarget(x64Exe), /负载架构不匹配/);
+});
+
 test('同时发现两种平台产物；正常 ASAR 与展开目录通过，禁运内容与损坏归档被拦截', t => {
   const dir = scratch(t);
   const app = path.join(dir, 'mac-arm64/AI 妙听.app/Contents/Resources/app');
   for (const [name, bytes] of Object.entries(fixture)) write(app, name, bytes);
+  macRuntime(path.join(dir, 'mac-arm64/AI 妙听.app'));
+  write(dir, 'win-unpacked/AI 妙听.exe', 'fixture');
   const file = path.join(dir, 'win-unpacked/resources/app.asar');
   write(dir, path.relative(dir, file), asar(fixture));
   for (const resources of [path.dirname(app), path.dirname(file)]) write(resources, 'public/podcasts/.gitkeep', '');

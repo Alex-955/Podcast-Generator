@@ -3,22 +3,14 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { execFileSync } = require('node:child_process');
-const { scanContent, productionPackages, packageOwner, excludedDependency, forbiddenPath } = require('./build-release');
+const childProcess = require('node:child_process');
+const { SOURCE_FILES, scanContent, productionPackages, packageOwner, excludedDependency, forbiddenPath } = require('./build-release');
 
 const applicationFiles = new Set([
   'package.json', 'server.js', 'LICENSE', 'TRADEMARK.md',
   'electron/main.js', 'electron/preload.js', 'electron/windowState.js', 'electron/navigationGuard.js', 'electron/migration.js',
   'public/index.html', 'public/style.css', 'public/app.js', 'public/inputSource.js', 'public/audioEngine.js',
-  'src/services/atomicWrite.js', 'src/services/audioMerger.js', 'src/services/connectionTests.js',
-  'src/services/edgeTtsAdapter.js', 'src/services/extractor.js', 'src/services/httpTts.js',
-  'src/services/imageExtractor.js', 'src/services/instanceLock.js', 'src/services/llmCredentials.js',
-  'src/services/llmModels.js', 'src/services/minimaxTtsProvider.js', 'src/services/mp3Utils.js',
-  'src/services/podcastPublication.js', 'src/services/providerHttp.js', 'src/services/scriptEngine.js',
-  'src/services/speechNormalize.js', 'src/services/styleRecommender.js', 'src/services/taskManager.js',
-  'src/services/textPolisher.js', 'src/services/ttsCache.js', 'src/services/ttsCredentials.js',
-  'src/services/ttsProvider.js', 'src/services/ttsService.js', 'src/services/validation.js',
-  'src/services/volcengineTtsProvider.js',
+  ...SOURCE_FILES,
 ]);
 const applicationDirs = new Set(['electron', 'public', 'src', 'src/services']);
 const { isUtf8 } = require('node:buffer');
@@ -27,6 +19,11 @@ const stat = file => fs.lstatSync(file, { throwIfNoEntry: false });
 
 function safeSegment(name) {
   if (!name || name === '.' || name === '..' || /[\\/:\x00-\x1f]/.test(name)) throw new Error('无效归档路径');
+}
+
+function checkPhysicalAppPath(name) {
+  const forbidden = /(?:^|\/)(?:plan|data|website|tests?|scripts|agents\.md|plan\.md|roadmap\.md|\.env[^/]*|\.git|\.ds_store|[^/]+\.map|public\/podcasts)(?:\/|$)/i;
+  if (forbidden.test(name)) throw new Error('外置应用目录含禁运路径');
 }
 
 function walkDirectory(dir, visit, prefix = '') {
@@ -53,6 +50,7 @@ function readArchive(file, visit) {
   const sidecar = file + '.unpacked';
   const physical = new Map();
   if (stat(sidecar)) walkDirectory(sidecar, (name, content) => {
+    checkPhysicalAppPath(name);
     if (content !== null) physical.set(name, content);
     else visit(name, null);
   });
@@ -141,17 +139,22 @@ function verifyBundle(file) {
     checkContent(name, bytes);
   }
   if (path.basename(file) === 'app.asar') readArchive(file, visit);
-  else walkDirectory(file, visit);
+  else walkDirectory(file, (name, bytes) => {
+    checkPhysicalAppPath(name);
+    visit(name, bytes);
+  });
   for (const name of applicationFiles) if (!found.has(name)) throw new Error('缺少 ' + name);
   for (const owner of owners) if (!manifests.has(owner)) throw new Error('依赖缺少清单');
   return found.size;
 }
 
-function resourcesAt(dir) {
-  const runtimeFiles = new Set(['icon.icns', 'LICENSE.electron.txt', 'LICENSES.chromium.html', 'app-update.yml', 'elevate.exe']);
+function resourcesAt(dir, platform) {
+  const runtimeFiles = new Set(['LICENSE.electron.txt', 'LICENSES.chromium.html', 'app-update.yml']);
+  if (platform !== 'win') runtimeFiles.add('icon.icns');
+  if (platform !== 'mac') runtimeFiles.add('elevate.exe');
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const name = entry.name;
-    if (entry.isDirectory() && /^[a-z]{2,3}(?:_[A-Za-z0-9]+)*\.lproj$/.test(name)) {
+    if (platform !== 'win' && entry.isDirectory() && /^[a-z]{2,3}(?:_[A-Za-z0-9]+)*\.lproj$/.test(name)) {
       if (fs.readdirSync(path.join(dir, name)).length) throw new Error('本地化资源含额外文件');
     } else if (entry.isFile() && runtimeFiles.has(name)) {
       checkContent(name, fs.readFileSync(path.join(dir, name)));
@@ -168,16 +171,136 @@ function resourcesAt(dir) {
   const archive = path.join(dir, 'app.asar'), app = path.join(dir, 'app');
   if (stat(archive) && stat(app)) throw new Error('存在重复的应用目录');
   if (stat(archive)) return archive;
+  if (stat(archive + '.unpacked')) throw new Error('外置资源缺少对应 ASAR');
   if (stat(app)?.isDirectory()) return app;
   throw new Error('缺少桌面应用资源');
+}
+
+// Runtime entries are relative to the extracted root. Directories are inferred
+// from allowed leaves so an unexpected empty directory also fails the gate.
+function runtimeLayout(files, directories = [], links = new Map()) {
+  const dirs = new Set(directories);
+  for (const name of [...files, ...links.keys()]) {
+    for (let dir = path.posix.dirname(name); dir !== '.'; dir = path.posix.dirname(dir)) dirs.add(dir);
+  }
+  return { files: new Set(files), dirs, links };
+}
+
+function checkRuntimeText(name, file) {
+  const bytes = fs.readFileSync(file);
+  checkContent(name, bytes);
+  if (!name.endsWith('.plist') && !name.endsWith('/CodeResources')) return;
+  // Decode XML entities and binary plists before checking string values.
+  let decoded;
+  try {
+    decoded = bytes.subarray(0, 8).toString() === 'bplist00'
+      ? childProcess.execFileSync('plutil', ['-convert', 'xml1', '-o', '-', file], { stdio: ['ignore', 'pipe', 'ignore'] })
+      : bytes;
+    decoded = JSON.stringify(require('plist').parse(decoded.toString('utf8')));
+  } catch {
+    throw new Error('无法读取运行时属性列表');
+  }
+  checkContent(name, Buffer.from(decoded));
+}
+
+function auditRuntime(root, layout, { resources, normalize = name => name } = {}) {
+  if (!stat(root)?.isDirectory()) throw new Error('缺少普通运行时目录');
+  function walk(dir, prefix) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      safeSegment(entry.name);
+      const name = prefix + entry.name, file = path.join(dir, entry.name);
+      const key = normalize(name);
+      if (entry.isDirectory() && layout.dirs.has(key)) {
+        // resourcesAt and verifyBundle inspect this subtree, including the ASAR.
+        if (name !== resources) walk(file, name + '/');
+      } else if (entry.isFile() && layout.files.has(key)) {
+        if (/\.(?:plist|json|txt|html|yml)$|\/(?:PkgInfo|CodeResources)$/.test(name)) checkRuntimeText(name, file);
+      } else if (entry.isSymbolicLink() && layout.links.has(key)) {
+        if (fs.readlinkSync(file) !== layout.links.get(key) || !fs.existsSync(file)) {
+          throw new Error('Electron 框架链接无效：' + name);
+        }
+      } else {
+        throw new Error('运行时含白名单以外的条目或链接：' + name);
+      }
+    }
+  }
+  walk(root, '');
+}
+
+const product = 'AI 妙听';
+const macResources = 'Contents/Resources';
+const electronResources = 'Contents/Frameworks/Electron Framework.framework/Versions/A/Resources';
+function macLayout() {
+  const files = [], links = new Map();
+  function appContents(prefix, executable) {
+    for (const leaf of ['Info.plist', 'PkgInfo', 'MacOS/' + executable, '_CodeSignature/CodeResources']) {
+      files.push(prefix + leaf);
+    }
+  }
+  appContents('Contents/', product);
+  for (const suffix of ['', ' (GPU)', ' (Plugin)', ' (Renderer)']) {
+    const helper = product + ' Helper' + suffix;
+    appContents('Contents/Frameworks/' + helper + '.app/Contents/', helper);
+  }
+  for (const framework of ['Electron Framework', 'Mantle', 'ReactiveObjC', 'Squirrel']) {
+    const prefix = 'Contents/Frameworks/' + framework + '.framework/';
+    const version = prefix + 'Versions/A/';
+    links.set(prefix + 'Versions/Current', 'A');
+    const aliases = [framework, 'Resources'];
+    if (framework === 'Electron Framework') aliases.push('Libraries', 'Helpers');
+    for (const alias of aliases) links.set(prefix + alias, 'Versions/Current/' + alias);
+    files.push(version + framework, version + 'Resources/Info.plist', version + '_CodeSignature/CodeResources');
+    if (framework === 'Squirrel') files.push(version + 'Resources/ShipIt');
+    if (framework === 'Electron Framework') {
+      for (const leaf of ['Helpers/app_shim_loader', 'Helpers/chrome_crashpad_handler',
+        'Libraries/libffmpeg.dylib', 'Libraries/libvk_swiftshader.dylib', 'Libraries/vk_swiftshader_icd.json',
+        'Resources/MainMenu.nib', 'Resources/chrome_100_percent.pak', 'Resources/chrome_200_percent.pak',
+        'Resources/resources.pak', 'Resources/icudtl.dat', 'Resources/v8_context_snapshot.arm64.bin',
+        'Resources/v8_context_snapshot.x86_64.bin', 'Resources/en.lproj/locale.pak']) files.push(version + leaf);
+    }
+  }
+  return runtimeLayout(files, [macResources], links);
+}
+
+function macBundle(app) {
+  auditRuntime(app, macLayout(), {
+    resources: macResources,
+    normalize(name) {
+      if (!name.startsWith(electronResources + '/')) return name;
+      return electronResources + '/' + name.slice(electronResources.length + 1)
+        .replace(/^[a-z]{2,3}(?:_[A-Za-z0-9]+)*\.lproj(?=\/|$)/, 'en.lproj');
+    },
+  });
+  for (const name of ['Contents/Info.plist', 'Contents/PkgInfo', 'Contents/MacOS/' + product]) {
+    if (!stat(path.join(app, name))?.isFile()) throw new Error('缺少 ' + name);
+  }
+  if (!stat(path.join(app, 'Contents/Frameworks'))?.isDirectory()) throw new Error('缺少 Electron 框架目录');
+  return resourcesAt(path.join(app, macResources), 'mac');
+}
+
+const windowsLayout = runtimeLayout([
+  product + '.exe', 'chrome_100_percent.pak', 'chrome_200_percent.pak', 'resources.pak',
+  'd3dcompiler_47.dll', 'dxcompiler.dll', 'dxil.dll', 'ffmpeg.dll', 'libEGL.dll', 'libGLESv2.dll',
+  'vk_swiftshader.dll', 'vulkan-1.dll', 'vk_swiftshader_icd.json', 'icudtl.dat',
+  'snapshot_blob.bin', 'v8_context_snapshot.bin', 'LICENSES.chromium.html', 'LICENSE.electron.txt',
+  'locales/en-US.pak',
+], ['resources']);
+
+function windowsBundle(dir) {
+  auditRuntime(dir, windowsLayout, {
+    resources: 'resources',
+    normalize: name => /^locales\/[a-z]{2,3}(?:[-_][A-Za-z0-9]+)*\.pak$/.test(name) ? 'locales/en-US.pak' : name,
+  });
+  if (!stat(path.join(dir, product + '.exe'))?.isFile()) throw new Error('缺少 Windows 主程序');
+  return resourcesAt(path.join(dir, 'resources'), 'win');
 }
 
 function locate(target) {
   const base = path.basename(target);
   if (base === 'app.asar' || base === 'app') return [target];
-  if (base.endsWith('.app')) return [resourcesAt(path.join(target, 'Contents', 'Resources'))];
+  if (base.endsWith('.app')) return [macBundle(target)];
   if (base.toLowerCase() === 'resources') return [resourcesAt(target)];
-  if (stat(path.join(target, 'resources'))) return [resourcesAt(path.join(target, 'resources'))];
+  if (stat(path.join(target, 'resources'))) return [windowsBundle(target)];
   const bundles = [];
   for (const dir of fs.readdirSync(target, { withFileTypes: true })) {
     if (!dir.isDirectory()) continue;
@@ -195,9 +318,7 @@ function verifyTarget(target) {
   return locate(target).map(verifyBundle);
 }
 
-function verifyInstalledResources(resources) {
-  if (!stat(resources)?.isDirectory()) throw new Error('缺少普通资源目录');
-  const archive = resourcesAt(resources);
+function verifyInstalledArchive(archive) {
   if (path.basename(archive) !== 'app.asar') throw new Error('安装包缺少 ASAR');
   return verifyBundle(archive);
 }
@@ -206,7 +327,7 @@ function verifyDmg(target) {
   const mount = fs.mkdtempSync(path.join(os.tmpdir(), 'miaoting-dmg-'));
   let attached = false;
   try {
-    execFileSync('hdiutil', ['attach', '-nobrowse', '-readonly', '-plist', '-mountpoint', mount, target]);
+    childProcess.execFileSync('hdiutil', ['attach', '-nobrowse', '-readonly', '-plist', '-mountpoint', mount, target]);
     attached = true;
     const app = 'AI 妙听.app';
     if (!stat(path.join(mount, app))?.isDirectory() ||
@@ -223,11 +344,11 @@ function verifyDmg(target) {
       }
       throw new Error('安装盘根目录含额外文件');
     }
-    return [verifyInstalledResources(path.join(mount, app, 'Contents', 'Resources'))];
+    return [verifyInstalledArchive(macBundle(path.join(mount, app)))];
   } finally {
     if (attached) {
-      try { execFileSync('hdiutil', ['detach', mount]); }
-      catch { execFileSync('hdiutil', ['detach', '-force', mount]); }
+      try { childProcess.execFileSync('hdiutil', ['detach', mount]); }
+      catch { childProcess.execFileSync('hdiutil', ['detach', '-force', mount]); }
     }
     fs.rmdirSync(mount);
   }
@@ -235,22 +356,31 @@ function verifyDmg(target) {
 
 function verifyNsis(target) {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'miaoting-nsis-'));
-  const extract = (file, dir, type) => execFileSync('7z',
+  const extract = (file, dir, type) => childProcess.execFileSync('7z',
     ['x', '-t' + type, '-y', '-bd', '-o' + dir, '--', file], { stdio: 'ignore' });
   try {
     const outer = path.join(temp, 'outer');
     extract(target, outer, 'Nsis');
     const plugins = path.join(outer, '$PLUGINSDIR');
     const payloads = stat(plugins)?.isDirectory() ? fs.readdirSync(plugins).filter(name => /^app-.*\.7z$/i.test(name)) : [];
-    if (payloads.length === 0) return [verifyInstalledResources(path.join(outer, 'resources'))];
-    if (payloads.length !== 1 || payloads[0] !== 'app-64.7z' || stat(path.join(outer, 'resources'))) {
-      throw new Error('NSIS 安装负载不匹配');
+    if (payloads.length !== 1 || !/^app-(?:64|32|arm64)\.7z$/.test(payloads[0])) {
+      throw new Error('NSIS 必须包含唯一的内层安装负载 app-*.7z');
     }
+    const arch = /-win-(x64|ia32|arm64)-setup\.exe$/i.exec(path.basename(target))?.[1].toLowerCase();
+    const payloadArch = { x64: '64', ia32: '32', arm64: 'arm64' };
+    if (arch && payloads[0] !== 'app-' + payloadArch[arch] + '.7z') throw new Error('NSIS 安装负载架构不匹配');
     const payload = path.join(plugins, payloads[0]);
-    if (!stat(payload)?.isFile()) throw new Error('NSIS 安装负载无效');
+    const pluginFiles = ['System.dll', 'StdUtils.dll', 'nsDialogs.dll', 'nsExec.dll',
+      'nsProcess.dll', 'Nsis7z.dll', 'UAC.dll', 'WinShell.dll', 'LangDLL.dll', 'StartMenu.dll',
+      'modern-header.bmp', 'modern-wizard.bmp', 'installerHeaderico.ico'];
+    const outerFiles = ['Uninstall ' + product + '.exe', 'uninstallerIcon.ico', '$PLUGINSDIR/' + payloads[0],
+      ...pluginFiles.map(name => '$PLUGINSDIR/' + name.toLowerCase())];
+    auditRuntime(outer, runtimeLayout(outerFiles), {
+      normalize: name => name.startsWith('$PLUGINSDIR/') ? '$PLUGINSDIR/' + path.posix.basename(name).toLowerCase() : name,
+    });
     const inner = path.join(temp, 'payload');
     extract(payload, inner, '7z');
-    return [verifyInstalledResources(path.join(inner, 'resources'))];
+    return [verifyInstalledArchive(windowsBundle(inner))];
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }
