@@ -406,12 +406,19 @@
             <h3 class="step-card-title">安装并首次放行开源未签名版</h3>
             <div data-os-panel="mac">
               <p class="step-card-desc">
-                将「拾声集」拖入「应用程序」即可运行；首次打开若提示无法验证开发者或已损坏，前往「系统设置 → 隐私与安全性 → 仍要打开」，或终端执行 <code>xattr -cr "/Applications/拾声集.app"</code>。
+                将「拾声集」拖入「应用程序」后首次打开，若遇「“拾声集”已损坏，无法打开」或「无法验证开发者」提示（既可能由未签名触发，也可能是文件损坏或被篡改），<strong>执行任何放行命令前</strong>请先确认安装包来自官方 Release，并核对同版本 <code>SHA256SUMS.txt</code>。确认无误后复制下方命令到终端回车，递归清除应用包扩展属性（含隔离标记）再重新双击打开（仅提示无法验证开发者时，也可在核验后前往「系统设置 → 隐私与安全性 → 仍要打开」）：
               </p>
+              <div class="sha-box xattr-box">
+                <div class="sha-box-head">
+                  <span>macOS 终端放行命令（先核对 SHA256 再执行）</span>
+                  <button type="button" class="btn btn-subtle btn-sm" data-copy-xattr data-copy-text='xattr -cr "/Applications/拾声集.app"'>复制命令</button>
+                </div>
+                <code class="sha-code">xattr -cr "/Applications/拾声集.app"</code>
+              </div>
             </div>
             <div data-os-panel="win" class="hidden">
               <p class="step-card-desc">
-                双击 <code>InkCast-v1.0.0-win-x64-setup.exe</code> 完成安装；首次运行若遇「Windows 已保护你的电脑」提示，点击「更多信息 → 仍要运行」即可。
+                双击 <code>InkCast-v1.0.0-win-x64-setup.exe</code> 完成安装；首次运行若遇「Windows 已保护你的电脑」提示，请先核对官方来源与 <code>SHA256SUMS.txt</code>，在设备策略允许且界面提供放行入口时，点击「更多信息 → 仍要运行」。
               </p>
             </div>
           </article>
@@ -443,12 +450,12 @@
             <div class="accordion-inner">
               <div class="accordion-body">
                 <div class="accordion-os-card">
-                  <h4>macOS Gatekeeper：提示“无法验证开发者”或“已损坏”</h4>
-                  <p>因开源项目未购买商业 Apple 开发者签名证书，系统会首次拦截。请前往<strong>「系统设置 → 隐私与安全性 → 仍要打开」</strong>，或在终端运行 <code>xattr -cr "/Applications/拾声集.app"</code> 即可正常启动。</p>
+                  <h4>macOS Gatekeeper：提示“「拾声集」已损坏，无法打开”或“无法验证开发者”</h4>
+                  <p>该提示既可能是开源未签名触发的系统拦截，也可能表示文件损坏或被篡改。<strong>执行任何放行命令前</strong>，请先确认来自官方 Release 并核对同版本 <code>SHA256SUMS.txt</code>。核验无误并拖入「应用程序」后，在终端执行 <code>xattr -cr "/Applications/拾声集.app"</code> 递归清除已安装应用包的扩展属性（含系统隔离标记），再重新双击打开；若仅提示「无法验证开发者」，也可在核验后前往<strong>「系统设置 → 隐私与安全性 → 仍要打开」</strong>。</p>
                 </div>
                 <div class="accordion-os-card">
                   <h4>Windows SmartScreen：提示“Windows 已保护你的电脑”</h4>
-                  <p>因开源安装包未购买商业代码签名证书，SmartScreen 会首次提醒。点击弹窗里的<strong>「更多信息」→「仍要运行」</strong>即可正常安装与启动，亦可先对照 <code>SHA256SUMS.txt</code> 校验安装包哈希。</p>
+                  <p>因开源安装包未购买商业代码签名证书，SmartScreen 可能在启动安装程序或首次运行时拦截提醒。请先确认来自官方 Release 并对照同版本 <code>SHA256SUMS.txt</code> 核对校验和；在当前设备策略允许且界面提供放行入口时，点击弹窗里的<strong>「更多信息」→「仍要运行」</strong>。</p>
                 </div>
               </div>
             </div>
@@ -585,11 +592,20 @@
       </div>
 
       <div class="modal-os-hint" data-modal-os-hint="mac">
-        <strong>macOS 首次打开指引：</strong>把「拾声集」拖入「应用程序」后若遇 Gatekeeper 提示无法验证开发者或已损坏，前往「系统设置 → 隐私与安全性 → 仍要打开」，或终端执行 <code>xattr -cr "/Applications/拾声集.app"</code>。
+        <p class="modal-os-hint-text">
+          <strong>macOS 首次打开指引：</strong>拖入「应用程序」后若提示「“拾声集”已损坏，无法打开」或「无法验证开发者」（既可能由开源未签名触发，也可能表示文件损坏或被篡改），<strong>执行任何放行命令前</strong>请先确认安装包来自官方 Release，并核对同版本 <code>SHA256SUMS.txt</code>；确认无误后在终端运行下方命令清除应用包扩展属性（含系统隔离标记）并重新双击打开（仅提示无法验证开发者时，也可在核验后前往「系统设置 → 隐私与安全性 → 仍要打开」）：
+        </p>
+        <div class="sha-box xattr-box">
+          <div class="sha-box-head">
+            <span>macOS 终端放行命令（先核对官方来源与 SHA256）</span>
+            <button type="button" class="btn btn-subtle btn-sm" data-copy-xattr data-copy-text='xattr -cr "/Applications/拾声集.app"'>复制终端命令</button>
+          </div>
+          <code class="sha-code">xattr -cr "/Applications/拾声集.app"</code>
+        </div>
       </div>
 
       <div class="modal-os-hint hidden" data-modal-os-hint="win">
-        <strong>Windows 首次运行指引：</strong>安装后若遇「Windows 已保护你的电脑」SmartScreen 提示，点击「更多信息 → 仍要运行」即可。
+        <strong>Windows 首次运行指引：</strong>启动安装程序或首次运行时若遇「Windows 已保护你的电脑」SmartScreen 提示，请先确认来自官方 Release 并核对同版本 <code>SHA256SUMS.txt</code>；在当前设备策略允许且界面提供放行入口时，点击「更多信息 → 仍要运行」。
       </div>
 
       <div class="modal-file-row">

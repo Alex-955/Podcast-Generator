@@ -1916,6 +1916,25 @@ body.modal-open {
   color: var(--ink-secondary);
 }
 
+.modal-os-hint-text {
+  margin: 0;
+}
+
+.xattr-box {
+  margin-top: 10px;
+}
+
+.step-card .xattr-box {
+  padding: 10px 12px;
+  gap: 6px;
+}
+
+.step-card .xattr-box .sha-code {
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .modal-file-row {
   display: flex;
   align-items: center;

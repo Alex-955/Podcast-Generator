@@ -929,9 +929,17 @@
           (shaCodeEl && shaCodeEl.textContent && shaCodeEl.textContent.trim()) ||
           getOsConfig(state.os).sha256;
         const ok = await copyText(shaText);
-        showToast(ok ? 'SHA256 校验码已复制到剪贴板' : '复制失败，请手动选中校验码复制');
+        showToast(ok ? '校验命令已复制到剪贴板' : '复制失败，请手动选中命令复制');
       });
     }
+
+    document.querySelectorAll('[data-copy-xattr]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const cmd = btn.getAttribute('data-copy-text') || 'xattr -cr "/Applications/拾声集.app"';
+        const ok = await copyText(cmd);
+        showToast(ok ? '已复制终端放行命令；确认安装包来自官方 Release 并核对同版本 SHA256SUMS.txt 无误后再粘贴回车' : '复制失败，请手动选中命令复制');
+      });
+    });
   }
 
   /* ------------------------------------------------------------------
