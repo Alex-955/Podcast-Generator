@@ -2,12 +2,12 @@
   'use strict';
 
   const FALLBACK_CONFIG = {
-    filename: 'ai-podcast-generator-v0.2.0-portable.zip',
-    directUrl: '/downloads/ai-podcast-generator-v0.2.0-portable.zip',
-    githubReleasesUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/tag/v0.2.0',
+    filename: 'AI-Miaoting-v1.0.0-mac-arm64.dmg',
+    directUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/AI-Miaoting-v1.0.0-mac-arm64.dmg',
+    githubReleasesUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.0',
     githubRepoUrl: 'https://github.com/Alex-955/Podcast-Generator',
-    sha256: '3b7b8ddb627d8be55c2c9872e568a74f71c13f3015700ea29d5d4cc48ea0aab5',
-    requireNodeNotice: true,
+    sha256: 'shasum -a 256 AI-Miaoting-v1.0.0-mac-*.dmg',
+    requireNodeNotice: false,
   };
 
   const PREVIEW_ASSETS = {
@@ -93,15 +93,17 @@
       (cfg.links && cfg.links.githubReleases) ||
       cfg.githubReleases ||
       FALLBACK_CONFIG.githubReleasesUrl;
-    const sha256 = osBucket.sha256 || cfg.sha256 || FALLBACK_CONFIG.sha256;
+    const sha256 = osBucket.shaCommand || osBucket.sha256 || cfg.sha256 || FALLBACK_CONFIG.sha256;
 
     return {
       filename,
       directUrl,
       githubAssetUrl,
       sha256,
-      heroLabel: osBucket.heroButtonLabel || osBucket.heroLabel || (os === 'win' ? '下载 Windows 便携版' : '下载 macOS 便携版'),
-      switchLabel: osBucket.switchButtonLabel || osBucket.switchLabel || (os === 'win' ? '切换为 macOS 版' : '切换为 Windows 版'),
+      directLabel: osBucket.directLabel || (os === 'win' ? '下载 Windows 64 位安装版 (.exe)' : '下载 Apple Silicon (.dmg)'),
+      secondaryLabel: osBucket.secondaryLabel || (os === 'win' ? '前往 GitHub Releases v1.0.0' : '下载 Intel 芯片 (.dmg)'),
+      heroLabel: osBucket.heroButtonLabel || osBucket.heroLabel || (os === 'win' ? '下载 Windows 安装版（v1.0）' : '下载 macOS 桌面版（v1.0）'),
+      switchLabel: osBucket.switchButtonLabel || osBucket.switchLabel || (os === 'win' ? '切到 macOS 版' : '切到 Windows 版'),
     };
   }
 
@@ -303,11 +305,13 @@
       } else {
         directBtn.dataset.href = osCfg.directUrl;
       }
+      if (osCfg.directLabel) directBtn.textContent = osCfg.directLabel;
     }
 
     const githubBtn = document.getElementById('modalGithubDownloadBtn');
     if (githubBtn && githubBtn.tagName === 'A') {
       githubBtn.setAttribute('href', osCfg.githubAssetUrl);
+      if (osCfg.secondaryLabel) githubBtn.textContent = osCfg.secondaryLabel;
     }
 
     const filenameEl = document.getElementById('modalFilename');
