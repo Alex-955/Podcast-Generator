@@ -1,15 +1,19 @@
 {
   "name": "ai-podcast-generator",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "AI 妙听播客生成器 - 将长文与公众号文章一键重构为沉浸式双人对话播客",
-  "main": "server.js",
+  "main": "electron/main.js",
   "scripts": {
     "start": "node --use-bundled-ca server.js",
     "dev": "node --use-bundled-ca --watch server.js",
     "launcher": "node scripts/start-portable.js --open",
     "launcher:stop": "node scripts/start-portable.js --stop",
     "release:build": "node scripts/build-release.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "desktop": "electron .",
+    "desktop:build:mac": "electron-builder --mac dmg --arm64 --x64 --publish never",
+    "desktop:build:win": "electron-builder --win nsis --x64 --publish never",
+    "desktop:verify": "node scripts/verify-desktop-bundle.js"
   },
   "keywords": [
     "podcast",
@@ -19,7 +23,7 @@
     "ai"
   ],
   "author": "Alex",
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "dependencies": {
     "axios": "^1.20.0",
     "cheerio": "^1.2.0",
@@ -28,5 +32,9 @@
     "express": "^5.2.1",
     "uuid": "^14.0.2",
     "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "electron": "45.5.0",
+    "electron-builder": "26.18.0"
   }
 }

@@ -1,0 +1,55 @@
+appId: com.aimiaoting.desktop
+productName: AI 妙听
+asar: true
+files:
+  - electron/**/*
+  - server.js
+  - src/**/*
+  - public/**/*
+  - package.json
+  - LICENSE
+  - TRADEMARK.md
+  - '!public/podcasts/**'
+  - public/podcasts/.gitkeep
+  - '!data/**'
+  - '!plan/**'
+  - '!website/**'
+  - '!docs/**'
+  - '!test/**'
+  - '!scripts/**'
+  - '!build/**'
+  - '!.env*'
+  - '!AGENTS.md'
+  - '!Plan.md'
+  - '!ROADMAP.md'
+  - '!**/*.map'
+  - '!**/.DS_Store'
+  - '!**/test/**'
+  - '!**/tests/**'
+# The builder's ASAR walker unconditionally omits .gitkeep. Copy only the
+# empty marker as a resource; never traverse the user's podcast library.
+extraResources:
+  - from: public/podcasts/.gitkeep
+    to: public/podcasts/.gitkeep
+mac:
+  icon: build/icon.icns
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  category: public.app-category.music
+  artifactName: AI-Miaoting-v${version}-mac-${arch}.dmg
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+win:
+  icon: build/icon.ico
+  forceCodeSigning: false
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  artifactName: AI-Miaoting-v${version}-win-${arch}-setup.exe

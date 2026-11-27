@@ -9,7 +9,7 @@ const dotenv = require('dotenv');
 
 const SOURCE_DIR = path.resolve(__dirname, '..');
 const FORMATS = ['zip', 'tar.gz', 'both', 'dir'];
-const ROOT_FILES = ['server.js', 'package.json', 'package-lock.json', 'README.md', 'LICENSE', '.env.example'];
+const ROOT_FILES = ['server.js', 'package.json', 'package-lock.json', 'README.md', 'LICENSE', 'TRADEMARK.md', '.env.example'];
 const PUBLIC_FILES = ['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js'].map(file => 'public/' + file);
 const SCRIPTS = ['scripts/start-portable.js', 'scripts/build-mac-launcher.sh'];
 const PLACEHOLDERS = ['public/podcasts/.gitkeep', 'data/.gitkeep'];
@@ -250,6 +250,26 @@ function writeLaunchers(sourceDir, stageDir) {
   }
 }
 
+function writePortableManifests(stageDir) {
+  const manifestFile = path.join(stageDir, 'package.json');
+  const lockFile = path.join(stageDir, 'package-lock.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  manifest.main = 'server.js';
+  delete manifest.devDependencies;
+  for (const key of Object.keys(manifest.scripts ?? {})) {
+    if (key === 'desktop' || key.startsWith('desktop:')) delete manifest.scripts[key];
+  }
+  let lock;
+  try { lock = JSON.parse(fs.readFileSync(lockFile, 'utf8')); }
+  catch { throw new Error('package-lock.json 格式无效'); }
+  if (lock.packages?.['']) delete lock.packages[''].devDependencies;
+  for (const [name, entry] of Object.entries(lock.packages || {})) {
+    if (entry?.dev === true) delete lock.packages[name];
+  }
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + '\n');
+  fs.writeFileSync(lockFile, JSON.stringify(lock, null, 2) + '\n');
+}
+
 function stageFiles(sourceDir, stageDir, withDeps) {
   for (const dir of ['public', 'scripts', 'scripts/launchers']) plainDirectory(sourceDir, dir);
   for (const relative of [...ROOT_FILES, ...PUBLIC_FILES, ...SCRIPTS]) {
@@ -263,6 +283,7 @@ function stageFiles(sourceDir, stageDir, withDeps) {
   }
   writeLaunchers(sourceDir, stageDir);
   if (withDeps) copyDependencies(sourceDir, stageDir);
+  writePortableManifests(stageDir);
 }
 
 function forbiddenPath(relative) {
@@ -679,4 +700,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { buildRelease, runReleaseSecurityGate, parseArgs };
+module.exports = { buildRelease, runReleaseSecurityGate, parseArgs, scanContent, productionPackages, packageOwner };

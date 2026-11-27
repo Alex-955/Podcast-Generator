@@ -16,7 +16,7 @@ const { version } = require('../package.json');
 
 const PROJECT = path.resolve(__dirname, '..');
 const SOURCE_FILES = [
-  'server.js', 'package.json', 'package-lock.json', 'README.md', 'LICENSE', '.env.example', 'src',
+  'server.js', 'package.json', 'package-lock.json', 'README.md', 'LICENSE', 'TRADEMARK.md', '.env.example', 'src',
   'scripts/start-portable.js', 'scripts/build-mac-launcher.sh',
   'scripts/launchers/macos.command', 'scripts/launchers/windows.bat',
   ...['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js'].map(file => 'public/' + file),
@@ -490,6 +490,14 @@ test('真实便携 ZIP 和 tar.gz 包含白名单目录、匹配 SHA-256 并带�
     if (/^(?:licen[cs]e|notice)/i.test(path.posix.basename(entry))) continue;
     assert.doesNotMatch(entry, /\.(?:md|markdown)$|\/__tests__\//i);
   }
+  assert.ok(![...zip.keys()].some(file => /\/node_modules\/(?:electron|electron-builder)\//.test(file)));
+  assert.ok(zip.has(path.basename(stageDir) + '/TRADEMARK.md'));
+  const portablePkg = JSON.parse(fs.readFileSync(path.join(stageDir, 'package.json')));
+  const lock = JSON.parse(fs.readFileSync(path.join(stageDir, 'package-lock.json')));
+  assert.equal(portablePkg.main, 'server.js');
+  assert.equal(portablePkg.devDependencies, undefined);
+  assert.equal(lock.packages[''].devDependencies, undefined);
+  assert.ok(Object.values(lock.packages).every(pkg => !pkg.dev));
   const smoke = spawnSync(process.execPath, ['--input-type=module', '-e', `
     import assert from 'node:assert/strict';
     import express from 'express';

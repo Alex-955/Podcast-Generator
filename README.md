@@ -2,7 +2,23 @@
 
 把网页长文、微信公众号文章，或者手机里截下的长图笔记，一键变成**主持人阿泽 × 嘉宾小晓**像朋友聊天一样的双人对话播客——带完整纯人声 MP3、同步高亮字幕，还有温暖克制的播音质感。
 
-不需要安装数据库、Redis 或 `ffmpeg`，也不强制绑定任何一家服务商：你的所有密钥只留在本地浏览器，音频和文稿也只存在自己的电脑里。
+## 下载 v1.0.0 桌面正式版
+
+桌面安装包自带运行环境，双击即可使用，无需安装 Node.js。按电脑型号下载对应文件。
+
+| 系统 | 安装包 |
+| --- | --- |
+| macOS · Apple Silicon（M 系列） | [AI-Miaoting-v1.0.0-mac-arm64.dmg](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/AI-Miaoting-v1.0.0-mac-arm64.dmg) |
+| macOS · Intel | [AI-Miaoting-v1.0.0-mac-x64.dmg](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/AI-Miaoting-v1.0.0-mac-x64.dmg) |
+| Windows · x64 | [AI-Miaoting-v1.0.0-win-x64-setup.exe](https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/AI-Miaoting-v1.0.0-win-x64-setup.exe) |
+
+<a id="first-launch"></a>
+
+**macOS 首次打开**　打开 DMG，把「AI 妙听」拖入「应用程序」。若 Gatekeeper 拦截，请先确认文件来自官方 Release，并与同页的 `SHA256SUMS.txt` 核对。尝试打开应用后，到「系统设置 → 隐私与安全性 → 仍要打开」。也可在核对来源后，单独对已安装的应用执行 `xattr -cr "/Applications/AI 妙听.app"`。
+
+**Windows 首次安装**　运行安装程序，选择安装目录。若 SmartScreen 显示保护提示，核对官方来源及校验和后，点击「更多信息 → 仍要运行」。
+
+桌面安装包未使用开发者证书签名。[官方 Releases](https://github.com/Alex-955/Podcast-Generator/releases) 同时提供便携 ZIP、tar.gz 与 SHA-256 校验文件。
 
 ![AI 妙听双人播客工作台](docs/images/studio-desktop.png)
 
@@ -11,11 +27,14 @@
 ## 为什么好用？
 
 - **三种方式轻松导入**：贴入网页 / 公众号文章链接、直接粘贴文字，或上传多张长截图自动识字；生成前支持预览文稿和 **「AI 纠错润色」**（分段并发提速，自动剔除首尾作者编辑与底部版权/关注杂讯并整理错别字）。
-- **AI 智能推荐风格，两种节目节奏听着不吵不尬**：
+- **AI 智能推荐风格，三种节目节奏听着不吵不尬**：
   - 解析或预览文稿后，后台静默结合文章内容自动推荐更匹配的节目风格与理由（仍可手动自由切换）；
   - **深度主讲（7:3，默认）**：小晓深度拆解干货，阿泽自然插话追问与总结；
   - **轻松对谈（5:5）**：两人你一言我一语轻快聊完，适合随笔与观点随聊；
+  - **正反交锋（5:5）**：阿泽还原原文观点，小晓用反例和追问探讨成立条件；
   - 语音合成前会自动把 `1972 年`、`80 年代` 与 `1080P` 等规格数字转成顺口读法（字幕保留原文），并为 MiniMax 内置常见多音字词典纠偏。
+- **剧本逐句微调**：在播客详情里修改台词或说话人后重新合成，未改动句可秒级复用已有缓存。
+- **导入旧版便携播客**：桌面菜单「数据」可打开数据目录、打开播客音频目录，或选取旧版便携根目录及其中的 `public/podcasts` 导入节目。同名播客会跳过，原文件继续保留。
 - **模型和音色随你挑，自带原生从容语速**：右上角点开 **「模型与语音」**，即可接入 DeepSeek、Kimi、豆包、通义千问、小米 MiMo、硅基流动等大模型；配音支持 **MiniMax Speech**、**火山引擎豆包语音 V3** 与免费的 **Microsoft Edge**，提供 **「从容聊天（推荐）/ 标准明快」** 两档合成原生控速，保持原声音质不失真。
 - **断点可续、手机也能同 Wi-Fi 听**：中途断网或换了新音色都能从断点继续生成，不白烧前面几句的额度；同一 Wi-Fi 下手机浏览器直接就能听节目，还带暖调微醺背景音乐与 `0.8x ~ 2.0x` 倍速播放。
 
@@ -41,7 +60,9 @@
 
 ## 给下载试用朋友的快速上手指南
 
-> 只要电脑上提前装过一次 **[Node.js 22 或更新版本](https://nodejs.org/)**（官网下载安装包一路点「下一步」即可），**不用敲一行命令行** 就能直接双击使用。GitHub **Releases** 里的便携压缩包已内置全部运行依赖，解压即用。
+### 便携包用户
+
+> 使用便携 ZIP 或 tar.gz 时，只要电脑上提前装过一次 **[Node.js 22 或更新版本](https://nodejs.org/)**（官网下载安装包一路点「下一步」即可），**不用敲一行命令行** 就能直接双击使用。GitHub **Releases** 里的便携压缩包已内置全部运行依赖，解压即用。
 
 ### 1. 下载与启动（Windows / Mac 区别一览）
 
@@ -61,7 +82,7 @@
 
 ### 3. 手机在同一 Wi-Fi 下一起听
 
-桌面和手机连着同一个路由器时，用下面任意一条命令启动，手机浏览器打开终端里打印出的局域网地址（`http://192.168.x.x:...`）即可收听：
+使用便携包或源码版时，电脑和手机连着同一个路由器，用下面任意一条命令启动，手机浏览器打开终端里打印出的局域网地址（`http://192.168.x.x:...`）即可收听：
 
 ```bash
 # 方式一：通过便携启动器开启局域网访问
@@ -92,7 +113,11 @@ npm run launcher          # 启动并自动打开浏览器（支持端口顺延�
 npm run launcher:stop     # 校验进程归属后安全停止
 
 # 质量门禁与打包
-npm test                  # 运行全量 288 项离线单元测试（不联网、不耗 API 额度）
+npm run desktop           # 启动桌面开发版
+npm run desktop:build:mac # 构建 Apple Silicon 与 Intel DMG
+npm run desktop:build:win # 在 Windows 构建 x64 安装包
+npm run desktop:verify    # 核验 dist 中的桌面应用清单与内容
+npm test                  # 运行全量离线单元测试（不联网、不耗 API 额度）
 npm run release:build -- --with-deps --format both
                           # 生成跨平台 UTF-8 .zip / .tar.gz 与 SHA256SUMS.txt，
                           # 并自动运行隐私与凭据安全门禁检查
@@ -118,7 +143,7 @@ npm run release:build -- --with-deps --format both
 | `MINIMAX_API_KEY` / `MINIMAX_TTS_MODEL` / `MINIMAX_TTS_ENDPOINT` | 模型 `speech-02-hd` | MiniMax Speech 服务端默认配置 |
 | `VOLCENGINE_TTS_API_KEY` / `VOLCENGINE_TTS_APP_ID` / `VOLCENGINE_TTS_ACCESS_KEY` / `VOLCENGINE_TTS_RESOURCE_ID` / `VOLCENGINE_TTS_ENDPOINT` | 资源 `seed-tts-2.0` | 火山引擎豆包语音 V3 服务端默认配置 |
 | `ALLOW_PRIVATE_TTS_ENDPOINT` / `ALLOW_PRIVATE_FETCH` | 未开启 | 默认开启 DNS 解析后私网拦截与重定向防穿越；设为 `1` 仅作局域网自建调试 |
-| `ALLOW_INSECURE_TLS` / `NODE_EXTRA_CA_CERTS` | 未开启 | 代理调试或自定义根证书选项；默认已启用 `--use-bundled-ca` 兼容主流环境 |
+| `ALLOW_INSECURE_TLS` / `NODE_EXTRA_CA_CERTS` | 未开启 | 桌面版直接使用内置 Node TLS 校验 HTTPS；自建 CA 可在启动前通过 `NODE_EXTRA_CA_CERTS` 指定 PEM 文件。仅在本机代理调试时可设 `ALLOW_INSECURE_TLS=1`，这会关闭服务端证书校验。便携启动器会按 Node 版本启用 `--use-bundled-ca` |
 | `CORS_ORIGIN` | 未开启 | 默认仅同源；按需填逗号分隔白名单 |
 
 #### 2. 已知边界与安全基线
@@ -132,4 +157,4 @@ npm run release:build -- --with-deps --format both
 
 ---
 
-基于 [MIT License](LICENSE) 开源。如果这期「阿泽 × 小晓」帮到了你，欢迎点个 Star，或者在 Issues 里聊聊你最想读/听什么文章类型。
+代码按 [GPL-3.0 License](LICENSE) 开源。名称与图标的使用详见[品牌与商标声明](TRADEMARK.md)。如果这期「阿泽 × 小晓」帮到了你，欢迎点个 Star，或者在 Issues 里聊聊你最想读/听什么文章类型。
