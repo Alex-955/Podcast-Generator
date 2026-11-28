@@ -1,6 +1,6 @@
 {
   "name": "ai-podcast-generator",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "拾声集 InkCast - 将长文与公众号文章一键重构为沉浸式双人对话播客",
   "main": "electron/main.js",
   "scripts": {

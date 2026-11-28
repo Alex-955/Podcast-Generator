@@ -288,7 +288,8 @@ test('已锁定的生产依赖仍须排除开发文件，外置播客目录必�
 
 test('桌面运行环境仅用于开发构建，版本、许可证与双端发布契约一致', () => {
   const pkg = require('../package.json'), lock = require('../package-lock.json');
-  assert.equal(pkg.version, '1.0.0');
+  assert.equal(pkg.version, '1.0.1');
+  assert.equal(pkg.version, lock.version);
   assert.equal(pkg.license, 'GPL-3.0-only');
   assert.equal(pkg.main, 'electron/main.js');
   assert.equal(pkg.version, lock.packages[''].version);

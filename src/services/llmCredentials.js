@@ -1,9 +1,10 @@
-const { InputError, ttsSecrets } = require('./validation');
+const { InputError, filterSensitivePath, ttsSecrets } = require('./validation');
 const { checkEndpoint, redactProviderDetail } = require('./providerHttp');
 
 const DEFAULT_MODEL = 'deepseek-flash';
 const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 const MODEL_ID = /^[\w.:-]+(?:\/[\w.:-]+)*$/;
+const VERSIONED_BASE_PATH = /\/v\d+(?:alpha|beta)?(?:\/openai)?$/i;
 
 function setting(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -14,7 +15,7 @@ function normalizeBaseURL(value) {
   if (!url || !['http:', 'https:'].includes(url.protocol) || url.username || url.password ||
       url.href.includes('?') || url.href.includes('#')) return undefined;
   const pathname = url.pathname.replace(/\/+$/, '');
-  url.pathname = pathname.endsWith('/v1') ? pathname : pathname + '/v1';
+  url.pathname = VERSIONED_BASE_PATH.test(pathname) ? pathname : pathname + '/v1';
   return url.href;
 }
 
@@ -23,9 +24,11 @@ function llmSecrets(payload, { apiKey, baseURL }, { includeDefaultBase = true } 
   const urls = [baseURL, payload.baseURL, payload.visionBaseURL, env.LLM_BASE_URL, env.VISION_BASE_URL]
     .filter(url => includeDefaultBase || normalizeBaseURL(url) !== DEFAULT_BASE_URL + '/v1');
   const normalized = urls.map(normalizeBaseURL).filter(Boolean);
+  const strippedV1 = normalized.filter(url => url.endsWith('/v1')).map(url => url.slice(0, -'/v1'.length));
+  const paths = [process.cwd(), env.DATA_DIR, env.PODCASTS_DIR].map(filterSensitivePath).filter(Boolean);
   return [apiKey, payload.apiKey, payload.visionApiKey, env.DEEPSEEK_API_KEY, env.VISION_API_KEY,
-    ...urls, ...normalized, ...normalized.map(url => url.slice(0, -'/v1'.length)),
-    ...ttsSecrets(payload?.tts ?? {}), process.cwd(), env.DATA_DIR, env.PODCASTS_DIR];
+    ...urls, ...normalized, ...strippedV1,
+    ...ttsSecrets(payload?.tts ?? {}), ...paths];
 }
 
 function checkCallerKeyEndpoint(payload) {

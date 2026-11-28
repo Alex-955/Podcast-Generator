@@ -7,6 +7,8 @@
  * - 其他（500）：内部错误
  */
 
+const path = require('node:path');
+
 const MAX_TITLE_LENGTH = 200;
 const MAX_CONTENT_LENGTH = 12000; // 与 extractor.MAX_CONTENT_LENGTH 一致的确定性截断语义
 const MAX_DIALOGUE_LINES = 300;
@@ -137,6 +139,35 @@ function ttsSecrets(tts = {}) {
     env.VOLCENGINE_TTS_API_KEY, env.VOLCENGINE_TTS_APP_ID, env.VOLCENGINE_TTS_ACCESS_KEY, env.VOLCENGINE_TTS_ENDPOINT];
 }
 
+function isFilesystemRoot(value) {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (/^[\\/]+$/.test(trimmed) || /^[a-zA-Z]:[\\/]*$/.test(trimmed) || /^\.{1,2}[\\/]*$/.test(trimmed)) {
+    return true;
+  }
+  // Keep UNC shares like \\server\share or //server/share sensitive because they contain an internal host/share name.
+  if (/^(?:\\\\|\/\/)(?!\.{1,2}(?:[\\/]|$))[^\\/]+[\\/]+(?!\.{1,2}(?:[\\/]|$))[^\\/]/.test(trimmed)) {
+    return false;
+  }
+  if (/^[a-zA-Z]:/.test(trimmed) || trimmed.startsWith('\\')) {
+    const winNorm = path.win32.normalize(trimmed);
+    return winNorm === '.' || winNorm === '..' || path.win32.parse(winNorm).root === winNorm;
+  }
+  const posixNorm = path.posix.normalize(trimmed);
+  if (posixNorm === '.' || posixNorm === '..') return true;
+  return path.posix.parse(posixNorm).root === posixNorm || path.parse(trimmed).root === trimmed;
+}
+
+function filterSensitivePath(value) {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (trimmed.length < 2 || isFilesystemRoot(trimmed)) {
+    return '';
+  }
+  return trimmed;
+}
+
 /** 日志/错误消息脱敏：去掉 API Key 形态的凭据 */
 function redactSecrets(text, sensitiveValues = []) {
   let message = String(text);
@@ -160,6 +191,8 @@ module.exports = {
   validateDialogueList,
   validateEditedDialogue,
   validateVoiceMapping,
+  isFilesystemRoot,
+  filterSensitivePath,
   redactSecrets,
   ttsSecrets,
 };

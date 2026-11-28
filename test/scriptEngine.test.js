@@ -246,3 +246,26 @@ test('剧本响应流成功、超时和取消均清理响应、定时器和外�
   await assertCancellationCleanup(t, (payload, options) => generatePodcastScript({ ...payload, ...options }),
     SCRIPT_INPUT, completion(JSON.stringify(dialogueFixture)));
 });
+
+test('豆包 /api/v3 与其他版本段地址直接拼接 /chat/completions，不误拼 /v1', async t => {
+  configureLlm(t);
+  for (const [baseURL, expectedUrl] of [
+    ['https://ark.cn-beijing.volces.com/api/v3', 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'],
+    ['https://ark.cn-beijing.volces.com/api/v3/', 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'],
+    ['https://open.bigmodel.cn/api/paas/v4', 'https://open.bigmodel.cn/api/paas/v4/chat/completions'],
+    ['https://generativelanguage.googleapis.com/v1beta/openai/', 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'],
+  ]) {
+    const calls = [];
+    const result = await generatePodcastScript({
+      ...SCRIPT_INPUT,
+      baseURL,
+      model: 'doubao-seed-1-6',
+      llmRequest: async url => {
+        calls.push(url);
+        return response(completion(JSON.stringify(dialogueFixture)));
+      },
+    });
+    assert.deepStrictEqual(calls, [expectedUrl]);
+    assert.strictEqual(result.success, true);
+  }
+});
