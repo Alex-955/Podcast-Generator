@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>API 与语音配置引导 · 拾声集（InkCast）</title>
+  <meta name="description" content="拾声集（InkCast）模型与语音合成配置指南：DeepSeek、豆包火山方舟、火山引擎豆包语音 V3、MiniMax Speech 与内置 Edge TTS 一站式分步填写、Base URL 一键复制与常见报错排查。">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://podcast.ai955.xyz/guide.html">
+  <meta property="og:title" content="API 与语音配置引导 · 拾声集（InkCast）">
+  <meta property="og:description" content="5 分钟配好你的本机大模型与双人语音。附官方控制台直达、Base URL 一键复制与常见报错排查。">
+  <meta property="og:image" content="https://podcast.ai955.xyz/assets/images/og-cover.png">
+  <link rel="icon" type="image/png" href="./assets/favicon.png">
+  <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg">
+  <link rel="stylesheet" href="./styles/tokens.css">
+  <link rel="stylesheet" href="./styles/main.css">
+  <script defer src="./scripts/site-config.js"></script>
+  <script defer src="./scripts/interactions.js"></script>
+  <script defer src="./scripts/main.js"></script>
+</head>
+<body>
+  <header class="topbar" id="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="./index.html" aria-label="返回拾声集 InkCast 首页">
+        <img class="brand-mark" src="./assets/images/logo.png" alt="" width="30" height="30">
+        <span class="brand-title">拾声集 · InkCast</span>
+        <span class="version-badge" data-config-text="versionBadge">v1.0 桌面正式版</span>
+      </a>
+
+      <nav class="topbar-nav" aria-label="配置引导导航">
+        <a class="nav-link" href="./index.html">官网首页</a>
+        <a class="nav-link" href="#deepseek">DeepSeek</a>
+        <a class="nav-link" href="#doubao-llm">火山方舟</a>
+        <a class="nav-link" href="#volcengine-tts">火山语音</a>
+        <a class="nav-link" href="#minimax-tts">MiniMax / Edge</a>
+        <a class="nav-link" href="#guide-faq">报错排查</a>
+      </nav>
+
+      <div class="topbar-actions">
+        <a class="btn btn-subtle btn-sm" href="./index.html">返回首页</a>
+        <a class="btn btn-primary btn-sm" href="./index.html#onboarding">下载桌面版</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- 引导页首屏 -->
+    <section class="hero guide-hero">
+      <div class="container hero-shell">
+        <div class="hero-badges">
+          <span class="pill-tag is-accent">
+            <span class="pill-dot" aria-hidden="true"></span>
+            API &amp; TTS 配置引导
+          </span>
+          <span class="pill-tag">BYOK 密钥仅留本机</span>
+          <span class="pill-tag">内置 Edge 语音可零配置先试听</span>
+        </div>
+
+        <h1 class="hero-title guide-hero-title">
+          5 分钟配好大模型与双人语音
+        </h1>
+
+        <p class="hero-subtitle">
+          拾声集采用自带密钥（BYOK）架构，所有 API Key 仅存储在你的本机，不经任何中转服务器。下方按客户端「模型与语音」设置面板顺序整理，提供官方控制台直达、一键复制参数与常见报错排查。
+        </p>
+
+        <div class="guide-jump-bar" aria-label="快速定位配置对象">
+          <a class="guide-jump-pill is-primary" href="#deepseek">1. DeepSeek（剧本首选）</a>
+          <a class="guide-jump-pill" href="#doubao-llm">2. 豆包 · 火山方舟（剧本/识图）</a>
+          <a class="guide-jump-pill is-primary" href="#volcengine-tts">3. 火山语音 V3（商业语音推荐）</a>
+          <a class="guide-jump-pill" href="#minimax-tts">4. MiniMax Speech &amp; Edge TTS</a>
+          <a class="guide-jump-pill" href="#guide-faq">常见报错排查</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- 一键复制参数对照表 -->
+    <section class="section-block" aria-labelledby="compareHeading">
+      <div class="container">
+        <div class="section-header">
+          <div>
+            <span class="section-eyebrow">QUICK REFERENCE · 参数速查表</span>
+            <h2 id="compareHeading" class="section-title">Base URL 与推荐参数对照表</h2>
+            <p class="section-desc">所有示例密钥（如 <code>sk-xxxxxxxx</code>）均为占位符，请替换为你在官方控制台创建的真实密钥。</p>
+          </div>
+        </div>
+
+        <div class="bento-card guide-table-card">
+          <div class="guide-table-wrap">
+            <table class="guide-table">
+              <thead>
+                <tr>
+                  <th>用途</th>
+                  <th>预设 / 供应商</th>
+                  <th>控制台入口</th>
+                  <th>Base URL / 资源标识（可复制）</th>
+                  <th>推荐模型与鉴权</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="guide-role-tag">剧本大模型</span></td>
+                  <td><strong>DeepSeek</strong>（首选）</td>
+                  <td><a href="https://platform.deepseek.com" target="_blank" rel="noopener noreferrer">platform.deepseek.com</a></td>
+                  <td>
+                    <div class="guide-copy-inline">
+                      <code>https://api.deepseek.com</code>
+                      <button type="button" class="btn btn-subtle btn-xs" data-copy-text="https://api.deepseek.com" data-copy-toast="已复制 DeepSeek Base URL">复制</button>
+                    </div>
+                  </td>
+                  <td>填 Key 后点「获取模型列表」，从实时列表中选当前主力对话模型</td>
+                </tr>
+                <tr>
+                  <td><span class="guide-role-tag">剧本 / 识图</span></td>
+                  <td><strong>豆包 · 火山方舟</strong></td>
+                  <td><a href="https://console.volcengine.com/ark" target="_blank" rel="noopener noreferrer">console.volcengine.com/ark</a></td>
+                  <td>
+                    <div class="guide-copy-inline">
+                      <code>https://ark.cn-beijing.volces.com/api/v3</code>
+                      <button type="button" class="btn btn-subtle btn-xs" data-copy-text="https://ark.cn-beijing.volces.com/api/v3" data-copy-toast="已复制火山方舟 Base URL">复制</button>
+                    </div>
+                  </td>
+                  <td>拉取已开通模型或手填模型 ID / <code>ep-xxx</code>（注：<code>v1.0.0</code> 客户端会为非 <code>/v1</code> 结尾地址拼接 <code>/v1</code>，若遇 404 建议先用 DeepSeek）</td>
+                </tr>
+                <tr>
+                  <td><span class="guide-role-tag is-tts">语音合成</span></td>
+                  <td><strong>火山引擎 · 豆包语音 V3</strong></td>
+                  <td><a href="https://console.volcengine.com/speech/app" target="_blank" rel="noopener noreferrer">console.volcengine.com/speech/app</a></td>
+                  <td>
+                    <div class="guide-copy-inline">
+                      <code>seed-tts-2.0</code>
+                      <button type="button" class="btn btn-subtle btn-xs" data-copy-text="seed-tts-2.0" data-copy-toast="已复制火山语音资源 ID：seed-tts-2.0">复制</button>
+                    </div>
+                  </td>
+                  <td>开通「大模型语音合成」；单 API Key（推荐）或 AppID + Access Key</td>
+                </tr>
+                <tr>
+                  <td><span class="guide-role-tag is-tts">语音合成</span></td>
+                  <td><strong>MiniMax Speech</strong></td>
+                  <td><a href="https://platform.minimaxi.com" target="_blank" rel="noopener noreferrer">platform.minimaxi.com</a></td>
+                  <td>
+                    <div class="guide-copy-inline">
+                      <code>speech-2.8-turbo</code>
+                      <button type="button" class="btn btn-subtle btn-xs" data-copy-text="speech-2.8-turbo" data-copy-toast="已复制 MiniMax 推荐模型：speech-2.8-turbo">复制</button>
+                    </div>
+                  </td>
+                  <td>仅需单个 API Key，内置句间节流防限流</td>
+                </tr>
+                <tr>
+                  <td><span class="guide-role-tag is-free">免费试听</span></td>
+                  <td><strong>Edge TTS</strong>（内置）</td>
+                  <td>无需注册语音控制台</td>
+                  <td><code>免语音 Key · 开箱即用</code></td>
+                  <td>免语音 Key 即可试听（生成新播客仍需先配剧本大模型 Key）；偶发限流时建议切到火山或 MiniMax</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 1. DeepSeek -->
+    <section class="section-block section-band guide-anchor" id="deepseek" aria-labelledby="deepseekHeading">
+      <div class="container">
+        <div class="section-header">
+          <div>
+            <span class="section-eyebrow">STEP 01 · 剧本生成首选</span>
+            <h2 id="deepseekHeading" class="section-title">DeepSeek（OpenAI 兼容接口）</h2>
+            <p class="section-desc">逻辑拆解清晰、双人对话自然且性价比高，是拾声集客户端默认推荐的剧本生成底座。</p>
+          </div>
+          <a class="btn btn-primary btn-sm" href="https://platform.deepseek.com" target="_blank" rel="noopener noreferrer">打开 DeepSeek 开放平台 ↗</a>
+        </div>
+
+        <div class="steps-grid">
+          <article class="step-card">
+            <span class="step-num-badge">1</span>
+            <h3 class="step-card-title">注册账号并完成少量充值</h3>
+            <p class="step-card-desc">前往 <code>platform.deepseek.com</code> 登录账号，在控制台确认账户余额可用（新号或按量付费充值少量额度即可生成数十期播客）。</p>
+            <div class="guide-path-pill">控制台 → 充值 / 余额管理</div>
+          </article>
+
+          <article class="step-card">
+            <span class="step-num-badge">2</span>
+            <h3 class="step-card-title">创建 API Key 并复制保存</h3>
+            <p class="step-card-desc">进入 API Keys 页面新建密钥，命名后立即复制以 <code>sk-</code> 开头的完整密钥（形如 <code>sk-xxxxxxxx</code>）。关闭弹窗后无法再次查看明文。</p>
+            <div class="guide-path-pill">左侧菜单 → API keys → 创建 API key</div>
+          </article>
+
+          <article class="step-card">
+            <span class="step-num-badge">3</span>
+            <h3 class="step-card-title">填入拾声集并拉取模型列表</h3>
+            <p class="step-card-desc">打开拾声集右上角「模型与语音」，预设选 <strong>DeepSeek</strong>，粘贴 Key 后点击<strong>「获取模型列表」</strong>，从实时返回列表中选择当前主力对话模型（如 <code>deepseek-chat</code> 已下线则选列表中最新对话模型，如 <code>deepseek-flash</code>）即可保存。</p>
+            <div class="guide-path-pill">模型与语音 → 预设：DeepSeek → 获取模型列表</div>
+          </article>
+        </div>
+
+        <div class="guide-mock-grid">
+          <div class="guide-mock-card">
+            <div class="guide-mock-head">拾声集客户端填写示意（剧本模型）</div>
+            <div class="guide-mock-row"><span>服务商预设</span><strong>DeepSeek</strong></div>
+            <div class="guide-mock-row">
+              <span>Base URL</span>
+              <div class="guide-copy-inline">
+                <code>https://api.deepseek.com</code>
+                <button type="button" class="btn btn-subtle btn-xs" data-copy-text="https://api.deepseek.com" data-copy-toast="已复制 DeepSeek Base URL">复制</button>
+              </div>
+            </div>
+            <div class="guide-mock-row"><span>API Key</span><code>sk-xxxxxxxxxxxxxxxx（替换为你的真实密钥）</code></div>
+            <div class="guide-mock-row"><span>模型名称</span><code>点「获取模型列表」后选择实时返回的主力对话模型</code></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. 豆包 · 火山方舟 -->
+    <section class="section-block guide-anchor" id="doubao-llm" aria-labelledby="doubaoLlmHeading">
+      <div class="container">
+        <div class="section-header">
+          <div>
+            <span class="section-eyebrow">STEP 02 · 剧本与长图识字</span>
+            <h2 id="doubaoLlmHeading" class="section-title">豆包 · 火山方舟（Ark）</h2>
+            <p class="section-desc">中文日常口语自然、少念稿腔，且支持长图截图直接识字；支持模型列表拉取或手动填模型 ID / 推理接入点。</p>
+          </div>
+          <a class="btn btn-outline btn-sm" href="https://console.volcengine.com/ark" target="_blank" rel="noopener noreferrer">打开火山方舟控制台 ↗</a>
+        </div>
+
+        <div class="steps-grid">
+          <article class="step-card">
+            <span class="step-num-badge">1</span>
+            <h3 class="step-card-title">开通模型或创建推理接入点</h3>
+            <p class="step-card-desc">在火山方舟控制台开通需要使用的豆包大模型；若采用推理接入点方式，创建一个接入点并记下其 ID（形如 <code>ep-xxxxxxxx</code>）。</p>
+            <div class="guide-path-pill">火山方舟 → 开通管理 / 在线推理 → 推理接入点</div>
+          </article>
+
+          <article class="step-card">
+            <span class="step-num-badge">2</span>
+            <h3 class="step-card-title">创建方舟 API Key</h3>
+            <p class="step-card-desc">在火山方舟控制台左侧找到 API Key 管理，新建并复制密钥（形如 <code>sk-xxxxxxxx</code> 或平台生成的 Key）。</p>
+            <div class="guide-path-pill">火山方舟 → API Key 管理 → 创建 API Key</div>
+          </article>
+
+          <article class="step-card">
+            <span class="step-num-badge">3</span>
+            <h3 class="step-card-title">选豆包预设，拉取或手填 ID</h3>
+            <p class="step-card-desc">在拾声集预设选<strong>「豆包 · 火山方舟」</strong>，填入 Key 后可点「获取模型列表」或手填模型 ID / <code>ep-xxx</code>。<strong>注：<code>v1.0.0</code> 客户端对非 <code>/v1</code> 结尾地址会自动拼接 <code>/v1</code>（后续版本修复），若当前版本请求报 404 建议先使用 DeepSeek。</strong></p>
+            <div class="guide-path-pill">模型与语音 → 预设：豆包 · 火山方舟</div>
+          </article>
+        </div>
+
+        <div class="guide-mock-grid">
+          <div class="guide-mock-card">
+            <div class="guide-mock-head">拾声集客户端填写示意（豆包 · 火山方舟）</div>
+            <div class="guide-mock-row"><span>服务商预设</span><strong>豆包 · 火山方舟</strong></div>
+            <div class="guide-mock-row">
+              <span>Base URL</span>
+              <div class="guide-copy-inline">
+                <code>https://ark.cn-beijing.volces.com/api/v3</code>
+                <button type="button" class="btn btn-subtle btn-xs" data-copy-text="https://ark.cn-beijing.volces.com/api/v3" data-copy-toast="已复制火山方舟 Base URL">复制</button>
+              </div>
+            </div>
+            <div class="guide-mock-row"><span>API Key</span><code>sk-xxxxxxxxxxxxxxxx（方舟 API Key 占位符）</code></div>
+            <div class="guide-mock-row"><span>模型名称</span><code>拉取已开通模型，或手动填模型 ID / ep-xxxxxxxx</code></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. 火山引擎 · 豆包语音 V3 -->
+    <section class="section-block section-band guide-anchor" id="volcengine-tts" aria-labelledby="volcTtsHeading">
+      <div class="container">
+        <div class="section-header">
+          <div>
+            <span class="section-eyebrow">STEP 03 · 商业语音合成推荐</span>
+            <h2 id="volcTtsHeading" class="section-title">火山引擎 · 豆包语音 V3（seed-tts-2.0）</h2>
+            <p class="section-desc">小天 2.0 + Vivi 2.0 对话级双人音色自然度高、国内直连稳定，支持单 API Key（推荐）或 AppID + Access Key 鉴权。</p>
+          </div>
+          <a class="btn btn-primary btn-sm" href="https://console.volcengine.com/speech/app" target="_blank" rel="noopener noreferrer">打开豆包语音控制台 ↗</a>
+        </div>
+
+        <div class="guide-callout-warn" role="note">
+          <strong>最容易点错的一步：</strong>在 <code>console.volcengine.com/speech/app</code> 开通服务时，请务必选择并开通<strong>「大模型语音合成」</strong>（对应资源 ID <code>seed-tts-2.0</code>），<strong>不要错开成「普通语音合成 / 短文本语音合成」</strong>，否则合成时会报错未开通或资源不匹配。
+        </div>
+
+        <div class="steps-grid">
+          <article class="step-card">
+            <span class="step-num-badge">1</span>
+            <h3 class="step-card-title">开通「大模型语音合成」服务</h3>
+            <p class="step-card-desc">进入豆包语音控制台选择目标项目，在<strong>「开通管理」</strong>找到<strong>「大模型语音合成」</strong>并确认已开通（支持按量付费或免费体验额度）。</p>
+            <div class="guide-path-pill">语音技术控制台 → 目标项目 → 开通管理 → 大模型语音合成</div>
+          </article>
+
+          <article class="step-card">
+            <span class="step-num-badge">2</span>
+            <h3 class="step-card-title">获取单 API Key（或 AppID + Access Key）</h3>
+            <p class="step-card-desc">新版单 API Key 流程：在目标项目的<strong>「开通管理」</strong>确认已开通服务后，进入<strong>「API 管理」</strong>获取单个 API Key（推荐）；若沿用旧版应用凭证，可在<strong>「API服务中心」</strong>查看 <code>AppID</code> 与 <code>Access Token</code>。</p>
+            <div class="guide-path-pill">控制台 → 目标项目 → 开通管理 / API 管理（旧版：API服务中心）</div>
+          </article>
+
+          <article class="step-card">
+            <span class="step-num-badge">3</span>
+            <h3 class="step-card-title">填回拾声集语音设置并试音</h3>
+            <p class="step-card-desc">在拾声集「模型与语音 → 语音合成」选择<strong>火山引擎 · 豆包语音 V3</strong>，模型保留 <code>seed-tts-2.0</code>，填入凭证后即可一键测试语音连通性。</p>
+            <div class="guide-path-pill">语音合成 → 火山豆包 V3 → seed-tts-2.0</div>
+          </article>
+        </div>
+
+        <div class="guide-mock-grid">
+          <div class="guide-mock-card">
+            <div class="guide-mock-head">拾声集客户端填写示意（火山豆包 V3）</div>
+            <div class="guide-mock-row"><span>语音供应商</span><strong>火山引擎 · 豆包语音 V3</strong></div>
+            <div class="guide-mock-row">
+              <span>语音模型 / Resource ID</span>
+              <div class="guide-copy-inline">
+                <code>seed-tts-2.0</code>
+                <button type="button" class="btn btn-subtle btn-xs" data-copy-text="seed-tts-2.0" data-copy-toast="已复制 seed-tts-2.0">复制</button>
+              </div>
+            </div>
+            <div class="guide-mock-row"><span>鉴权凭据</span><code>单 API Key（推荐，填 xxxxxxxx）或 AppID + Access Key</code></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. MiniMax Speech & Edge TTS -->
+    <section class="section-block guide-anchor" id="minimax-tts" aria-labelledby="minimaxHeading">
+      <div class="container">
+        <div class="section-header">
+          <div>
+            <span class="section-eyebrow">STEP 04 · 备选商业语音与免费零配置方案</span>
+            <h2 id="minimaxHeading" class="section-title">MiniMax Speech &amp; 内置 Edge TTS</h2>
+            <p class="section-desc">新手配好剧本大模型 Key 后，语音合成可先用内置免费的 Edge TTS（免语音 Key）试听体验；想要更自然的停顿、呼吸感与稳定高并发，再升级为火山豆包 V3 或 MiniMax Speech。</p>
+          </div>
+          <a class="btn btn-outline btn-sm" href="https://platform.minimaxi.com" target="_blank" rel="noopener noreferrer">打开 MiniMax 开放平台 ↗</a>
+        </div>
+
+        <div class="privacy-grid guide-dual-grid">
+          <article class="bento-card">
+            <div>
+              <span class="bento-tag">商业语音备选 · 单 Key 极简接入</span>
+              <h3 class="bento-title">MiniMax Speech（推荐 speech-2.8-turbo）</h3>
+              <p class="bento-desc">前往 <code>platform.minimaxi.com</code> → 接口密钥（API Keys）创建一个密钥（形如 <code>sk-xxxxxxxx</code>），在拾声集语音合成选择 <strong>MiniMax Speech</strong>、模型保持默认的 <code>speech-2.8-turbo</code> 即可。无需额外配置 Group ID，客户端内置句间节流防止限流。</p>
+            </div>
+            <div class="guide-copy-bar">
+              <span>推荐模型：<code>speech-2.8-turbo</code></span>
+              <button type="button" class="btn btn-subtle btn-sm" data-copy-text="speech-2.8-turbo" data-copy-toast="已复制 MiniMax 推荐模型：speech-2.8-turbo">复制模型名</button>
+            </div>
+          </article>
+
+          <article class="bento-card">
+            <div>
+              <span class="bento-tag">免语音 Key · 开箱即用</span>
+              <h3 class="bento-title">Microsoft Edge TTS（内置默认语音）</h3>
+              <p class="bento-desc">无需注册语音账号或填写语音 Key，安装打开拾声集即可直接试听语音合成效果（从原文生成新播客仍需先配好剧本大模型 Key）。由于 Edge 语音属于非官方公开接口，网络高峰期偶发限流；如需稳定高并发，建议配置火山豆包 V3 或 MiniMax。</p>
+            </div>
+            <div class="guide-copy-bar">
+              <span>语音配置要求：<strong>无需语音 Key</strong></span>
+              <a class="btn btn-subtle btn-sm" href="./index.html#features">查看同供应商缓存复用</a>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 常见报错排查 FAQ -->
+    <section class="section-block section-band guide-anchor" id="guide-faq" aria-labelledby="faqHeading">
+      <div class="container">
+        <div class="section-header">
+          <div>
+            <span class="section-eyebrow">TROUBLESHOOTING · 常见报错排查</span>
+            <h2 id="faqHeading" class="section-title">配置时遇到报错，先对照这 4 条</h2>
+          </div>
+        </div>
+
+        <div class="privacy-grid">
+          <article class="privacy-card">
+            <h3>1. 点「获取模型列表」提示 401 或鉴权失败</h3>
+            <p>检查 API Key 首尾是否误带空格或换行，确认 Base URL 未多写 <code>/chat/completions</code> 尾巴（DeepSeek 填 <code>https://api.deepseek.com</code>，火山方舟填 <code>https://ark.cn-beijing.volces.com/api/v3</code>）。</p>
+          </article>
+
+          <article class="privacy-card">
+            <h3>2. 火山方舟拉不到列表或报 404 怎么办？</h3>
+            <p><code>v1.0.0</code> 客户端对非 <code>/v1</code> 结尾的 Base URL 会自动拼接 <code>/v1</code>（如 <code>/api/v3/v1/...</code>），若在 <code>v1.0.0</code> 遇到 404，建议先使用 DeepSeek（后续版本已规划修复）；已兼容或修复版本中，若列表未返回全部模型，可手填模型 ID 或 <code>ep-xxxxxxxx</code>。</p>
+          </article>
+
+          <article class="privacy-card">
+            <h3>3. 火山语音报错未开通或资源 ID 无效</h3>
+            <p>90% 的情况是在控制台误开了「普通语音合成」。请回到 <code>console.volcengine.com/speech/app</code> 确认目标项目已开通<strong>「大模型语音合成」</strong>，且模型选择 <code>seed-tts-2.0</code>。</p>
+          </article>
+
+          <article class="privacy-card">
+            <h3>4. Edge TTS 合成到一半中断或限流</h3>
+            <p>微软 Edge 在线接口存在不定时限流。若保持<strong>同一语音供应商、音色、模型及未改动的句子文本</strong>重试，已合成句子会秒级命中本地缓存；若<strong>切换</strong>语音供应商（如火山豆包 V3 或 MiniMax）、音色、模型或修改了台词，则需要重新合成并按新供应商标准计费。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 收口 CTA -->
+    <section class="section-block" aria-label="下载客户端入口">
+      <div class="container">
+        <div class="closing-cta">
+          <div>
+            <h2>密钥准备好后，回到客户端即可开播</h2>
+            <p>还没有安装桌面端？前往官网首页下载 <span data-config-text="versionBadge">v1.0 桌面正式版</span>（免装 Node.js）。</p>
+          </div>
+          <div class="closing-cta-actions">
+            <a class="btn btn-primary btn-lg" href="./index.html#onboarding">前往下载拾声集 v1.0</a>
+            <a class="btn btn-outline btn-lg" href="./index.html#stage">返回首页试听样片</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <img class="footer-brand-mark" src="./assets/images/logo.png" alt="" width="22" height="22">
+        <span><strong>拾声集 · InkCast</strong> · 双人对话播客生成器（<span data-config-text="versionBadge">v1.0 桌面正式版</span>）· GPL-3.0 License · 「拾声集 / InkCast」名称与图标保留相应商标权利</span>
+      </div>
+      <div class="footer-links">
+        <a href="./index.html">官网首页</a>
+        <a data-config-link="githubRepo" href="https://github.com/Alex-955/Podcast-Generator" target="_blank" rel="noopener noreferrer">GitHub 仓库</a>
+        <a data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.0" target="_blank" rel="noopener noreferrer">Releases v1.0.0</a>
+        <a data-config-link="githubLicense" href="https://github.com/Alex-955/Podcast-Generator/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">GPL-3.0 协议</a>
+        <a data-config-link="githubTrademark" href="https://github.com/Alex-955/Podcast-Generator/blob/main/TRADEMARK.md" target="_blank" rel="noopener noreferrer">商标声明</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- 全局 Toast -->
+  <div id="siteToast" class="site-toast" role="status" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

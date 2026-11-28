@@ -933,11 +933,19 @@
       });
     }
 
-    document.querySelectorAll('[data-copy-xattr]').forEach((btn) => {
+    document.querySelectorAll('[data-copy-text], [data-copy-xattr]').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        const cmd = btn.getAttribute('data-copy-text') || 'xattr -cr "/Applications/拾声集.app"';
-        const ok = await copyText(cmd);
-        showToast(ok ? '已复制终端放行命令；确认安装包来自官方 Release 并核对同版本 SHA256SUMS.txt 无误后再粘贴回车' : '复制失败，请手动选中命令复制');
+        const text =
+          btn.getAttribute('data-copy-text') ||
+          (btn.hasAttribute('data-copy-xattr') ? 'xattr -cr "/Applications/拾声集.app"' : '');
+        if (!text) return;
+        const ok = await copyText(text);
+        const successMsg =
+          btn.getAttribute('data-copy-toast') ||
+          (btn.hasAttribute('data-copy-xattr')
+            ? '已复制终端放行命令；确认安装包来自官方 Release 并核对同版本 SHA256SUMS.txt 无误后再粘贴回车'
+            : '已复制到剪贴板');
+        showToast(ok ? successMsg : '复制失败，请手动选中内容复制');
       });
     });
   }
