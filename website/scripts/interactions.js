@@ -12,7 +12,7 @@
 
   const PREVIEW_ASSETS = {
     desktop: {
-      src: './assets/images/studio-desktop.png',
+      src: './assets/images/studio-desktop.png?v=1.0.1b',
       alt: '拾声集（InkCast）双栏桌面工作台实景截图',
       caption: '双栏桌面工作台 · 导入文稿、确认预览与同步放音同屏完成',
     },

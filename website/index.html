@@ -16,12 +16,12 @@
   <meta name="twitter:image" content="https://podcast.ai955.xyz/assets/images/og-cover.png">
   <link rel="icon" type="image/png" href="./assets/favicon.png">
   <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg">
-  <link rel="stylesheet" href="./styles/tokens.css">
-  <link rel="stylesheet" href="./styles/main.css">
-  <script defer src="./scripts/site-config.js"></script>
-  <script defer src="./scripts/player.js"></script>
-  <script defer src="./scripts/interactions.js"></script>
-  <script defer src="./scripts/main.js"></script>
+  <link rel="stylesheet" href="./styles/tokens.css?v=1.0.1b">
+  <link rel="stylesheet" href="./styles/main.css?v=1.0.1b">
+  <script defer src="./scripts/site-config.js?v=1.0.1b"></script>
+  <script defer src="./scripts/player.js?v=1.0.1b"></script>
+  <script defer src="./scripts/interactions.js?v=1.0.1b"></script>
+  <script defer src="./scripts/main.js?v=1.0.1b"></script>
 </head>
 <body>
   <header class="topbar" id="topbar">
@@ -49,29 +49,26 @@
   </header>
 
   <main id="top">
-    <!-- 首屏 Hero -->
-    <section class="hero">
-      <div class="container hero-shell">
-        <div class="hero-badges">
-          <span class="pill-tag is-accent">
+    <!-- 首屏 Hero（左文右图 · 方案 B 墨色对比） -->
+    <section class="hero hero-b">
+      <div class="container hero-b-grid">
+        <div class="hero-shell hero-b-copy">
+          <span class="pill-tag is-accent hero-version-pill">
             <span class="pill-dot" aria-hidden="true"></span>
             <span data-config-text="versionBadge">v1.0.1 桌面正式版</span>
           </span>
-          <span class="pill-tag">免装 Node.js · 下载即用</span>
-          <span class="pill-tag">BYOK 自带密钥 · GPL-3.0 开源</span>
-        </div>
 
-        <h1 class="hero-title">
-          把来不及看的长文，<br>
-          变成<span class="hero-underline-wrap">两位朋友的闲聊<svg class="hero-squiggle" viewBox="0 0 280 18" fill="none" aria-hidden="true"><path d="M4 12 C 74 4, 196 3, 276 11" stroke="currentColor" stroke-width="4.2" stroke-linecap="round"/></svg></span>
-        </h1>
+          <h1 class="hero-title">
+            把来不及看的长文，<br>
+            变成<span class="hero-underline-wrap">两位朋友的闲聊<svg class="hero-squiggle" viewBox="0 0 280 18" fill="none" aria-hidden="true"><defs><linearGradient id="sq-b" gradientUnits="userSpaceOnUse" x1="4" y1="0" x2="276" y2="0"><stop offset="0" stop-color="#1C5A73"/><stop offset="1" stop-color="#B03E24"/></linearGradient></defs><path d="M4 12 C 74 4, 196 3, 276 11" stroke="url(#sq-b)" stroke-width="4.2" stroke-linecap="round"/></svg></span>
+          </h1>
 
-        <p class="hero-subtitle">
-          粘贴网页 / 公众号文章或手机长截图，几分钟在本机生成<span class="hero-role-host">阿泽</span> × <span class="hero-role-guest">小晓</span>的双人对话播客（支持深度主讲 / 轻松对谈 / 正反交锋、逐句微调与同步字幕）。无云端账号，API Key 仅留在你的本机。
-        </p>
+          <p class="hero-subtitle">
+            粘贴网页、公众号文章或长截图，几分钟在本机生成<span class="hero-role-host">阿泽</span> × <span class="hero-role-guest">小晓</span>的双人对话播客。
+          </p>
+          <p class="hero-features">深度主讲<i></i>轻松对谈<i></i>正反交锋<i></i>逐句微调<i></i>同步字幕</p>
 
-        <div class="hero-actions">
-          <div class="hero-os-group">
+          <div class="hero-actions">
             <button type="button" id="heroDownloadBtn" class="btn btn-primary btn-lg" data-open-download data-os="mac">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -80,21 +77,61 @@
               </svg>
               <span id="heroDownloadLabel">下载 macOS 桌面版（v1.0.1）</span>
             </button>
-            <button type="button" id="heroSwitchOsBtn" class="btn btn-outline btn-lg">切到 Windows 版</button>
+            <button type="button" id="heroListenBtn" class="btn btn-listen btn-lg">
+              <span class="play-disc" aria-hidden="true">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M7.5 5.25a.75.75 0 0 1 1.14-.64l10.5 6.75a.75.75 0 0 1 0 1.28l-10.5 6.75a.75.75 0 0 1-1.14-.64V5.25z"/>
+                </svg>
+              </span>
+              <span>先听 45 秒样片</span>
+            </button>
+            <button type="button" id="heroSwitchOsBtn" class="hero-switch-os">切到 Windows 版</button>
           </div>
 
-          <button type="button" id="heroListenBtn" class="btn btn-subtle btn-lg">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path d="M7.5 5.25a.75.75 0 0 1 1.14-.64l10.5 6.75a.75.75 0 0 1 0 1.28l-10.5 6.75a.75.75 0 0 1-1.14-.64V5.25z"/>
-            </svg>
-            <span>先听 45 秒样片</span>
-          </button>
+          <div class="hero-meta-bar">
+            <span>免装 Node.js · 无云端账号 · API Key 仅留在你的本机</span>
+            <a class="hero-meta-link" data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.1" target="_blank" rel="noopener noreferrer">GitHub Releases v1.0.1</a>
+            <button type="button" class="hero-meta-link" data-open-download data-highlight-sha="true">核对 SHA256SUMS</button>
+          </div>
         </div>
 
-        <div class="hero-meta-bar">
-          <span>免装 Node.js，支持 macOS Apple Silicon / Intel (.dmg) 与 Windows (.exe) · 另附便携版</span>
-          <a class="hero-meta-link" data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.1" target="_blank" rel="noopener noreferrer">GitHub Releases v1.0.1</a>
-          <button type="button" class="hero-meta-link" data-open-download data-highlight-sha="true">核对 SHA256SUMS.txt</button>
+        <div class="hero-b-visual" aria-hidden="true">
+          <div class="hero-shot">
+            <img src="./assets/images/studio-desktop.png?v=1.0.1b" alt="" width="1200" height="760">
+          </div>
+          <div class="bubble bubble-host">
+            <b>阿泽</b>
+            <span>这个落点很实。那「选择」具体有哪几种？</span>
+          </div>
+          <div class="bubble bubble-guest">
+            <b>小晓</b>
+            <span>原文说有三种：回避、直面但处理不好……</span>
+          </div>
+          <div class="hero-wavechip">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 墨黑数据带 -->
+    <section class="stats-band" aria-label="核心特性概览">
+      <div class="container stats-grid">
+        <div class="stat">
+          <strong>3</strong>
+          <span>种双人对话风格 · 深度 / 对谈 / 交锋</span>
+        </div>
+        <div class="stat">
+          <strong>0</strong>
+          <span>云端账号 · 密钥与音频仅留本机</span>
+        </div>
+        <div class="stat">
+          <strong>秒级</strong>
+          <span>未改动句子复用 <code>tts-cache</code> 缓存</span>
+        </div>
+        <div class="stat">
+          <strong>2</strong>
+          <span>个桌面平台 · macOS / Windows 即装即用</span>
         </div>
       </div>
     </section>
@@ -324,7 +361,7 @@
             </div>
 
             <button type="button" id="previewFrameBtn" class="preview-frame" aria-label="点击放大查看实景截图">
-              <img id="previewScreenshotImg" src="./assets/images/studio-desktop.png" alt="拾声集（InkCast）双人播客工作台实景截图" loading="lazy">
+              <img id="previewScreenshotImg" src="./assets/images/studio-desktop.png?v=1.0.1b" alt="拾声集（InkCast）双人播客工作台实景截图" loading="lazy">
               <span class="preview-zoom-pill">点击放大查看</span>
               <div id="previewFallback" class="preview-fallback hidden">
                 暂未加载到截图资源，请查看仓库 <code>docs/images/</code> 目录。
@@ -657,7 +694,7 @@
           </svg>
         </button>
       </div>
-      <img id="lightboxImg" class="lightbox-img" src="./assets/images/studio-desktop.png" alt="拾声集（InkCast）工作台放大截图">
+      <img id="lightboxImg" class="lightbox-img" src="./assets/images/studio-desktop.png?v=1.0.1b" alt="拾声集（InkCast）工作台放大截图">
     </div>
   </div>
 
