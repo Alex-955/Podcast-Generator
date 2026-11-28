@@ -21,24 +21,23 @@
 <body>
   <header class="topbar" id="topbar">
     <div class="container topbar-inner">
-      <a class="brand" href="./index.html" aria-label="返回拾声集 InkCast 首页">
+      <a class="brand" href="./index.html" aria-label="拾声集 InkCast 首页">
         <img class="brand-mark" src="./assets/images/logo.png" alt="" width="30" height="30">
         <span class="brand-title">拾声集 · InkCast</span>
-        <span class="version-badge" data-config-text="versionBadge">v1.0 桌面正式版</span>
+        <span class="version-badge" data-config-text="versionBadge">v1.0.1 桌面正式版</span>
       </a>
 
-      <nav class="topbar-nav" aria-label="配置引导导航">
-        <a class="nav-link" href="./index.html">官网首页</a>
-        <a class="nav-link" href="#deepseek">DeepSeek</a>
-        <a class="nav-link" href="#doubao-llm">火山方舟</a>
-        <a class="nav-link" href="#volcengine-tts">火山语音</a>
-        <a class="nav-link" href="#minimax-tts">MiniMax / Edge</a>
-        <a class="nav-link" href="#guide-faq">报错排查</a>
+      <nav class="topbar-nav" aria-label="页面导航">
+        <a class="nav-link" href="./index.html#stage">试听样片</a>
+        <a class="nav-link" href="./index.html#features">核心特性</a>
+        <a class="nav-link" href="./index.html#onboarding">下载与打开</a>
+        <a class="nav-link is-active" href="./guide.html" aria-current="page">配置引导</a>
+        <a class="nav-link" href="./index.html#roadmap">隐私与路线图</a>
       </nav>
 
       <div class="topbar-actions">
-        <a class="btn btn-subtle btn-sm" href="./index.html">返回首页</a>
-        <a class="btn btn-primary btn-sm" href="./index.html#onboarding">下载桌面版</a>
+        <a class="btn btn-ghost btn-sm" data-config-link="githubRepo" href="https://github.com/Alex-955/Podcast-Generator" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a class="btn btn-primary btn-sm" href="./index.html#onboarding">下载试用</a>
       </div>
     </div>
   </header>
@@ -63,19 +62,24 @@
         <p class="hero-subtitle">
           拾声集采用自带密钥（BYOK）架构，所有 API Key 仅存储在你的本机，不经任何中转服务器。下方按客户端「模型与语音」设置面板顺序整理，提供官方控制台直达、一键复制参数与常见报错排查。
         </p>
-
-        <div class="guide-jump-bar" aria-label="快速定位配置对象">
-          <a class="guide-jump-pill is-primary" href="#deepseek">1. DeepSeek（剧本首选）</a>
-          <a class="guide-jump-pill" href="#doubao-llm">2. 豆包 · 火山方舟（剧本/识图）</a>
-          <a class="guide-jump-pill is-primary" href="#volcengine-tts">3. 火山语音 V3（商业语音推荐）</a>
-          <a class="guide-jump-pill" href="#minimax-tts">4. MiniMax Speech &amp; Edge TTS</a>
-          <a class="guide-jump-pill" href="#guide-faq">常见报错排查</a>
-        </div>
       </div>
     </section>
 
+    <!-- 页内吸顶二级目录 -->
+    <nav class="guide-subnav" aria-label="配置引导页内目录">
+      <div class="container guide-subnav-inner">
+        <span class="guide-subnav-label">本页目录</span>
+        <a class="guide-subnav-pill" href="#compare">参数速查</a>
+        <a class="guide-subnav-pill is-primary" href="#deepseek">1. DeepSeek（剧本首选）</a>
+        <a class="guide-subnav-pill" href="#doubao-llm">2. 豆包 · 火山方舟</a>
+        <a class="guide-subnav-pill is-primary" href="#volcengine-tts">3. 火山语音 V3</a>
+        <a class="guide-subnav-pill" href="#minimax-tts">4. MiniMax &amp; Edge</a>
+        <a class="guide-subnav-pill" href="#guide-faq">报错排查</a>
+      </div>
+    </nav>
+
     <!-- 一键复制参数对照表 -->
-    <section class="section-block" aria-labelledby="compareHeading">
+    <section class="section-block guide-anchor" id="compare" aria-labelledby="compareHeading">
       <div class="container">
         <div class="section-header">
           <div>
@@ -120,7 +124,7 @@
                       <button type="button" class="btn btn-subtle btn-xs" data-copy-text="https://ark.cn-beijing.volces.com/api/v3" data-copy-toast="已复制火山方舟 Base URL">复制</button>
                     </div>
                   </td>
-                  <td>拉取已开通模型或手填模型 ID / <code>ep-xxx</code>（注：<code>v1.0.0</code> 客户端会为非 <code>/v1</code> 结尾地址拼接 <code>/v1</code>，若遇 404 建议先用 DeepSeek）</td>
+                  <td>拉取已开通模型，或手动填模型 ID / <code>ep-xxx</code>（<code>v1.0.1</code> 起已原生保留 <code>/api/v3</code> 路径）</td>
                 </tr>
                 <tr>
                   <td><span class="guide-role-tag is-tts">语音合成</span></td>
@@ -243,7 +247,7 @@
           <article class="step-card">
             <span class="step-num-badge">3</span>
             <h3 class="step-card-title">选豆包预设，拉取或手填 ID</h3>
-            <p class="step-card-desc">在拾声集预设选<strong>「豆包 · 火山方舟」</strong>，填入 Key 后可点「获取模型列表」或手填模型 ID / <code>ep-xxx</code>。<strong>注：<code>v1.0.0</code> 客户端对非 <code>/v1</code> 结尾地址会自动拼接 <code>/v1</code>（后续版本修复），若当前版本请求报 404 建议先使用 DeepSeek。</strong></p>
+            <p class="step-card-desc">在拾声集预设选<strong>「豆包 · 火山方舟」</strong>，填入 Key 后可点「获取模型列表」；若列表未返回全部模型，直接把模型 ID 或 <code>ep-xxx</code> 手动填入模型名称框即可（<code>v1.0.1</code> 起已原生保留 <code>/api/v3</code> 路径，仍用旧版 <code>v1.0.0</code> 请先升级）。</p>
             <div class="guide-path-pill">模型与语音 → 预设：豆包 · 火山方舟</div>
           </article>
         </div>
@@ -391,7 +395,7 @@
 
           <article class="privacy-card">
             <h3>2. 火山方舟拉不到列表或报 404 怎么办？</h3>
-            <p><code>v1.0.0</code> 客户端对非 <code>/v1</code> 结尾的 Base URL 会自动拼接 <code>/v1</code>（如 <code>/api/v3/v1/...</code>），若在 <code>v1.0.0</code> 遇到 404，建议先使用 DeepSeek（后续版本已规划修复）；已兼容或修复版本中，若列表未返回全部模型，可手填模型 ID 或 <code>ep-xxxxxxxx</code>。</p>
+            <p>若列表未返回全部模型，直接在「模型名称」手动填写已开通的模型 ID 或接入点 <code>ep-xxxxxxxx</code> 即可。若您仍在使用 <code>v1.0.0</code> 旧版遇到 404，升级到 <code>v1.0.1</code> 即可自动保留 <code>/api/v3</code> 路径。</p>
           </article>
 
           <article class="privacy-card">
@@ -413,10 +417,10 @@
         <div class="closing-cta">
           <div>
             <h2>密钥准备好后，回到客户端即可开播</h2>
-            <p>还没有安装桌面端？前往官网首页下载 <span data-config-text="versionBadge">v1.0 桌面正式版</span>（免装 Node.js）。</p>
+            <p>还没有安装桌面端？前往官网首页下载 <span data-config-text="versionBadge">v1.0.1 桌面正式版</span>（免装 Node.js）。</p>
           </div>
           <div class="closing-cta-actions">
-            <a class="btn btn-primary btn-lg" href="./index.html#onboarding">前往下载拾声集 v1.0</a>
+            <a class="btn btn-primary btn-lg" href="./index.html#onboarding">前往下载拾声集 v1.0.1</a>
             <a class="btn btn-outline btn-lg" href="./index.html#stage">返回首页试听样片</a>
           </div>
         </div>
@@ -428,12 +432,12 @@
     <div class="container footer-inner">
       <div class="footer-brand">
         <img class="footer-brand-mark" src="./assets/images/logo.png" alt="" width="22" height="22">
-        <span><strong>拾声集 · InkCast</strong> · 双人对话播客生成器（<span data-config-text="versionBadge">v1.0 桌面正式版</span>）· GPL-3.0 License · 「拾声集 / InkCast」名称与图标保留相应商标权利</span>
+        <span><strong>拾声集 · InkCast</strong> · 双人对话播客生成器（<span data-config-text="versionBadge">v1.0.1 桌面正式版</span>）· GPL-3.0 License · 「拾声集 / InkCast」名称与图标保留相应商标权利</span>
       </div>
       <div class="footer-links">
         <a href="./index.html">官网首页</a>
         <a data-config-link="githubRepo" href="https://github.com/Alex-955/Podcast-Generator" target="_blank" rel="noopener noreferrer">GitHub 仓库</a>
-        <a data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.0" target="_blank" rel="noopener noreferrer">Releases v1.0.0</a>
+        <a data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.1" target="_blank" rel="noopener noreferrer">Releases v1.0.1</a>
         <a data-config-link="githubLicense" href="https://github.com/Alex-955/Podcast-Generator/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">GPL-3.0 协议</a>
         <a data-config-link="githubTrademark" href="https://github.com/Alex-955/Podcast-Generator/blob/main/TRADEMARK.md" target="_blank" rel="noopener noreferrer">商标声明</a>
       </div>
