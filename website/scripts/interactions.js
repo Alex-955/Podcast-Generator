@@ -2,11 +2,11 @@
   'use strict';
 
   const FALLBACK_CONFIG = {
-    filename: 'InkCast-v1.0.0-mac-arm64.dmg',
-    directUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/InkCast-v1.0.0-mac-arm64.dmg',
-    githubReleasesUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.0',
+    filename: 'InkCast-v1.0.1-mac-arm64.dmg',
+    directUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.1/InkCast-v1.0.1-mac-arm64.dmg',
+    githubReleasesUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.1',
     githubRepoUrl: 'https://github.com/Alex-955/Podcast-Generator',
-    sha256: 'shasum -a 256 InkCast-v1.0.0-mac-*.dmg',
+    sha256: 'shasum -a 256 InkCast-v1.0.1-mac-*.dmg',
     requireNodeNotice: false,
   };
 
@@ -101,8 +101,8 @@
       githubAssetUrl,
       sha256,
       directLabel: osBucket.directLabel || (os === 'win' ? '下载 Windows 64 位安装版 (.exe)' : '下载 Apple Silicon (.dmg)'),
-      secondaryLabel: osBucket.secondaryLabel || (os === 'win' ? '前往 GitHub Releases v1.0.0' : '下载 Intel 芯片 (.dmg)'),
-      heroLabel: osBucket.heroButtonLabel || osBucket.heroLabel || (os === 'win' ? '下载 Windows 安装版（v1.0）' : '下载 macOS 桌面版（v1.0）'),
+      secondaryLabel: osBucket.secondaryLabel || (os === 'win' ? '前往 GitHub Releases v1.0.1' : '下载 Intel 芯片 (.dmg)'),
+      heroLabel: osBucket.heroButtonLabel || osBucket.heroLabel || (os === 'win' ? '下载 Windows 安装版（v1.0.1）' : '下载 macOS 桌面版（v1.0.1）'),
       switchLabel: osBucket.switchButtonLabel || osBucket.switchLabel || (os === 'win' ? '切到 macOS 版' : '切到 Windows 版'),
     };
   }

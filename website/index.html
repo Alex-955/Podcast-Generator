@@ -3,16 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>拾声集 · InkCast · 双人对话播客生成器（v1.0 桌面正式版）</title>
+  <title>拾声集 · InkCast · 双人对话播客生成器（v1.0.1 桌面正式版）</title>
   <meta name="description" content="把网页长文、公众号文章和长图笔记，在本机一键变成阿泽与小晓的双人对话播客。免装 Node.js 下载即用，支持深度主讲、轻松对谈、正反交锋三种风格与逐句微调，GPL-3.0 开源免费。">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://podcast.ai955.xyz/">
-  <meta property="og:title" content="拾声集 · InkCast · 双人对话播客生成器（v1.0 桌面正式版）">
+  <meta property="og:title" content="拾声集 · InkCast · 双人对话播客生成器（v1.0.1 桌面正式版）">
   <meta property="og:description" content="网页长文、文字与长截图一键变双人对话播客。免装 Node.js 桌面客户端、BYOK 密钥仅留本机、支持三种对话风格、逐句微调与缓存复用。">
   <meta property="og:image" content="https://podcast.ai955.xyz/assets/images/og-cover.png">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="拾声集 · InkCast · 双人对话播客生成器（v1.0 桌面正式版）">
-  <meta name="twitter:description" content="v1.0 桌面正式版 GPL-3.0 开源下载 · 免装 Node.js，把长文变成阿泽与小晓的双人对话播客。">
+  <meta name="twitter:title" content="拾声集 · InkCast · 双人对话播客生成器（v1.0.1 桌面正式版）">
+  <meta name="twitter:description" content="v1.0.1 桌面正式版 GPL-3.0 开源下载 · 免装 Node.js，把长文变成阿泽与小晓的双人对话播客。">
   <meta name="twitter:image" content="https://podcast.ai955.xyz/assets/images/og-cover.png">
   <link rel="icon" type="image/png" href="./assets/favicon.png">
   <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg">
@@ -29,7 +29,7 @@
       <a class="brand" href="#top" aria-label="拾声集 InkCast 首页">
         <img class="brand-mark" src="./assets/images/logo.png" alt="" width="30" height="30">
         <span class="brand-title">拾声集 · InkCast</span>
-        <span class="version-badge" data-config-text="versionBadge">v1.0 桌面正式版</span>
+        <span class="version-badge" data-config-text="versionBadge">v1.0.1 桌面正式版</span>
       </a>
 
       <nav class="topbar-nav" aria-label="页面导航">
@@ -55,7 +55,7 @@
         <div class="hero-badges">
           <span class="pill-tag is-accent">
             <span class="pill-dot" aria-hidden="true"></span>
-            <span data-config-text="versionBadge">v1.0 桌面正式版</span>
+            <span data-config-text="versionBadge">v1.0.1 桌面正式版</span>
           </span>
           <span class="pill-tag">免装 Node.js · 下载即用</span>
           <span class="pill-tag">BYOK 自带密钥 · GPL-3.0 开源</span>
@@ -78,7 +78,7 @@
                 <polyline points="7 10 12 15 17 10"/>
                 <line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
-              <span id="heroDownloadLabel">下载 macOS 桌面版（v1.0）</span>
+              <span id="heroDownloadLabel">下载 macOS 桌面版（v1.0.1）</span>
             </button>
             <button type="button" id="heroSwitchOsBtn" class="btn btn-outline btn-lg">切到 Windows 版</button>
           </div>
@@ -93,7 +93,7 @@
 
         <div class="hero-meta-bar">
           <span>免装 Node.js，支持 macOS Apple Silicon / Intel (.dmg) 与 Windows (.exe) · 另附便携版</span>
-          <a class="hero-meta-link" data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.0" target="_blank" rel="noopener noreferrer">GitHub Releases v1.0.0</a>
+          <a class="hero-meta-link" data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.1" target="_blank" rel="noopener noreferrer">GitHub Releases v1.0.1</a>
           <button type="button" class="hero-meta-link" data-open-download data-highlight-sha="true">核对 SHA256SUMS.txt</button>
         </div>
       </div>
@@ -380,7 +380,7 @@
           <div>
             <span class="section-eyebrow">ONBOARDING · 3 步下载即用</span>
             <h2 id="onboardingHeading" class="section-title">免装 Node.js，下载桌面客户端双击开播</h2>
-            <p class="section-desc">v1.0 桌面正式版内置运行环境，支持自动端口避让（3456–3475）、本地配置持久化与一键导入旧版便携目录，无需命令行或编程环境。</p>
+            <p class="section-desc">v1.0.1 桌面正式版内置运行环境，支持自动端口避让（3456–3475）、本地配置持久化与一键导入旧版便携目录，无需命令行或编程环境。</p>
           </div>
 
           <div class="segmented" data-segmented="onboarding-os" role="tablist" aria-label="选择你的电脑系统">
@@ -420,7 +420,7 @@
             </div>
             <div data-os-panel="win" class="hidden">
               <p class="step-card-desc">
-                双击 <code>InkCast-v1.0.0-win-x64-setup.exe</code> 完成安装；首次运行若遇「Windows 已保护你的电脑」提示，请先核对官方来源与 <code>SHA256SUMS.txt</code>，在设备策略允许且界面提供放行入口时，点击「更多信息 → 仍要运行」。
+                双击 <code>InkCast-v1.0.1-win-x64-setup.exe</code> 完成安装；首次运行若遇「Windows 已保护你的电脑」提示，请先核对官方来源与 <code>SHA256SUMS.txt</code>，在设备策略允许且界面提供放行入口时，点击「更多信息 → 仍要运行」。
               </p>
             </div>
           </article>
@@ -473,7 +473,7 @@
           <div>
             <span class="section-eyebrow">PRIVACY &amp; ROADMAP · 隐私边界与演进路线</span>
             <h2 id="roadmapHeading" class="section-title">纯本机可审计架构，每一步规划都透明写清</h2>
-            <p class="section-desc">所有密钥与音频均留在你的电脑里，v1.0 桌面正式版现已发布，并清晰列出后续演进方向。</p>
+            <p class="section-desc">所有密钥与音频均留在你的电脑里，v1.0.1 桌面正式版现已发布，并清晰列出后续演进方向。</p>
           </div>
         </div>
 
@@ -510,7 +510,7 @@
 
           <article class="roadmap-node is-current reveal">
             <span class="roadmap-badge">已上线 · 当前版本</span>
-            <h3>v1.0 桌面正式版</h3>
+            <h3>v1.0.1 桌面正式版</h3>
             <ul class="roadmap-list">
               <li>macOS Apple Silicon / Intel <code>.dmg</code> 与 Windows <code>.exe</code> 安装包，免装 Node.js 双击即用</li>
               <li>剧本逐句微调与 <code>tts-cache</code> 秒级缓存复用重合成</li>
@@ -538,10 +538,10 @@
         <div class="closing-cta reveal">
           <div>
             <h2>把下一篇长文，留给通勤路上的双人电台</h2>
-            <p>GPL-3.0 开源免费 · <code>v1.0 桌面正式版</code>（免装 Node.js · 下载即用）</p>
+            <p>GPL-3.0 开源免费 · <code>v1.0.1 桌面正式版</code>（免装 Node.js · 下载即用）</p>
           </div>
           <div class="closing-cta-actions">
-            <button type="button" class="btn btn-primary btn-lg" data-open-download>立即下载 v1.0 桌面版</button>
+            <button type="button" class="btn btn-primary btn-lg" data-open-download>立即下载 v1.0.1 桌面版</button>
             <a class="btn btn-outline btn-lg" data-config-link="githubRepo" href="https://github.com/Alex-955/Podcast-Generator" target="_blank" rel="noopener noreferrer">查看 GitHub 源码</a>
           </div>
         </div>
@@ -553,11 +553,11 @@
     <div class="container footer-inner">
       <div class="footer-brand">
         <img class="footer-brand-mark" src="./assets/images/logo.png" alt="" width="22" height="22">
-        <span><strong>拾声集 · InkCast</strong> · 双人对话播客生成器（<span data-config-text="versionBadge">v1.0 桌面正式版</span>）· GPL-3.0 License · 「拾声集 / InkCast」名称与图标保留相应商标权利</span>
+        <span><strong>拾声集 · InkCast</strong> · 双人对话播客生成器（<span data-config-text="versionBadge">v1.0.1 桌面正式版</span>）· GPL-3.0 License · 「拾声集 / InkCast」名称与图标保留相应商标权利</span>
       </div>
       <div class="footer-links">
         <a data-config-link="githubRepo" href="https://github.com/Alex-955/Podcast-Generator" target="_blank" rel="noopener noreferrer">GitHub 仓库</a>
-        <a data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.0" target="_blank" rel="noopener noreferrer">Releases v1.0.0</a>
+        <a data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.1" target="_blank" rel="noopener noreferrer">Releases v1.0.1</a>
         <a href="./guide.html">配置引导</a>
         <a data-config-link="githubLicense" href="https://github.com/Alex-955/Podcast-Generator/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">GPL-3.0 协议</a>
         <a data-config-link="githubTrademark" href="https://github.com/Alex-955/Podcast-Generator/blob/main/TRADEMARK.md" target="_blank" rel="noopener noreferrer">商标声明</a>
@@ -573,7 +573,7 @@
     <div class="modal-sheet">
       <div class="modal-head">
         <div>
-          <h2 id="downloadModalTitle" class="modal-title">下载拾声集 · InkCast（v1.0 桌面正式版）</h2>
+          <h2 id="downloadModalTitle" class="modal-title">下载拾声集 · InkCast（v1.0.1 桌面正式版）</h2>
           <p class="modal-subtitle">免装 Node.js，下载即用桌面客户端（另附便携 Node.js 版）</p>
         </div>
         <button type="button" id="downloadModalClose" class="icon-close-btn" aria-label="关闭下载弹窗">
@@ -613,14 +613,14 @@
 
       <div class="modal-file-row">
         <span>主推安装包：</span>
-        <code id="modalFilename">InkCast-v1.0.0-mac-arm64.dmg</code>
+        <code id="modalFilename">InkCast-v1.0.1-mac-arm64.dmg</code>
       </div>
 
       <div class="modal-download-actions">
-        <a id="modalDirectDownloadBtn" class="btn btn-primary" href="https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/InkCast-v1.0.0-mac-arm64.dmg" download="InkCast-v1.0.0-mac-arm64.dmg">
+        <a id="modalDirectDownloadBtn" class="btn btn-primary" href="https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.1/InkCast-v1.0.1-mac-arm64.dmg" download="InkCast-v1.0.1-mac-arm64.dmg">
           下载 Apple Silicon (.dmg)
         </a>
-        <a id="modalGithubDownloadBtn" class="btn btn-outline" href="https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/InkCast-v1.0.0-mac-x64.dmg" target="_blank" rel="noopener noreferrer">
+        <a id="modalGithubDownloadBtn" class="btn btn-outline" href="https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.1/InkCast-v1.0.1-mac-x64.dmg" target="_blank" rel="noopener noreferrer">
           下载 Intel 芯片 (.dmg)
         </a>
       </div>
@@ -628,19 +628,19 @@
       <div class="modal-portable-box">
         <span class="modal-portable-label">开发者 / 便携 Node.js 版与 Release 兜底</span>
         <div class="modal-portable-links">
-          <a data-config-link="portableZip" href="https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/InkCast-v1.0.0-portable.zip" target="_blank" rel="noopener noreferrer">便携版 (.zip)</a>
-          <a data-config-link="portableTar" href="https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/InkCast-v1.0.0-portable.tar.gz" target="_blank" rel="noopener noreferrer">便携版 (.tar.gz)</a>
-          <a data-config-link="sha256Sums" href="https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/SHA256SUMS.txt" target="_blank" rel="noopener noreferrer">SHA256SUMS.txt</a>
-          <a data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.0" target="_blank" rel="noopener noreferrer">GitHub Releases v1.0.0</a>
+          <a data-config-link="portableZip" href="https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.1/InkCast-v1.0.1-portable.zip" target="_blank" rel="noopener noreferrer">便携版 (.zip)</a>
+          <a data-config-link="portableTar" href="https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.1/InkCast-v1.0.1-portable.tar.gz" target="_blank" rel="noopener noreferrer">便携版 (.tar.gz)</a>
+          <a data-config-link="sha256Sums" href="https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.1/SHA256SUMS.txt" target="_blank" rel="noopener noreferrer">SHA256SUMS.txt</a>
+          <a data-config-link="githubReleases" href="https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.1" target="_blank" rel="noopener noreferrer">GitHub Releases v1.0.1</a>
         </div>
       </div>
 
       <div id="modalShaBox" class="sha-box">
         <div class="sha-box-head">
-          <span>校验命令 · 对照 <a class="sha-inline-link" data-config-link="sha256Sums" href="https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.0/SHA256SUMS.txt" target="_blank" rel="noopener noreferrer">SHA256SUMS.txt</a></span>
+          <span>校验命令 · 对照 <a class="sha-inline-link" data-config-link="sha256Sums" href="https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.1/SHA256SUMS.txt" target="_blank" rel="noopener noreferrer">SHA256SUMS.txt</a></span>
           <button type="button" id="btnCopySha" class="btn btn-subtle btn-sm">复制校验命令</button>
         </div>
-        <code id="modalShaCode" class="sha-code">shasum -a 256 InkCast-v1.0.0-mac-*.dmg</code>
+        <code id="modalShaCode" class="sha-code">shasum -a 256 InkCast-v1.0.1-mac-*.dmg</code>
       </div>
     </div>
   </div>

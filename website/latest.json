@@ -1,12 +1,12 @@
 {
-  "version": "1.0.0",
-  "releaseDate": "2026-11-27",
+  "version": "1.0.1",
+  "releaseDate": "2026-11-28",
   "notes": [
-    "桌面正式版免装 Node.js 双击即用（macOS Apple Silicon / Intel .dmg 与 Windows .exe）",
-    "支持剧本逐句微调与 tts-cache 秒级缓存复用重合成",
-    "新增「正反交锋」第三种播客风格、首选端口顺延（3456–3475）与旧版目录导入"
+    "修复豆包火山方舟（/api/v3 等版本化路径）Base URL 被错误拼接 /v1 的问题",
+    "修复 macOS 从「应用程序」启动时误将根目录 / 视为敏感路径导致含斜杠内容被拦截的问题",
+    "同步优化 macOS Gatekeeper 首次打开指引与官网一键复制体验"
   ],
   "downloadPageUrl": "https://podcast.ai955.xyz/#onboarding",
-  "releaseUrl": "https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.0",
+  "releaseUrl": "https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.1",
   "guideUrl": "https://podcast.ai955.xyz/guide.html"
 }
