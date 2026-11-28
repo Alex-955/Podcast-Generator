@@ -3,6 +3,7 @@
 const https = require('node:https');
 const { load } = require('cheerio');
 const { version: APP_VERSION } = require('../../package.json');
+const { redactProviderDetail } = require('./providerHttp');
 const { redactSecrets } = require('./validation');
 
 const DOWNLOAD_PAGE = 'https://podcast.ai955.xyz/#onboarding';
@@ -44,17 +45,49 @@ function isNewer(remote, local) {
   return a.length > b.length;
 }
 
+function safeDecode(value) {
+  try { return decodeURIComponent(value); }
+  catch { return null; }
+}
+
 function safeUrl(value, fallback) {
   if (typeof value !== 'string') return fallback;
   try {
     const url = new URL(value);
-    if (url.username || url.password) return fallback;
+    const fragment = url.hash.slice(1);
+    const decodedPath = safeDecode(url.pathname);
+    const decodedFragment = safeDecode(fragment);
+    if (url.username || url.password || url.search || decodedPath === null || decodedFragment === null) return fallback;
+    if (/%(?:2f|5c|3a)/i.test(url.pathname) || /%(?:2f|5c|3a)/i.test(decodedFragment)) return fallback;
+    if (redactSecrets(url.href) !== url.href || redactSecrets(decodedPath) !== decodedPath ||
+        redactProviderDetail(decodedFragment) !== decodedFragment) return fallback;
     if (url.origin === 'https://podcast.ai955.xyz' ||
         (url.origin === 'https://github.com' && /^\/Alex-955\/Podcast-Generator(?:\/|$)/.test(url.pathname))) {
       if (url.protocol === 'https:') return url.href;
     }
   } catch { /* Malformed release links use the built-in destination. */ }
   return fallback;
+}
+
+function redactEncodedText(raw) {
+  const decoded = safeDecode(raw);
+  if (decoded === null) return '***';
+  return redactProviderDetail(decoded) === decoded ? raw : '***';
+}
+
+function redactUrlPart(part) {
+  if (!part) return part;
+  const hashIdx = part.indexOf('#');
+  const query = hashIdx === -1 ? part : part.slice(0, hashIdx);
+  const hash = hashIdx === -1 ? '' : part.slice(hashIdx);
+  const safeQuery = !query ? '' : '?' + query.slice(1).split('&').map(segment => {
+    if (!segment) return segment;
+    const eq = segment.indexOf('=');
+    if (eq === -1) return redactEncodedText(segment);
+    return redactEncodedText(segment.slice(0, eq)) + '=' + redactEncodedText(segment.slice(eq + 1));
+  }).join('&');
+  const safeHash = !hash ? '' : '#' + redactEncodedText(hash.slice(1));
+  return safeQuery + safeHash;
 }
 
 function plainText(value) {
@@ -64,7 +97,21 @@ function plainText(value) {
     html('script,style,template').remove();
     value = html.root().text();
   }
-  return redactSecrets(value.replace(/[<>\p{Cc}\u202a-\u202e\u2066-\u2069]/gu, '').trim());
+  const cleaned = value.replace(/[<>\p{Cc}\u202a-\u202e\u2066-\u2069]/gu, '').trim();
+  const redacted = redactProviderDetail(cleaned);
+  return redacted.replace(/https?:\/\/[^\s"'`<>),\]，。）】》」』；、]+/giu, urlText => {
+    const idx = urlText.search(/[?#]/);
+    const base = idx === -1 ? urlText : urlText.slice(0, idx);
+    const suffix = idx === -1 ? '' : redactUrlPart(urlText.slice(idx));
+    if (/%(?:2f|5c|3a)/i.test(base)) {
+      const pathPart = base.replace(/^https?:\/\/[^/?#]+/i, '');
+      const decodedPath = safeDecode(pathPart);
+      if (decodedPath === null) return '***' + suffix;
+      const variants = [decodedPath.replace(/^\/+/, '/'), decodedPath.replace(/^\/+/, ''), ...decodedPath.split('/')];
+      if (variants.some(item => item && redactProviderDetail(item) !== item)) return '***' + suffix;
+    }
+    return base + suffix;
+  });
 }
 
 function notesFrom(lines) {
@@ -137,7 +184,7 @@ function createUpdateChecker({
         }
         const version = github ? payload.tag_name : payload.version;
         const remote = parseVersion(version);
-        if (!remote || redactSecrets(version) !== version || (github && (payload.draft === true || payload.prerelease === true))) continue;
+        if (!remote || redactProviderDetail(version) !== version || (github && (payload.draft === true || payload.prerelease === true))) continue;
 
         const time = now();
         const lines = github ? [payload.body] : payload.notes;
