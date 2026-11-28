@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" href="./assets/favicon.png">
   <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg">
   <link rel="stylesheet" href="./styles/tokens.css?v=1.1.0">
-  <link rel="stylesheet" href="./styles/main.css?v=1.1.0">
+  <link rel="stylesheet" href="./styles/main.css?v=1.1.1">
   <script defer src="./scripts/site-config.js?v=1.1.0"></script>
   <script defer src="./scripts/interactions.js?v=1.1.0"></script>
   <script defer src="./scripts/main.js?v=1.1.0"></script>
@@ -70,7 +70,7 @@
       <div class="container guide-subnav-inner">
         <span class="guide-subnav-label">本页目录</span>
         <a class="guide-subnav-pill" href="#compare">参数速查</a>
-        <a class="guide-subnav-pill is-primary" href="#deepseek">1. DeepSeek（剧本首选）</a>
+        <a class="guide-subnav-pill is-primary" href="#deepseek">1. DeepSeek（剧本与识读）</a>
         <a class="guide-subnav-pill" href="#doubao-llm">2. 豆包 · 火山方舟</a>
         <a class="guide-subnav-pill is-primary" href="#volcengine-tts">3. 火山语音 V3</a>
         <a class="guide-subnav-pill" href="#minimax-tts">4. MiniMax &amp; Edge</a>
@@ -103,7 +103,7 @@
               </thead>
               <tbody>
                 <tr>
-                  <td><span class="guide-role-tag">剧本大模型</span></td>
+                  <td><span class="guide-role-tag">剧本 / 识读</span></td>
                   <td><strong>DeepSeek</strong>（首选）</td>
                   <td><a href="https://platform.deepseek.com" target="_blank" rel="noopener noreferrer">platform.deepseek.com</a></td>
                   <td>
@@ -112,7 +112,7 @@
                       <button type="button" class="btn btn-subtle btn-xs" data-copy-text="https://api.deepseek.com" data-copy-toast="已复制 DeepSeek Base URL">复制</button>
                     </div>
                   </td>
-                  <td>填 Key 后点「获取模型列表」，从实时列表中选当前主力对话模型</td>
+                  <td>填 Key 后点「获取模型列表」，剧本可选主力对话模型；如需长图识读请选 <code>deepseek-flash</code></td>
                 </tr>
                 <tr>
                   <td><span class="guide-role-tag">剧本 / 识图</span></td>
@@ -169,9 +169,9 @@
       <div class="container">
         <div class="section-header">
           <div>
-            <span class="section-eyebrow">STEP 01 · 剧本生成首选</span>
+            <span class="section-eyebrow">STEP 01 · 剧本与长图识读首选</span>
             <h2 id="deepseekHeading" class="section-title">DeepSeek（OpenAI 兼容接口）</h2>
-            <p class="section-desc">逻辑拆解清晰、双人对话自然且性价比高，是拾声集客户端默认推荐的剧本生成底座。</p>
+            <p class="section-desc">逻辑拆解清晰、双人对话自然且性价比高，同时支持剧本生成与长图识读，是拾声集客户端默认推荐的核心底座。</p>
           </div>
           <a class="btn btn-primary btn-sm" href="https://platform.deepseek.com" target="_blank" rel="noopener noreferrer">打开 DeepSeek 开放平台 ↗</a>
         </div>
@@ -194,14 +194,14 @@
           <article class="step-card">
             <span class="step-num-badge">3</span>
             <h3 class="step-card-title">填入拾声集并拉取模型列表</h3>
-            <p class="step-card-desc">打开拾声集右上角「模型与语音」，预设选 <strong>DeepSeek</strong>，粘贴 Key 后点击<strong>「获取模型列表」</strong>，从实时返回列表中选择当前主力对话模型（如 <code>deepseek-chat</code> 已下线则选列表中最新对话模型，如 <code>deepseek-flash</code>）即可保存。</p>
+            <p class="step-card-desc">打开拾声集右上角「模型与语音」，预设选 <strong>DeepSeek</strong>，粘贴 Key 后点击<strong>「获取模型列表」</strong>，从实时返回列表中选择主力对话模型（如需同时开启<strong>长图识读</strong>，请直接选择支持视觉识图的 <code>deepseek-flash</code>）即可保存。</p>
             <div class="guide-path-pill">模型与语音 → 预设：DeepSeek → 获取模型列表</div>
           </article>
         </div>
 
         <div class="guide-mock-grid">
           <div class="guide-mock-card">
-            <div class="guide-mock-head">拾声集客户端填写示意（剧本模型）</div>
+            <div class="guide-mock-head">拾声集客户端填写示意（剧本与识读模型）</div>
             <div class="guide-mock-row"><span>服务商预设</span><strong>DeepSeek</strong></div>
             <div class="guide-mock-row">
               <span>Base URL</span>
@@ -211,7 +211,7 @@
               </div>
             </div>
             <div class="guide-mock-row"><span>API Key</span><code>sk-xxxxxxxxxxxxxxxx（替换为你的真实密钥）</code></div>
-            <div class="guide-mock-row"><span>模型名称</span><code>点「获取模型列表」后选择实时返回的主力对话模型</code></div>
+            <div class="guide-mock-row"><span>模型名称</span><code>点「获取模型列表」后选择 deepseek-flash（同时支持剧本与长图识读）</code></div>
           </div>
         </div>
       </div>
@@ -373,6 +373,27 @@
               <a class="btn btn-subtle btn-sm" href="./index.html#features">查看同供应商缓存复用</a>
             </div>
           </article>
+        </div>
+
+        <div class="guide-shot-grid guide-shot-grid-minimax">
+          <figure class="guide-shot-card guide-shot-card-wide">
+            <a class="guide-shot-link" href="./assets/images/minimax-step1-platform.png" target="_blank" rel="noopener noreferrer" title="点击查看原图">
+              <img src="./assets/images/minimax-step1-platform.png" alt="MiniMax 官网右上角点击登录并进入 API 开放平台" loading="lazy" />
+            </a>
+            <figcaption>图 1：打开 MiniMax 官网，点击右上角「登录 → API 开放平台」（点击图片可查看原图）。</figcaption>
+          </figure>
+          <figure class="guide-shot-card">
+            <a class="guide-shot-link" href="./assets/images/minimax-step2-menu.png" target="_blank" rel="noopener noreferrer" title="点击查看原图">
+              <img src="./assets/images/minimax-step2-menu.png" alt="MiniMax 开放平台左侧菜单进入 API 管理下的 API Key" loading="lazy" />
+            </a>
+            <figcaption>图 2：在开放平台左侧导航依次点击「API 管理 → API Key」。</figcaption>
+          </figure>
+          <figure class="guide-shot-card">
+            <a class="guide-shot-link" href="./assets/images/minimax-step3-create.png" target="_blank" rel="noopener noreferrer" title="点击查看原图">
+              <img src="./assets/images/minimax-step3-create.png" alt="在 API Key 页面点击右上角创建 API Key 并注意按量付费与订阅套餐分开管理" loading="lazy" />
+            </a>
+            <figcaption>图 3：点击右上角「+ 创建 API Key」；注意按量付费/资源包 Key 与订阅套餐 Key 分开管理，请在本页创建按量付费/资源包 Key。</figcaption>
+          </figure>
         </div>
       </div>
     </section>

@@ -2169,6 +2169,21 @@ body.modal-open {
   gap: 16px;
 }
 
+.guide-shot-grid.guide-shot-grid-minimax {
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.guide-shot-card-wide {
+  grid-column: 1 / -1;
+}
+
+.guide-shot-link {
+  display: block;
+  background: #ffffff;
+  border-bottom: 1px solid var(--hairline);
+}
+
 .guide-shot-card {
   margin: 0;
   background: var(--bg-surface);
@@ -2189,6 +2204,15 @@ body.modal-open {
   border-bottom: 1px solid var(--hairline);
 }
 
+.guide-shot-card .guide-shot-link img {
+  border-bottom: 0;
+}
+
+.guide-shot-grid.guide-shot-grid-minimax .guide-shot-card img {
+  aspect-ratio: auto;
+  max-height: 400px;
+}
+
 .guide-shot-card figcaption {
   padding: 11px 14px;
   font-size: 12.5px;
@@ -2197,7 +2221,8 @@ body.modal-open {
 }
 
 @media (max-width: 820px) {
-  .guide-shot-grid {
+  .guide-shot-grid,
+  .guide-shot-grid.guide-shot-grid-minimax {
     grid-template-columns: 1fr;
   }
 }
