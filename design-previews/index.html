@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>拾声集 · 视觉方案预览</title>
+  <style>
+    body { margin: 0; padding: 56px 24px; background: #F5F2EB; color: #1A1916; font: 15px/1.7 "PingFang SC", -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 860px; margin: 0 auto; }
+    h1 { font-family: "Songti SC", "Noto Serif SC", serif; font-size: 30px; margin: 0 0 6px; }
+    p { color: #4D4941; margin: 0 0 28px; }
+    h2 { font-size: 13px; letter-spacing: .08em; color: #B03E24; margin: 32px 0 10px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    a { display: block; padding: 18px 20px; background: #fff; border: 1px solid rgba(26,25,22,.15); border-radius: 14px; color: inherit; text-decoration: none; }
+    a:hover { border-color: #B03E24; }
+    a b { display: block; font-size: 16px; }
+    a span { font-size: 13px; color: #6C665D; }
+    code { background: #ECE7DC; padding: 2px 6px; border-radius: 6px; font-size: 13px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>拾声集 · 视觉方案预览</h1>
+  <p>仅用于看效果，不改动 <code>public/</code> 与 <code>website/</code>。在仓库根目录运行 <code>python3 -m http.server 8810</code>，再打开 <code>http://127.0.0.1:8810/design-previews/</code>。</p>
+
+  <h2>官网</h2>
+  <div class="grid">
+    <a href="./website/index-a.html"><b>方案 A · 纸本精修</b><span>保持通透暖纸；无深色块；纸纹、渐变波浪线、声部色晕、数据带</span></a>
+    <a href="./website/index-b.html"><b>方案 B · 墨色对比</b><span>左文右图 Hero；深色仅 3 处：数据带 / 缓存演练卡 / 收尾 CTA</span></a>
+  </div>
+
+  <h2>应用端 · 右栏空状态</h2>
+  <div class="grid">
+    <a href="./app/index-a.html"><b>方案 A · 线稿插画</b><span>单线描边：文稿 → 阿泽 / 小晓对话气泡</span></a>
+    <a href="./app/index-b.html"><b>方案 B · 几何插画</b><span>实心色块：泽 / 晓 双圆 + 声纹柱</span></a>
+  </div>
+</main>
+</body>
+</html>
