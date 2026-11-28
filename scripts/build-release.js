@@ -11,7 +11,8 @@ const SOURCE_DIR = path.resolve(__dirname, '..');
 const FORMATS = ['zip', 'tar.gz', 'both', 'dir'];
 const ROOT_FILES = ['server.js', 'package.json', 'package-lock.json', 'README.md', 'LICENSE', 'TRADEMARK.md', '.env.example'];
 const SOURCE_FILES = Object.freeze([
-  'src/services/atomicWrite.js', 'src/services/audioMerger.js', 'src/services/connectionTests.js',
+  'src/services/atomicWrite.js', 'src/services/audioMerger.js', 'src/services/collectionStore.js',
+  'src/services/collectionSuggester.js', 'src/services/connectionTests.js',
   'src/services/edgeTtsAdapter.js', 'src/services/extractor.js', 'src/services/httpTts.js',
   'src/services/imageExtractor.js', 'src/services/instanceLock.js', 'src/services/llmCredentials.js',
   'src/services/llmModels.js', 'src/services/minimaxTtsProvider.js', 'src/services/mp3Utils.js',

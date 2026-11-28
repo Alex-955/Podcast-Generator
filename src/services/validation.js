@@ -22,6 +22,12 @@ class InputError extends Error {
   }
 }
 
+const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
+
+function checkId(id) {
+  if (typeof id !== 'string' || !SAFE_ID.test(id)) throw new InputError('无效的资源 ID');
+}
+
 /** 校验必填文本字段 */
 function requireText(value, name, { max, allowEmpty = false }) {
   if (typeof value !== 'string') {
@@ -181,6 +187,8 @@ function redactSecrets(text, sensitiveValues = []) {
 }
 
 module.exports = {
+  SAFE_ID,
+  checkId,
   InputError,
   MAX_TITLE_LENGTH,
   MAX_CONTENT_LENGTH,
