@@ -1,0 +1,12 @@
+{
+  "version": "1.0.0",
+  "releaseDate": "2026-11-27",
+  "notes": [
+    "桌面正式版免装 Node.js 双击即用（macOS Apple Silicon / Intel .dmg 与 Windows .exe）",
+    "支持剧本逐句微调与 tts-cache 秒级缓存复用重合成",
+    "新增「正反交锋」第三种播客风格、首选端口顺延（3456–3475）与旧版目录导入"
+  ],
+  "downloadPageUrl": "https://podcast.ai955.xyz/#onboarding",
+  "releaseUrl": "https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.0",
+  "guideUrl": "https://podcast.ai955.xyz/guide.html"
+}
