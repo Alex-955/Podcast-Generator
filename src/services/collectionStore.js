@@ -266,6 +266,7 @@ function createCollectionStore({ dataDir, podcastsDir, adminToken, desktopSessio
   }
 
   return { createCollection, updateCollection, deleteCollection, setPodcastCollection, removePodcast, hasPodcastData, assertWritable, listCollections, getCollection,
+    getPodcastHighlights: id => (read().highlights[id] || []).map(h => ({ ...h })),
     getPodcastCollectionId: id => read().assignments[id] ?? null,
     getPodcastHighlightCount: id => read().highlights[id]?.length ?? 0 };
 }

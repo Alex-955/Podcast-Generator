@@ -17,9 +17,10 @@ const { polishArticleText } = require('./src/services/textPolisher');
 const { recommendPodcastStyle } = require('./src/services/styleRecommender');
 const { acquireInstanceLock, withDataDirLock } = require('./src/services/instanceLock');
 const { createCollectionStore } = require('./src/services/collectionStore');
+const { createLanCompanion } = require('./src/services/lanCompanion');
 const { suggestCollection } = require('./src/services/collectionSuggester');
 const { llmSecrets } = require('./src/services/llmCredentials');
-const { createTaskManager } = require('./src/services/taskManager');
+const { createTaskManager, createPodcastCatalog } = require('./src/services/taskManager');
 const { checkId, InputError, ttsSecrets } = require('./src/services/validation');
 const { redactProviderDetail } = require('./src/services/providerHttp');
 
@@ -79,6 +80,13 @@ function createApp({ desktopSessionToken, ...options } = {}, ownerToken) {
       ...options, collectionStore, adminToken, extractor, podcastsDir, tasksDir: path.join(dataDir, 'tasks'), cacheDir: path.join(dataDir, 'tts-cache'),
     });
   }
+  const companionCatalog = createPodcastCatalog({
+    podcastsDir, collectionStore, adminToken, extraSecrets: [desktopSessionToken, dataDir].filter(Boolean).map(String),
+  });
+  const lanCompanion = options.lanCompanion || createLanCompanion({
+    manager: taskManager || companionCatalog, collectionStore, publicDir, podcastsDir,
+    getLanInterfaces: options.getLanInterfaces, sensitive: [desktopSessionToken, adminToken, dataDir, podcastsDir],
+  });
   appStartup.set(app, { dataDir, initializeManager });
   const requests = new Set();
   let shutdown;
@@ -91,7 +99,7 @@ function createApp({ desktopSessionToken, ...options } = {}, ownerToken) {
   }
   app.shutdown = opts => {
     if (shutdown) return shutdown;
-    shutdown = Promise.resolve().then(() => manager?.shutdown?.(opts));
+    shutdown = Promise.all([lanCompanion.stop(), Promise.resolve().then(() => manager?.shutdown?.(opts))]).then(() => {});
     for (const controller of requests) controller.abort();
     return shutdown;
   };
@@ -178,6 +186,27 @@ function createApp({ desktopSessionToken, ...options } = {}, ownerToken) {
   }));
   app.use('/api', express.json({ limit: '10mb' }), checkAvailable, withManagerAccess);
 
+  const companionControl = action => async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    // The portable server has no desktop-session header. A browser page must
+    // not inherit local control privileges just because its socket is loopback.
+    if (!desktopSessionToken && isLoopbackRequest(req)) {
+      const host = req.hostname?.toLowerCase();
+      const origin = req.get('origin');
+      const localHost = ['localhost', '127.0.0.1', '[::1]', req.socket.localAddress].includes(host);
+      if (!localHost || (origin && origin !== req.protocol + '://' + req.get('host')) ||
+          req.get('sec-fetch-site') === 'cross-site') {
+        return res.status(403).json({ success: false, error: '请通过本机拾声集页面操作' });
+      }
+    }
+    res.json({ success: true, data: await action(req.body || {}) });
+  };
+  app.get('/api/lan-companion/status', authorizePodcastWrite, companionControl(() => lanCompanion.status()));
+  app.post('/api/lan-companion/start', authorizePodcastWrite, companionControl(({ host }) => lanCompanion.start({ host })));
+  app.post('/api/lan-companion/stop', authorizePodcastWrite, companionControl(() => lanCompanion.stop()));
+  app.post('/api/lan-companion/rotate', authorizePodcastWrite, companionControl(() => lanCompanion.rotate()));
+  app.post('/api/lan-companion/select-host', authorizePodcastWrite, companionControl(({ host }) => lanCompanion.selectHost(host)));
+
   app.post('/api/llm/test', cancelOnDisconnect(testLlmConnection));
   app.post('/api/llm/models', cancelOnDisconnect(fetchLlmModels));
   app.post('/api/polish-text', cancelOnDisconnect(polishArticleText));
@@ -259,7 +288,7 @@ function createApp({ desktopSessionToken, ...options } = {}, ownerToken) {
     if (err.type === 'entity.parse.failed') detail = '请求体必须是有效 JSON';
     const sensitive = [req.body?.apiKey, req.body?.baseURL, process.env.DEEPSEEK_API_KEY, process.env.LLM_BASE_URL,
       req.body?.visionApiKey, req.body?.visionBaseURL, process.env.VISION_API_KEY, process.env.VISION_BASE_URL,
-      ...ttsSecrets(req.body?.tts ?? {}), desktopSessionToken, adminToken, req.get?.('x-admin-token'), bearerToken(req), dataDir, podcastsDir];
+      ...ttsSecrets(req.body?.tts ?? {}), desktopSessionToken, req.get?.('x-desktop-session'), adminToken, req.get?.('x-admin-token'), bearerToken(req), dataDir, podcastsDir];
     const error = redactProviderDetail(detail, sensitive);
     const code = typeof err.code === 'string' ? redactProviderDetail(err.code, sensitive) : undefined;
     res.status(status).json({ success: false, error, code });

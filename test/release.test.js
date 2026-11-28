@@ -19,7 +19,7 @@ const SOURCE_FILES = [
   'server.js', 'package.json', 'package-lock.json', 'README.md', 'LICENSE', 'TRADEMARK.md', '.env.example', 'src',
   'scripts/start-portable.js', 'scripts/build-mac-launcher.sh',
   'scripts/launchers/macos.command', 'scripts/launchers/windows.bat',
-  ...['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js', 'icon.png'].map(file => 'public/' + file),
+  ...['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js', 'mobile.html', 'mobile.css', 'mobile.js', 'icon.png'].map(file => 'public/' + file),
 ];
 const INTERNAL_FILES = ['ROADMAP.md', 'Plan.md', 'AGENTS.md', 'plan/draft.md', 'website/index.html'];
 const PRIVATE_FILES = [

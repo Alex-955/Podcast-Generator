@@ -64,9 +64,10 @@ function hasPreparedTransaction(dir) {
     fs.lstatSync(path.join(dir, entry.name, 'prepared'), { throwIfNoEntry: false }) !== undefined);
 }
 
-function readPodcastMetadata(dir, resolveTaskStatus) {
+function readPodcastMetadata(dir, resolveTaskStatus, { reconcile = true } = {}) {
   if (!fs.lstatSync(dir, { throwIfNoEntry: false })?.isDirectory()) return;
   const baseMeta = readValidPodcastFiles(dir);
+  if (!reconcile) return baseMeta;
   if (!baseMeta && !hasPreparedTransaction(dir)) return;
   reconcilePendingPublications(dir, resolveTaskStatus);
   return readValidPodcastFiles(dir);
@@ -226,6 +227,69 @@ function publicTtsSummary(meta, sensitive) {
   };
 }
 
+function createPodcastCatalog({ podcastsDir, collectionStore, adminToken, extraSecrets = [] }) {
+  const storedSecrets = [
+    ...llmSecrets({}, {}, { includeDefaultBase: false }),
+    adminToken,
+    filterSensitivePath(podcastsDir),
+    ...extraSecrets,
+  ].filter(Boolean);
+
+  function podcastDTO(id, meta) {
+    const metaSensitive = metadataSecrets(meta, storedSecrets);
+    const { podcastTitle, summary = '' } = meta;
+    const audioVersion = isSafeVersion(meta.audioVersion) && redactScriptField(meta.audioVersion, metaSensitive) === meta.audioVersion
+      ? meta.audioVersion : undefined;
+    const query = audioVersion ? '?v=' + audioVersion : '';
+    const podcastStyle = PODCAST_STYLES.includes(meta.podcastStyle) ? meta.podcastStyle : 'dialogue';
+    const sourceType = SOURCE_TYPES.has(meta.sourceType) ? meta.sourceType : null;
+    return {
+      collectionId: collectionStore?.getPodcastCollectionId(id) ?? null,
+      highlightCount: collectionStore?.getPodcastHighlightCount(id) ?? 0,
+      id, podcastTitle: redactScriptField(podcastTitle, metaSensitive), summary: redactScriptField(summary, metaSensitive),
+      podcastStyle, sourceType, sourceTruncated: Boolean(meta.sourceTruncated),
+      createAt: publicDate(meta.createAt, metaSensitive), totalDuration: finiteNumber(meta.totalDuration),
+      sentenceGap: finiteNumber(meta.sentenceGap), measurement: publicIdentifier(meta.measurement, /^[a-zA-Z0-9_-]{1,60}$/, metaSensitive),
+      ...publicTtsSummary(meta, metaSensitive),
+      ...(audioVersion && { audioVersion, updatedAt: publicDate(meta.updatedAt, metaSensitive) }),
+      fullAudioUrl: `/podcasts/${id}/full_podcast.mp3${query}`, sentences: publicSentences(id, meta.sentences || [], metaSensitive, query),
+    };
+  }
+
+  function getPodcast(id) {
+    checkId(id);
+    const dir = path.join(podcastsDir, id);
+    const missing = () => httpError(404, '播客不存在或尚未生成完成');
+    try {
+      const meta = readPodcastMetadata(dir, undefined, { reconcile: false });
+      if (!meta) throw missing();
+      return podcastDTO(path.basename(fs.realpathSync.native(dir)), meta);
+    } catch (error) {
+      if (['ENOENT', 'ENOTDIR'].includes(error.code) || error instanceof SyntaxError || error instanceof TypeError) throw missing();
+      throw error;
+    }
+  }
+
+  function listPodcasts() {
+    const items = [];
+    for (const entry of readDirectory(podcastsDir)) {
+      if (!entry.isDirectory() || !SAFE_ID.test(entry.name)) continue;
+      try {
+        const { id, collectionId, highlightCount, podcastTitle, summary, podcastStyle, sourceType, createAt, totalDuration, sentences, fullAudioUrl,
+          ttsProvider, ttsModel, voiceMapping, speechSpeed } = getPodcast(entry.name);
+        items.push({ id, collectionId, highlightCount, podcastTitle, summary, podcastStyle, sourceType, createAt, totalDuration, sentenceCount: sentences.length, fullAudioUrl,
+          ...(ttsProvider && { ttsProvider }), ...(ttsModel && { ttsModel }), ...(voiceMapping && { voiceMapping }), speechSpeed });
+      } catch (error) {
+        if (error.statusCode === 404 || (error.statusCode === 503 && error.code === 'PODCAST_RECOVERY_FAILED')) continue;
+        throw error;
+      }
+    }
+    return { items: items.sort((a, b) => (Date.parse(b.createAt) || 0) - (Date.parse(a.createAt) || 0)) };
+  }
+
+  return { listPodcasts, getPodcast, podcastDTO };
+}
+
 function createTaskManager({
   tasksDir, podcastsDir, cacheDir, extractor = extractArticle, scriptGenerator = generatePodcastScript,
   llmRequest, lookup, ttsSynthesizer = synthesizeDialogueScript, audioMerger = concatenateAudioFiles,
@@ -237,6 +301,9 @@ function createTaskManager({
     adminToken,
     ...[podcastsDir, cacheDir, tasksDir].map(filterSensitivePath),
   ].filter(Boolean);
+  const catalog = createPodcastCatalog({
+    podcastsDir, collectionStore, adminToken, extraSecrets: [cacheDir, tasksDir].map(filterSensitivePath),
+  });
   let active = null;
   let closing;
 
@@ -362,48 +429,29 @@ function createTaskManager({
     reconcilePendingPublications(dir, resolvePublicationTask);
   }
 
-  function getPodcast(id) {
+  function getPodcast(id, { reconcile = true } = {}) {
+    if (!reconcile) return catalog.getPodcast(id);
     checkId(id);
     const dir = path.join(podcastsDir, id);
     const missing = () => httpError(404, '播客不存在或尚未生成完成');
     try {
-      const meta = readPodcastMetadata(dir, resolvePublicationTask);
+      const meta = readPodcastMetadata(dir, resolvePublicationTask, { reconcile });
       if (!meta) throw missing();
-      return podcastDTO(path.basename(fs.realpathSync.native(dir)), meta);
+      return catalog.podcastDTO(path.basename(fs.realpathSync.native(dir)), meta);
     } catch (error) {
       if (['ENOENT', 'ENOTDIR'].includes(error.code) || error instanceof SyntaxError || error instanceof TypeError) throw missing();
       throw error;
     }
   }
 
-  function podcastDTO(id, meta) {
-    const metaSensitive = metadataSecrets(meta, storedSecrets);
-    const { podcastTitle, summary = '' } = meta;
-    const audioVersion = isSafeVersion(meta.audioVersion) && redactScriptField(meta.audioVersion, metaSensitive) === meta.audioVersion
-      ? meta.audioVersion : undefined;
-    const query = audioVersion ? '?v=' + audioVersion : '';
-    const podcastStyle = PODCAST_STYLES.includes(meta.podcastStyle) ? meta.podcastStyle : 'dialogue';
-    const sourceType = SOURCE_TYPES.has(meta.sourceType) ? meta.sourceType : null;
-    return {
-      collectionId: collectionStore?.getPodcastCollectionId(id) ?? null,
-      highlightCount: collectionStore?.getPodcastHighlightCount(id) ?? 0,
-      id, podcastTitle: redactScriptField(podcastTitle, metaSensitive), summary: redactScriptField(summary, metaSensitive),
-      podcastStyle, sourceType, sourceTruncated: Boolean(meta.sourceTruncated),
-      createAt: publicDate(meta.createAt, metaSensitive), totalDuration: finiteNumber(meta.totalDuration),
-      sentenceGap: finiteNumber(meta.sentenceGap), measurement: publicIdentifier(meta.measurement, /^[a-zA-Z0-9_-]{1,60}$/, metaSensitive),
-      ...publicTtsSummary(meta, metaSensitive),
-      ...(audioVersion && { audioVersion, updatedAt: publicDate(meta.updatedAt, metaSensitive) }),
-      fullAudioUrl: `/podcasts/${id}/full_podcast.mp3${query}`, sentences: publicSentences(id, meta.sentences || [], metaSensitive, query),
-    };
-  }
-
-  function listPodcasts() {
+  function listPodcasts({ reconcile = true } = {}) {
+    if (!reconcile) return catalog.listPodcasts();
     const items = [];
     for (const entry of readDirectory(podcastsDir)) {
       if (!entry.isDirectory() || !SAFE_ID.test(entry.name)) continue;
       try {
         const { id, collectionId, highlightCount, podcastTitle, summary, podcastStyle, sourceType, createAt, totalDuration, sentences, fullAudioUrl,
-          ttsProvider, ttsModel, voiceMapping, speechSpeed } = getPodcast(entry.name);
+          ttsProvider, ttsModel, voiceMapping, speechSpeed } = getPodcast(entry.name, { reconcile });
         items.push({ id, collectionId, highlightCount, podcastTitle, summary, podcastStyle, sourceType, createAt, totalDuration, sentenceCount: sentences.length, fullAudioUrl,
           ...(ttsProvider && { ttsProvider }), ...(ttsModel && { ttsModel }), ...(voiceMapping && { voiceMapping }), speechSpeed });
       } catch (error) {
@@ -412,6 +460,10 @@ function createTaskManager({
       }
     }
     return { items: items.sort((a, b) => (Date.parse(b.createAt) || 0) - (Date.parse(a.createAt) || 0)) };
+  }
+
+  function podcastDTO(id, meta) {
+    return catalog.podcastDTO(id, meta);
   }
 
   function deletePodcast(id) {
@@ -809,8 +861,11 @@ function createTaskManager({
 
   return {
     createTask, resynthesizePodcast, isPodcastEdit: id => Boolean(readTask(id).targetPodcastId),
-    getTask: id => toDTO(readTask(id)), cancelTask, resumeTask, listPodcasts, getPodcast, reconcilePodcast, deletePodcast, shutdown,
+    getTask: id => toDTO(readTask(id)), cancelTask, resumeTask, listPodcasts, getPodcast,
+    listPodcastsReadOnly: () => listPodcasts({ reconcile: false }),
+    getPodcastReadOnly: id => getPodcast(id, { reconcile: false }),
+    reconcilePodcast, deletePodcast, shutdown,
   };
 }
 
-module.exports = { createTaskManager };
+module.exports = { createTaskManager, createPodcastCatalog };

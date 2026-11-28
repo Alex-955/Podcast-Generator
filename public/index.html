@@ -28,6 +28,17 @@
           </span>
         </div>
 
+        <button type="button" id="btnLanCompanion" class="btn-settings btn-lan-companion" aria-haspopup="dialog" aria-controls="lanCompanionModal" title="手机同 Wi-Fi 扫码随身听">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="7" y="2.5" width="10" height="19" rx="2.2"></rect>
+            <line x1="11" y1="18" x2="13" y2="18"></line>
+            <path d="M3.5 9.5a8.5 8.5 0 0 1 0 5"></path>
+            <path d="M20.5 9.5a8.5 8.5 0 0 1 0 5"></path>
+          </svg>
+          <span>手机随身听</span>
+          <span id="lanCompanionStatusDot" class="status-dot is-lan-dot" aria-hidden="true"></span>
+        </button>
+
         <button type="button" id="btnSettings" class="btn-settings" aria-haspopup="dialog" aria-controls="settingsModal">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="4" y1="7" x2="20" y2="7"></line>
@@ -905,6 +916,94 @@
             <input type="text" id="quickCollectionNameInput" class="field-input" placeholder="输入新合集名称直接创建并归入…" autocomplete="off" spellcheck="false">
             <button type="submit" id="btnQuickCreateCollection" class="btn btn-primary btn-sm">新建并归入</button>
           </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- 手机同 WiFi 随身听弹窗 -->
+    <div id="lanCompanionModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="lanCompanionModalTitle">
+      <div class="modal-sheet modal-sheet-sm lan-modal-sheet">
+        <div class="modal-head">
+          <div>
+            <h2 id="lanCompanionModalTitle" class="modal-title">手机同 WiFi 随身听</h2>
+            <p class="modal-subtitle">局域网安全只读收听 · 把拾声集装进口袋</p>
+          </div>
+          <button type="button" id="btnCloseLanCompanionModal" class="btn-icon-quiet" aria-label="关闭手机随身听弹窗">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-scroll lan-modal-scroll">
+          <!-- 未开启状态 -->
+          <div id="lanCompanionStoppedView" class="lan-state-panel">
+            <div class="lan-intro-card">
+              <div class="lan-intro-badge">
+                <span class="lan-dot-idle" aria-hidden="true"></span>
+                <span>当前未开启局域网随身听</span>
+              </div>
+              <p class="lan-intro-lead">在局域网内安全开启只读随身听，手机扫码即听，不暴露任何设置与密钥。</p>
+              <ul class="lan-feature-list">
+                <li>主服务始终锁定本机 <code>127.0.0.1</code>，伴随端口物理只读隔离</li>
+                <li>支持按合集筛选、同步高亮台词、锁屏播控与离线保存 MP3</li>
+              </ul>
+            </div>
+
+            <p id="lanCompanionStoppedError" class="collection-inline-error hidden" role="alert"></p>
+
+            <button type="button" id="btnStartLanCompanion" class="btn btn-primary btn-block">
+              <span>开启手机随身听</span>
+            </button>
+          </div>
+
+          <!-- 已开启状态 -->
+          <div id="lanCompanionRunningView" class="lan-state-panel hidden">
+            <div class="lan-running-bar">
+              <span class="lan-running-pill">
+                <span class="lan-dot-live" aria-hidden="true"></span>
+                <span>局域网随身听已开启</span>
+              </span>
+              <span id="lanCompanionPortBadge" class="meta-pill is-num">端口 —</span>
+            </div>
+
+            <div class="lan-qr-card">
+              <div id="lanCompanionQrBox" class="lan-qr-box" aria-label="手机随身听配对二维码"></div>
+              <p class="lan-qr-caption">使用手机相机扫码即可直达随身听</p>
+            </div>
+
+            <div class="form-field">
+              <label for="lanCompanionUrlInput" class="form-label">随身听配对地址</label>
+              <div class="lan-url-row">
+                <input type="text" id="lanCompanionUrlInput" class="field-input lan-url-input" readonly spellcheck="false" aria-label="随身听配对地址">
+                <button type="button" id="btnCopyLanCompanionUrl" class="btn btn-subtle btn-sm">复制链接</button>
+              </div>
+            </div>
+
+            <div id="lanCompanionHostWrap" class="form-field hidden">
+              <label for="lanCompanionHostSelect" class="form-label">切换局域网网卡地址（多网卡 / VPN 时可用）</label>
+              <select id="lanCompanionHostSelect" class="field-select"></select>
+            </div>
+
+            <p id="lanCompanionRunningError" class="collection-inline-error hidden" role="alert"></p>
+
+            <div class="lan-action-row">
+              <button type="button" id="btnRotateLanCompanion" class="btn btn-subtle">
+                <span>刷新二维码</span>
+              </button>
+              <button type="button" id="btnStopLanCompanion" class="btn btn-ghost lan-btn-stop">
+                <span>关闭随身听</span>
+              </button>
+            </div>
+            <p class="form-help lan-rotate-hint">「刷新二维码」会立即生成新配对口令，并作废旧二维码与此前已配对的手机连接。</p>
+          </div>
+
+          <!-- 底部温和提示 -->
+          <div class="lan-tips-box" aria-label="连接提示">
+            <p class="lan-tip-item">1. 手机与电脑需连接同一 Wi-Fi（若系统弹出防火墙提示，请点击「允许」）。</p>
+            <p class="lan-tip-item">2. 推荐系统相机扫码，或在微信右上角选「在浏览器中打开」，以获得最佳锁屏连播与音频保存体验。</p>
+          </div>
         </div>
       </div>
     </div>
