@@ -7,6 +7,11 @@ const { InputError } = require('./validation');
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_MODELS = 500;
 
+function isVolcArkBaseURL(baseURL) {
+  const url = URL.parse(baseURL);
+  return Boolean(url && /(?:^|\.)(?:volces\.com|bytepluses\.com)$/i.test(url.hostname) && /(?:^|\.)ark(?:\.|$)/i.test(url.hostname));
+}
+
 function resolveLlmListCredentials(payload) {
   const credentials = getCredentials(payload);
   if (!credentials.apiKey) throw new InputError('请先填写 API Key 再获取模型列表');
@@ -38,8 +43,10 @@ async function fetchLlmModels(payload = {}, options = {}) {
   }, async response => {
     const { statusCode } = response;
     if (statusCode === 404 || statusCode === 405) {
-      return { supported: false, models: [], count: 0, latencyMs: Date.now() - started,
-        message: '该接口暂未开放自动拉取模型列表，请直接手动填写模型名称' };
+      const message = isVolcArkBaseURL(baseURL)
+        ? '当前火山方舟接口未开放自动拉取模型列表，请直接手动填写火山方舟模型 ID 或推理接入点 ID（如 ep-xxx）'
+        : '该接口暂未开放自动拉取模型列表，请直接手动填写模型名称';
+      return { supported: false, models: [], count: 0, latencyMs: Date.now() - started, message };
     }
     if (statusCode === 401 || statusCode === 403) {
       throw upstreamError(`鉴权失败或该地址不支持通用接口访问（HTTP ${statusCode}），请检查 API Key 或所选接口体系`, false);
@@ -57,7 +64,16 @@ async function fetchLlmModels(payload = {}, options = {}) {
       models.push({ id, ownedBy: redactProviderDetail(setting(item?.owned_by), sensitive) });
       if (models.length === MAX_MODELS) break;
     }
-    return { supported: true, models, count: models.length, latencyMs: Date.now() - started };
+    const emptyMessage = models.length === 0 && isVolcArkBaseURL(baseURL)
+      ? '接口鉴权通过，但未返回可用模型，请直接手动填写火山方舟模型 ID 或推理接入点 ID（如 ep-xxx）'
+      : undefined;
+    return {
+      supported: true,
+      models,
+      count: models.length,
+      latencyMs: Date.now() - started,
+      ...(emptyMessage ? { message: emptyMessage } : {}),
+    };
   });
 }
 

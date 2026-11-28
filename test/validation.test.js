@@ -12,6 +12,8 @@ const {
   validateDialogueList,
   validateEditedDialogue,
   validateVoiceMapping,
+  isFilesystemRoot,
+  filterSensitivePath,
   redactSecrets,
 } = require('../src/services/validation');
 const { AVAILABLE_VOICE_IDS } = require('../src/services/ttsService');
@@ -108,6 +110,24 @@ test('商业服务允许自定义音色且限定角色与字符；服务商凭�
 
 test('空串和纯空白不会破坏正文，带空格的凭据按实际值脱敏', () => {
   assert.equal(redactSecrets('连接失败：test-credential', ['', '   ', '\t', ' test-credential ']), '连接失败：***');
+});
+
+test('文件系统根目录和无效占位路径会被过滤，短绝对路径、真实路径与显式凭据仍正常保护', () => {
+  for (const rootPath of ['/', '///', ' / ', '/.', '/..', '//.', '//..', '\\', '\\\\', '\\.', '\\..', '\\\\.', 'C:\\', 'C:/', 'C:', 'C:\\.', 'd:\\\\', '.', '..', './', '..\\']) {
+    assert.strictEqual(isFilesystemRoot(rootPath), true, rootPath);
+    assert.strictEqual(filterSensitivePath(rootPath), '', rootPath);
+  }
+  assert.strictEqual(filterSensitivePath('a'), '');
+  for (const realPath of ['/a', '/.a', 'C:\\a', '/Users/demo/workspace/app', '/tmp/inkcast-data', 'C:\\Users\\demo\\workspace\\app', '\\\\nas\\podcasts', '//nas/podcasts']) {
+    assert.strictEqual(isFilesystemRoot(realPath), false, realPath);
+    assert.strictEqual(filterSensitivePath(realPath), realPath, realPath);
+  }
+  const text = '访问 https://example.com/a/b 分析 模型/基模，路径 /Users/demo/workspace/app，短目录 /.a，密钥 real-secret-value';
+  const safePaths = ['/', 'C:\\', '/Users/demo/workspace/app', '/.a'].map(filterSensitivePath).filter(Boolean);
+  const redacted = redactSecrets(text, [...safePaths, 'real-secret-value']);
+  assert.strictEqual(redacted, '访问 https://example.com/a/b 分析 模型/基模，路径 ***，短目录 ***，密钥 ***');
+  // 显式凭据即便形似根路径（如 C:）也不得被跳过脱敏
+  assert.strictEqual(redactSecrets('包含显式凭据 C: 与 /Users/demo/workspace/app', ['C:', '/Users/demo/workspace/app']), '包含显式凭据 *** 与 ***');
 });
 
 test('微调台词只接受有效的角色、文本和单行情绪，返回全新的公开字段', () => {

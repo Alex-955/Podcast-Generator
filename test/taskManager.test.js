@@ -1766,3 +1766,61 @@ for (const scenario of ['换账号', '同账号', '缺少旧账号证明']) {
     await verifyEdit(key, 1);
   });
 }
+
+test('打包应用 process.cwd() 为文件系统根目录时不误拦带 URL 和斜杠的文章，真实密钥与工作路径仍拦截', async t => {
+  for (const rootCwd of ['/', 'C:\\']) {
+    t.mock.method(process, 'cwd', () => rootCwd);
+    const articleUrl = 'https://article.example/2026/models/compare';
+    const slashText = '模型/基模 对比 https://docs.example/a/b 的推理架构';
+    const slashScript = {
+      podcastTitle: '模型/基模深度拆解',
+      summary: '来源 https://docs.example/a/b 的对比',
+      dialogue: [
+        { speaker: '阿泽', text: '今天聊聊 模型/基模 和 https://docs.example/a/b 里的架构差异。', emotion: '好奇' },
+        { speaker: '小晓', text: '没错，从输入/输出比例来看非常清晰。', emotion: '温和' },
+      ],
+    };
+    const { manager, config } = setup(t, {
+      ttsProvider: await localProvider(t),
+      extractor: async () => ({ title: '模型/基模实测', content: slashText }),
+      scriptGenerator: async () => slashScript,
+    });
+
+    // URL 模式：提交、抓取、剧本生成、落盘和 DTO 均保留斜杠且不被误拦
+    const urlTask = manager.createTask({ mode: 'url', url: articleUrl, apiKey, baseURL: payload.baseURL });
+    const urlDone = await waitFor(() => manager.getTask(urlTask.id), task => task.status === 'completed');
+    assert.equal(urlDone.input.url, articleUrl);
+    assert.equal(urlDone.podcastTitle, slashScript.podcastTitle);
+    assert.equal(urlDone.podcast.sentences[0].text, slashScript.dialogue[0].text);
+
+    // 文本模式：正文含 URL 与斜杠正常通过
+    const textTask = manager.createTask({ mode: 'text', title: '模型/基模', content: slashText, apiKey, baseURL: payload.baseURL });
+    const textDone = await waitFor(() => manager.getTask(textTask.id), task => task.status === 'completed');
+    assert.equal(textDone.podcast.sentences[1].text, slashScript.dialogue[1].text);
+
+    // 真实密钥与真实非根目录本地路径仍必须拦截
+    assert.throws(() => manager.createTask({ mode: 'text', content: '泄露 ' + apiKey, apiKey, baseURL: payload.baseURL }), {
+      statusCode: 400, message: '输入内容包含敏感凭据，已拦截并中止保存',
+    });
+    assert.throws(() => manager.resynthesizePodcast(textDone.podcastId, {
+      baseVersion: textDone.podcast.audioVersion ?? null,
+      dialogue: [{ speaker: '阿泽', text: '泄露路径 ' + config.tasksDir }],
+    }), {
+      statusCode: 400, message: '输入内容包含敏感凭据，已拦截并中止保存',
+    });
+  }
+
+  // 非根目录的真实工作目录与短绝对目录、以及形似根路径的显式凭据仍必须拦截
+  t.mock.method(process, 'cwd', () => '/Users/demo/inkcast-work');
+  const { manager } = setup(t, { ttsProvider: await localProvider(t) });
+  assert.throws(() => manager.createTask({
+    mode: 'text', content: '泄露工作目录 /Users/demo/inkcast-work', apiKey, baseURL: payload.baseURL,
+  }), {
+    statusCode: 400, message: '输入内容包含敏感凭据，已拦截并中止保存',
+  });
+  assert.throws(() => manager.createTask({
+    mode: 'text', content: '泄露显式短凭据 C: 到正文', apiKey: 'C:', baseURL: payload.baseURL,
+  }), {
+    statusCode: 400, message: '输入内容包含敏感凭据，已拦截并中止保存',
+  });
+});

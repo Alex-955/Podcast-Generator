@@ -13,7 +13,7 @@ const { getTtsProvider, DEFAULT_PROVIDER_ID, resolveSpeechRate } = require('./tt
 const { SPEECH_SPEEDS, normalizeSpeechSpeed } = require('./speechNormalize');
 const { createTtsCache, speechAccountHash } = require('./ttsCache');
 const { concatenateAudioFiles } = require('./audioMerger');
-const { InputError, validateEditedDialogue, validateScriptRequest, redactSecrets, ttsSecrets } = require('./validation');
+const { InputError, validateEditedDialogue, validateScriptRequest, filterSensitivePath, redactSecrets, ttsSecrets } = require('./validation');
 
 const { isSafeVersion, assertPodcastVersion, publishEditedPodcast, reconcilePendingPublications } = require('./podcastPublication');
 
@@ -123,8 +123,10 @@ function validTaskRecord(task, id) {
 }
 
 function containsSecrets(secrets, ...fields) {
+  const activeSecrets = secrets.filter(value => typeof value === 'string').map(value => value.trim()).filter(Boolean);
+  if (!activeSecrets.length) return false;
   function contains(value) {
-    if (typeof value === 'string') return secrets.some(secret => value.includes(secret));
+    if (typeof value === 'string') return activeSecrets.some(secret => value.includes(secret));
     if (value && typeof value === 'object') return Object.values(value).some(contains);
     return false;
   }
@@ -223,7 +225,11 @@ function createTaskManager({
   adminToken, ttsProvider, getTtsProviderById = getTtsProvider,
 }) {
   const cache = createTtsCache(cacheDir);
-  const storedSecrets = [...llmSecrets({}, {}, { includeDefaultBase: false }), adminToken, podcastsDir, cacheDir, tasksDir];
+  const storedSecrets = [
+    ...llmSecrets({}, {}, { includeDefaultBase: false }),
+    adminToken,
+    ...[podcastsDir, cacheDir, tasksDir].map(filterSensitivePath),
+  ].filter(Boolean);
   let active = null;
   let closing;
 
@@ -520,7 +526,7 @@ function createTaskManager({
   async function runPipeline(task, creds, speech, signal) {
     const workDir = workingDirectory(task);
     const podcastId = task.targetPodcastId || task.id;
-    const scriptSecrets = [...speech.secrets, creds.baseURL, workDir, cacheDir, tasksDir];
+    const scriptSecrets = [...speech.secrets, creds.baseURL, ...[workDir, cacheDir, tasksDir].map(filterSensitivePath)].filter(Boolean);
     function enter(stage, publishedPodcast) {
       signal.throwIfAborted();
       task.stage = stage;
@@ -743,7 +749,7 @@ function createTaskManager({
     const workDir = workingDirectory(task);
     if (styleChanged) task.script = null;
     const scriptChanged = !styleChanged && sanitizeTaskScript(task,
-      metadataSecrets(task, [...speech.secrets, creds.baseURL, workDir, cacheDir, tasksDir]));
+      metadataSecrets(task, [...speech.secrets, creds.baseURL, ...[workDir, cacheDir, tasksDir].map(filterSensitivePath)]));
     if (styleChanged || scriptChanged || speech.changed || task.clearPending) {
       clearAudio(workDir);
       // A cancelled adapter may still publish its last write before it drains.

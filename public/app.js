@@ -2980,12 +2980,36 @@
     };
   }
 
+  const VERSIONED_BASE_PATH = /\/v\d+(?:alpha|beta)?(?:\/openai)?$/i;
+
   function normalizeBaseUrlForMatch(url) {
     return String(url || '').trim().replace(/\/+$/, '').toLowerCase();
   }
 
   function normalizeEndpointForBinding(url) {
-    return normalizeBaseUrlForMatch(url).replace(/\/v1$/i, '');
+    const raw = String(url || '').trim();
+    if (!raw) return '';
+    try {
+      const parsed = new URL(raw);
+      if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.username || parsed.password ||
+          parsed.href.includes('?') || parsed.href.includes('#')) {
+        return normalizeBaseUrlForMatch(raw);
+      }
+      const pathname = parsed.pathname.replace(/\/+$/, '');
+      parsed.pathname = VERSIONED_BASE_PATH.test(pathname) ? pathname : `${pathname}/v1`;
+      return parsed.href;
+    } catch {
+      return normalizeBaseUrlForMatch(raw);
+    }
+  }
+
+  function isDoubaoArkBaseUrl(baseURL) {
+    try {
+      const host = new URL(String(baseURL || '').trim()).hostname.toLowerCase();
+      return /(?:^|\.)(?:volces\.com|bytepluses\.com)$/.test(host) && /(?:^|\.)ark(?:\.|$)/.test(host);
+    } catch {
+      return false;
+    }
   }
 
   function detectLlmPresetId(baseURL) {
@@ -3193,14 +3217,19 @@
         body: JSON.stringify(body),
       });
 
+      const targetBase = isVision
+        ? (visionSnap.baseURL || llmSnap.baseURL)
+        : llmSnap.baseURL;
+      const isDoubao = isDoubaoArkBaseUrl(targetBase);
+
       if (!data.supported) {
-        setTestStatus(statusEl, 'error', data.message || '该接口未开放模型列表，请手动输入模型名称');
+        const fallbackMessage = isDoubao
+          ? '当前火山方舟接口未开放自动拉取模型列表，请直接手动填写火山方舟模型 ID 或推理接入点 ID（如 ep-xxx）'
+          : '该接口未开放模型列表，请手动输入模型名称';
+        setTestStatus(statusEl, 'error', data.message || fallbackMessage);
         return;
       }
 
-      const targetBase = isVision
-        ? (dom.settingVisionBaseUrl?.value.trim() || llmSnap.baseURL)
-        : llmSnap.baseURL;
       const cacheKey = modelCacheKey(scope, targetBase);
       if (state.llmModelsCache.has(cacheKey)) {
         state.llmModelsCache.delete(cacheKey);
@@ -3216,7 +3245,14 @@
           dom.settingVisionModel.value = data.models[0].id;
           dom.settingVisionModelSelect.value = data.models[0].id;
         }
-        setTestStatus(statusEl, 'ok', `已拉取 ${data.count} 个模型（${data.latencyMs}ms），请从下拉列表选择`);
+        if (!data.models?.length) {
+          const emptyFallback = isDoubao
+            ? `接口鉴权通过（${data.latencyMs}ms），但未返回可用模型，请直接手动填写火山方舟模型 ID 或推理接入点 ID（如 ep-xxx）`
+            : `接口鉴权通过（${data.latencyMs}ms），但未返回可用模型，请直接手动填写识图模型名称`;
+          setTestStatus(statusEl, '', data.message || emptyFallback);
+        } else {
+          setTestStatus(statusEl, 'ok', `已拉取 ${data.count} 个模型（${data.latencyMs}ms），请从下拉列表选择`);
+        }
       } else {
         if (dom.settingModelFilter) dom.settingModelFilter.value = '';
         renderLlmModelOptions();
@@ -3226,7 +3262,14 @@
             dom.settingModelSelect.value = data.models[0].id;
           }
         }
-        setTestStatus(statusEl, 'ok', `接口鉴权通过 · 已拉取 ${data.count} 个模型（${data.latencyMs}ms），请在下方勾选`);
+        if (!data.models?.length) {
+          const emptyFallback = isDoubao
+            ? `接口鉴权通过（${data.latencyMs}ms），但未返回可用模型，请直接手动填写火山方舟模型 ID 或推理接入点 ID（如 ep-xxx）`
+            : `接口鉴权通过（${data.latencyMs}ms），但未返回可用模型，请直接手动填写模型名称`;
+          setTestStatus(statusEl, '', data.message || emptyFallback);
+        } else {
+          setTestStatus(statusEl, 'ok', `接口鉴权通过 · 已拉取 ${data.count} 个模型（${data.latencyMs}ms），请在下方勾选`);
+        }
       }
     } catch (err) {
       setTestStatus(statusEl, 'error', err.message || '获取模型列表失败');
