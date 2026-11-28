@@ -16,8 +16,11 @@ const { fetchLlmModels } = require('./src/services/llmModels');
 const { polishArticleText } = require('./src/services/textPolisher');
 const { recommendPodcastStyle } = require('./src/services/styleRecommender');
 const { acquireInstanceLock, withDataDirLock } = require('./src/services/instanceLock');
+const { createCollectionStore } = require('./src/services/collectionStore');
+const { suggestCollection } = require('./src/services/collectionSuggester');
+const { llmSecrets } = require('./src/services/llmCredentials');
 const { createTaskManager } = require('./src/services/taskManager');
-const { InputError, ttsSecrets } = require('./src/services/validation');
+const { checkId, InputError, ttsSecrets } = require('./src/services/validation');
 const { redactProviderDetail } = require('./src/services/providerHttp');
 
 const { getPublicTtsProviders, resolveDefaultProviderId } = require('./src/services/ttsProvider');
@@ -68,11 +71,12 @@ function createApp({ desktopSessionToken, ...options } = {}, ownerToken) {
   const podcastsDir = path.resolve(options.podcastsDir || process.env.PODCASTS_DIR || path.join(publicDir, 'podcasts'));
   const extractor = options.extractor || extractArticle;
   const { taskManager } = options;
+  const collectionStore = options.collectionStore || createCollectionStore({ dataDir, podcastsDir, adminToken, desktopSessionToken });
   let manager = taskManager;
   function initializeManager(token = ownerToken) {
     ownerToken = token;
     manager ??= createTaskManager({
-      ...options, adminToken, extractor, podcastsDir, tasksDir: path.join(dataDir, 'tasks'), cacheDir: path.join(dataDir, 'tts-cache'),
+      ...options, collectionStore, adminToken, extractor, podcastsDir, tasksDir: path.join(dataDir, 'tasks'), cacheDir: path.join(dataDir, 'tts-cache'),
     });
   }
   appStartup.set(app, { dataDir, initializeManager });
@@ -98,13 +102,13 @@ function createApp({ desktopSessionToken, ...options } = {}, ownerToken) {
 
   function authorizePodcastWrite(req, res, next) {
     if (isLoopbackRequest(req)) return next();
-    const deletion = req.method === 'DELETE';
+    const deletion = req.route.path === '/api/podcasts/:id' && req.method === 'DELETE';
     if (!adminDigest) {
-      return res.status(403).json({ success: false, error: deletion ? '为保护本地播客，局域网设备默认禁止删除历史播客，请在启动服务的电脑本机删除' : '请在本机微调播客，或配置管理令牌' });
+      return res.status(403).json({ success: false, error: deletion ? '为保护本地播客，局域网设备默认禁止删除历史播客，请在启动服务的电脑本机删除' : '请在本机操作，或配置管理令牌' });
     }
     const candidates = [req.get('x-admin-token'), bearerToken(req)];
     if (candidates.some(token => token && timingSafeEqual(adminDigest, tokenDigest(token)))) return next();
-    return res.status(403).json({ success: false, error: deletion ? '局域网客户端无权删除本地播客，请在本机操作或提供有效管理令牌' : '微调播客需要有效管理令牌' });
+    return res.status(403).json({ success: false, error: deletion ? '局域网客户端无权删除本地播客，请在本机操作或提供有效管理令牌' : '此操作需要有效管理令牌' });
   }
 
   function authorizeTaskWrite(req, res, next) {
@@ -155,7 +159,7 @@ function createApp({ desktopSessionToken, ...options } = {}, ownerToken) {
     };
     res.once('close', cancel);
     try {
-      const data = await handler(req.body || {}, { ...options, signal: controller.signal });
+      const data = await handler(req.body || {}, { ...options, signal: controller.signal }, req);
       if (!controller.signal.aborted) res.json({ success: true, data });
     } catch (error) {
       if (!controller.signal.aborted) throw error;
@@ -198,6 +202,33 @@ function createApp({ desktopSessionToken, ...options } = {}, ownerToken) {
   app.post('/api/tasks/:id/resume', authorizeTaskWrite, (req, res) => res.status(202).json({
     success: true, data: manager.resumeTask(req.params.id, req.body || {}),
   }));
+  function requestSecrets(req) {
+    return [...llmSecrets(req.body || {}, {}), req.get('x-admin-token'), bearerToken(req), req.get('x-desktop-session')];
+  }
+  app.get('/api/collections', (req, res) => res.json({
+    success: true, data: collectionStore.listCollections(manager.listPodcasts().items),
+  }));
+  app.get('/api/collections/:id', (req, res) => res.json({
+    success: true, data: collectionStore.getCollection(req.params.id, manager.listPodcasts().items),
+  }));
+  app.post('/api/collections', authorizePodcastWrite, (req, res) => res.status(201).json({
+    success: true, data: collectionStore.createCollection(req.body || {}, requestSecrets(req)),
+  }));
+  app.patch('/api/collections/:id', authorizePodcastWrite, (req, res) => res.json({
+    success: true, data: collectionStore.updateCollection(req.params.id, req.body || {}, requestSecrets(req)),
+  }));
+  app.delete('/api/collections/:id', authorizePodcastWrite, (req, res) => res.json({
+    success: true, data: collectionStore.deleteCollection(req.params.id),
+  }));
+  app.post('/api/collections/suggest', authorizePodcastWrite, cancelOnDisconnect((payload, opts, req) =>
+    suggestCollection(payload, { ...opts, collectionStore, manager,
+      sensitive: [dataDir, podcastsDir, desktopSessionToken, adminToken, ...requestSecrets(req)] })));
+  app.patch('/api/podcasts/:id/collection', authorizePodcastWrite, (req, res) => {
+    checkId(req.params.id);
+    const podcast = manager.getPodcast(req.params.id);
+    if (!podcast) throw Object.assign(new Error('播客不存在'), { statusCode: 404 });
+    res.json({ success: true, data: collectionStore.setPodcastCollection(podcast.id, req.body?.collectionId) });
+  });
   app.get('/api/podcasts', (req, res) => res.json({ success: true, data: manager.listPodcasts() }));
   app.get('/api/podcasts/:id', (req, res) => res.json({ success: true, data: manager.getPodcast(req.params.id) }));
   app.post('/api/podcasts/:id/resynthesize', authorizePodcastWrite, (req, res) => res.status(202).json({

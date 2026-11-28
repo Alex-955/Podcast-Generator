@@ -74,18 +74,18 @@ function reconcileTransaction(target, dir, taskId, resolveTaskStatus) {
   const originals = path.join(dir, 'originals');
   const info = JSON.parse(fs.readFileSync(marker, 'utf8'));
   const names = verifyOriginals(originals, info.originals);
-  const task = resolveTaskStatus(taskId, path.basename(target));
-  if (task === 'completed' || task?.status === 'completed') return;
   if (info.taskId !== taskId || !isSafeVersion(info.targetVersion) ||
       (info.previousVersion !== null && !isSafeVersion(info.previousVersion))) {
     throw new Error('微调事务版本无效');
   }
-  const current = readVersion(target);
-  // Metadata is renamed last. Both the committed target and a newer publication win.
-  if (isSafeVersion(current) && (current === info.targetVersion || current !== info.previousVersion)) return;
   if (!Number.isSafeInteger(info.dialogueCount) || info.dialogueCount < 1 || info.dialogueCount > MAX_DIALOGUE_LINES) {
     throw new Error('微调事务句数无效');
   }
+  const task = resolveTaskStatus(taskId, path.basename(target));
+  if (task === 'completed' || task?.status === 'completed') return;
+  const current = readVersion(target);
+  // Metadata is renamed last. Both the committed target and a newer publication win.
+  if (isSafeVersion(current) && (current === info.targetVersion || current !== info.previousVersion)) return;
   for (const name of names) restoreFile(originals, dir, target, name);
   for (let index = 0; index < info.dialogueCount; index++) {
     const name = sentenceFileName(index);
@@ -96,12 +96,16 @@ function reconcileTransaction(target, dir, taskId, resolveTaskStatus) {
 function reconcilePendingPublications(target, resolveTaskStatus) {
   try {
     if (!fs.lstatSync(target, { throwIfNoEntry: false })?.isDirectory()) return;
+    const completed = [];
     for (const entry of fs.readdirSync(target, { withFileTypes: true })) {
       if (!entry.name.startsWith('.tmp-publish-')) continue;
       const taskId = entry.name.slice('.tmp-publish-'.length);
       if (!entry.isDirectory() || !/^[a-zA-Z0-9_-]+$/.test(taskId)) throw new Error('微调事务目录无效');
       const dir = path.join(target, entry.name);
       reconcileTransaction(target, dir, taskId, resolveTaskStatus);
+      completed.push(dir);
+    }
+    for (const dir of completed) {
       fs.rmSync(path.join(dir, 'prepared'), { force: true });
       fs.rmSync(dir, { recursive: true });
     }

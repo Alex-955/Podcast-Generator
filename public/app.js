@@ -10,6 +10,7 @@
   const SPEEDS = [0.8, 1.0, 1.25, 1.5, 1.75, 2.0];
   const STAGE_ORDER = ['extract', 'script', 'tts', 'merge'];
   const PODCAST_STYLES = ['deep_dive', 'dialogue', 'debate'];
+  const COLLECTION_COLORS = ['ink', 'vermilion', 'indigo', 'jade', 'amber', 'plum'];
 
   function normalizePodcastStyleClient(value) {
     return PODCAST_STYLES.includes(value) ? value : 'deep_dive';
@@ -286,6 +287,30 @@
     pollInFlight: false,
     elapsedTimer: null,
     historyItems: [],
+    collections: [],
+    collectionsTotalCount: 0,
+    collectionsUnassignedCount: 0,
+    selectedCollectionFilter: 'all',
+    collectionDeleteConfirmId: null,
+    collectionHighlightsExpanded: false,
+    activeCollectionDetail: null,
+    collectionDetailSeq: 0,
+    collectionModal: {
+      mode: 'create',
+      collectionId: null,
+      color: 'ink',
+      submitting: false,
+    },
+    assignModal: {
+      podcastId: null,
+      sessionSeq: 0,
+      suggestSeq: 0,
+      submitting: false,
+      suggesting: false,
+      suggestion: null,
+      suggestionError: null,
+      suggestAbortController: null,
+    },
     pendingDeleteId: null,
     deletingPodcastId: null,
     historySelectSeq: 0,
@@ -450,13 +475,54 @@
     taskErrorActions: document.getElementById('taskErrorActions'),
 
     historyCount: document.getElementById('historyCount'),
+    btnNewCollection: document.getElementById('btnNewCollection'),
     btnRefreshHistory: document.getElementById('btnRefreshHistory'),
+    collectionFilterBar: document.getElementById('collectionFilterBar'),
+    collectionHeaderCard: document.getElementById('collectionHeaderCard'),
+    collectionHeaderDot: document.getElementById('collectionHeaderDot'),
+    collectionHeaderName: document.getElementById('collectionHeaderName'),
+    collectionHeaderCount: document.getElementById('collectionHeaderCount'),
+    collectionHeaderActions: document.getElementById('collectionHeaderActions'),
+    btnEditCollection: document.getElementById('btnEditCollection'),
+    btnDeleteCollection: document.getElementById('btnDeleteCollection'),
+    collectionDeleteConfirm: document.getElementById('collectionDeleteConfirm'),
+    btnConfirmDeleteCollection: document.getElementById('btnConfirmDeleteCollection'),
+    btnCancelDeleteCollection: document.getElementById('btnCancelDeleteCollection'),
+    collectionHeaderDesc: document.getElementById('collectionHeaderDesc'),
+    btnToggleCollectionHighlights: document.getElementById('btnToggleCollectionHighlights'),
+    collectionHighlightsLabel: document.getElementById('collectionHighlightsLabel'),
+    collectionHighlightsPanel: document.getElementById('collectionHighlightsPanel'),
     historyList: document.getElementById('historyList'),
 
     playerDeck: document.getElementById('playerDeck'),
     waveVisualizer: document.getElementById('waveVisualizer'),
     currentPodcastMeta: document.getElementById('currentPodcastMeta'),
     currentPodcastBadges: document.getElementById('currentPodcastBadges'),
+    btnAssignCurrentCollection: document.getElementById('btnAssignCurrentCollection'),
+    currentCollectionDot: document.getElementById('currentCollectionDot'),
+    currentCollectionLabel: document.getElementById('currentCollectionLabel'),
+
+    collectionModal: document.getElementById('collectionModal'),
+    collectionModalTitle: document.getElementById('collectionModalTitle'),
+    collectionModalSubtitle: document.getElementById('collectionModalSubtitle'),
+    btnCloseCollectionModal: document.getElementById('btnCloseCollectionModal'),
+    collectionForm: document.getElementById('collectionForm'),
+    collectionNameInput: document.getElementById('collectionNameInput'),
+    collectionDescInput: document.getElementById('collectionDescInput'),
+    collectionColorSwatches: document.querySelectorAll('[data-collection-color]'),
+    collectionModalError: document.getElementById('collectionModalError'),
+    btnCancelCollectionModal: document.getElementById('btnCancelCollectionModal'),
+    btnSaveCollectionModal: document.getElementById('btnSaveCollectionModal'),
+
+    assignCollectionModal: document.getElementById('assignCollectionModal'),
+    assignCollectionPodcastTitle: document.getElementById('assignCollectionPodcastTitle'),
+    btnCloseAssignModal: document.getElementById('btnCloseAssignModal'),
+    btnSuggestCollection: document.getElementById('btnSuggestCollection'),
+    aiSuggestResult: document.getElementById('aiSuggestResult'),
+    assignCollectionList: document.getElementById('assignCollectionList'),
+    quickCreateCollectionForm: document.getElementById('quickCreateCollectionForm'),
+    quickCollectionNameInput: document.getElementById('quickCollectionNameInput'),
+    btnQuickCreateCollection: document.getElementById('btnQuickCreateCollection'),
     currentPodcastTitle: document.getElementById('currentPodcastTitle'),
     currentPodcastSummary: document.getElementById('currentPodcastSummary'),
     currentTime: document.getElementById('currentTime'),
@@ -1866,10 +1932,274 @@
     }
   }
 
+  function codePointLength(value) {
+    return Array.from(String(value || '')).length;
+  }
+
+  function collectKnownClientSecrets() {
+    const credentialKeys = [
+      state.apiKey,
+      state.visionConfig?.apiKey,
+      state.ttsConfig?.minimax?.apiKey,
+      state.ttsConfig?.volcengine?.apiKey,
+      state.ttsConfig?.volcengine?.appId,
+      state.ttsConfig?.volcengine?.accessKey,
+    ]
+      .map((v) => String(v || '').trim())
+      .filter(Boolean);
+    const customEndpoints = [
+      state.ttsConfig?.minimax?.endpoint,
+      state.ttsConfig?.volcengine?.endpoint,
+      state.visionConfig?.baseURL,
+      state.baseURL && state.baseURL !== DEFAULT_BASE_URL ? state.baseURL : '',
+    ]
+      .map((v) => String(v || '').trim())
+      .filter((v) => v.length >= 4);
+    return Array.from(new Set([...credentialKeys, ...customEndpoints]));
+  }
+
+  function containsClientSecretOrPath(text) {
+    const value = String(text || '').trim();
+    if (!value) return false;
+    const secrets = collectKnownClientSecrets();
+    if (secrets.some((secret) => value.includes(secret))) return true;
+    if (/\bsk-[A-Za-z0-9_-]{6,}|\bfile:(?:\/\/)?\/?[^\s"'<>]+/i.test(value)) return true;
+    const slashMatches = value.matchAll(/\/\/[^\s"'<>),\]，。）】》」』；、]+/gu);
+    for (const match of slashMatches) {
+      const before = value.slice(0, match.index);
+      if (!/(?:^|[\s"'=(\[（【《「『；、，。]|[^\x00-\x7f])(?:https?|wss?):$/i.test(before) &&
+          !/^(?:https?|wss?):$/i.test(before)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function normalizeCollectionColor(color) {
+    return COLLECTION_COLORS.includes(color) ? color : 'ink';
+  }
+
+  function findCollectionById(id) {
+    if (!id) return null;
+    return state.collections.find((col) => col.id === id) || null;
+  }
+
+  function pickNextCollectionColor() {
+    const used = new Set(state.collections.map((c) => c.color));
+    return COLLECTION_COLORS.find((c) => !used.has(c)) || COLLECTION_COLORS[state.collections.length % COLLECTION_COLORS.length];
+  }
+
+  function applyCollectionCountsFromLocalHistory() {
+    const validIds = new Set(state.collections.map((c) => c.id));
+    const counts = new Map();
+    let unassigned = 0;
+    state.historyItems.forEach((item) => {
+      const colId = item.collectionId && validIds.has(item.collectionId) ? item.collectionId : null;
+      if (colId) {
+        counts.set(colId, (counts.get(colId) || 0) + 1);
+      } else {
+        unassigned += 1;
+      }
+    });
+    state.collections = state.collections.map((col) => ({
+      ...col,
+      podcastCount: counts.get(col.id) || 0,
+    }));
+    state.collectionsTotalCount = state.historyItems.length;
+    state.collectionsUnassignedCount = unassigned;
+  }
+
+  async function loadCollections({ render = true } = {}) {
+    try {
+      const data = await apiJson('/api/collections');
+      state.collections = Array.isArray(data?.items) ? data.items : [];
+      state.collectionsTotalCount = Number.isFinite(data?.totalPodcastCount) ? data.totalPodcastCount : state.historyItems.length;
+      state.collectionsUnassignedCount = Number.isFinite(data?.unassignedCount) ? data.unassignedCount : 0;
+      if (state.selectedCollectionFilter !== 'all' &&
+          state.selectedCollectionFilter !== 'unassigned' &&
+          !findCollectionById(state.selectedCollectionFilter)) {
+        state.selectedCollectionFilter = 'all';
+        state.collectionDeleteConfirmId = null;
+        state.collectionHighlightsExpanded = false;
+        state.activeCollectionDetail = null;
+      }
+      if (render) {
+        renderCollectionFilterBar();
+        renderCollectionHeaderCard();
+        renderCurrentPodcastCollectionTrigger();
+      }
+    } catch {
+      // 保留现有内存态，避免影响历史列表展示
+    }
+  }
+
+  async function loadCollectionDetail(collectionId) {
+    if (!collectionId) return;
+    const seq = ++state.collectionDetailSeq;
+    try {
+      const detail = await apiJson(`/api/collections/${encodeURIComponent(collectionId)}`);
+      if (seq !== state.collectionDetailSeq || state.selectedCollectionFilter !== collectionId) return;
+      state.activeCollectionDetail = detail;
+      renderCollectionHeaderCard();
+    } catch {
+      if (seq === state.collectionDetailSeq && state.selectedCollectionFilter === collectionId) {
+        renderCollectionHeaderCard();
+      }
+    }
+  }
+
+  function renderCollectionFilterBar() {
+    if (!dom.collectionFilterBar) return;
+    dom.collectionFilterBar.textContent = '';
+
+    const total = Number.isFinite(state.collectionsTotalCount) ? state.collectionsTotalCount : state.historyItems.length;
+    const validIds = new Set(state.collections.map((c) => c.id));
+    const computedUnassigned = state.historyItems.filter((item) => !item.collectionId || !validIds.has(item.collectionId)).length;
+    const unassigned = state.historyItems.length ? computedUnassigned : (state.collectionsUnassignedCount || 0);
+
+    const pills = [
+      { id: 'all', label: '全部', count: state.historyItems.length || total, color: null },
+      { id: 'unassigned', label: '未归类', count: unassigned, color: null },
+      ...state.collections.map((col) => ({
+        id: col.id,
+        label: col.name,
+        count: col.podcastCount || 0,
+        color: normalizeCollectionColor(col.color),
+      })),
+    ];
+
+    const fragment = document.createDocumentFragment();
+    pills.forEach((pill) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'collection-filter-pill';
+      const active = state.selectedCollectionFilter === pill.id;
+      if (active) btn.classList.add('is-active');
+      btn.setAttribute('role', 'tab');
+      btn.setAttribute('aria-selected', String(active));
+      btn.dataset.filterId = pill.id;
+
+      if (pill.color) {
+        const dot = document.createElement('span');
+        dot.className = `collection-dot is-${pill.color}`;
+        dot.setAttribute('aria-hidden', 'true');
+        btn.appendChild(dot);
+      }
+
+      const textSpan = document.createElement('span');
+      textSpan.textContent = pill.label;
+      const countSpan = document.createElement('span');
+      countSpan.className = 'collection-filter-count';
+      countSpan.textContent = String(pill.count);
+      btn.append(textSpan, countSpan);
+
+      fragment.appendChild(btn);
+    });
+    dom.collectionFilterBar.appendChild(fragment);
+  }
+
+  function renderCollectionHeaderCard() {
+    if (!dom.collectionHeaderCard) return;
+    const filter = state.selectedCollectionFilter;
+    const col = filter !== 'all' && filter !== 'unassigned' ? findCollectionById(filter) : null;
+    if (!col) {
+      dom.collectionHeaderCard.classList.add('hidden');
+      return;
+    }
+
+    dom.collectionHeaderCard.classList.remove('hidden');
+    const color = normalizeCollectionColor(col.color);
+    dom.collectionHeaderDot.className = `collection-dot is-${color}`;
+    dom.collectionHeaderName.textContent = col.name;
+    dom.collectionHeaderCount.textContent = `${col.podcastCount || 0} 集`;
+
+    if (col.description) {
+      dom.collectionHeaderDesc.textContent = col.description;
+      dom.collectionHeaderDesc.classList.remove('hidden');
+    } else {
+      dom.collectionHeaderDesc.textContent = '';
+      dom.collectionHeaderDesc.classList.add('hidden');
+    }
+
+    const confirmingDelete = state.collectionDeleteConfirmId === col.id;
+    dom.collectionHeaderActions.classList.toggle('hidden', confirmingDelete);
+    dom.collectionDeleteConfirm.classList.toggle('hidden', !confirmingDelete);
+
+    const detail = state.activeCollectionDetail?.id === col.id ? state.activeCollectionDetail : null;
+    const getHighlightText = (hl) => {
+      const text = typeof hl?.text === 'string' ? hl.text.trim() : '';
+      if (text) return text;
+      return typeof hl?.quote === 'string' ? hl.quote.trim() : '';
+    };
+    const rawHighlights = Array.isArray(detail?.highlights) ? detail.highlights : [];
+    const highlights = rawHighlights.filter((hl) => Boolean(getHighlightText(hl)));
+    const highlightCount = detail ? highlights.length : (col.highlightCount || 0);
+    dom.collectionHighlightsLabel.textContent = `合集金句（${highlightCount} 条）`;
+    dom.btnToggleCollectionHighlights.setAttribute('aria-expanded', String(state.collectionHighlightsExpanded));
+    dom.collectionHighlightsPanel.classList.toggle('hidden', !state.collectionHighlightsExpanded);
+
+    if (state.collectionHighlightsExpanded) {
+      dom.collectionHighlightsPanel.textContent = '';
+      if (highlights.length === 0) {
+        const emptyP = document.createElement('p');
+        emptyP.className = 'collection-highlights-empty';
+        emptyP.textContent = '后续版本支持收听时一键摘录金句，收藏后将自动汇总于此。';
+        dom.collectionHighlightsPanel.appendChild(emptyP);
+      } else {
+        const ul = document.createElement('ul');
+        ul.className = 'collection-highlight-list';
+        highlights.forEach((hl) => {
+          const li = document.createElement('li');
+          li.className = 'collection-highlight-item';
+          li.textContent = getHighlightText(hl);
+          ul.appendChild(li);
+        });
+        dom.collectionHighlightsPanel.appendChild(ul);
+      }
+    }
+  }
+
+  function renderCurrentPodcastCollectionTrigger() {
+    if (!dom.btnAssignCurrentCollection) return;
+    const podcast = state.currentPodcast;
+    if (!podcast) {
+      dom.btnAssignCurrentCollection.classList.add('hidden');
+      return;
+    }
+    dom.btnAssignCurrentCollection.classList.remove('hidden');
+    const col = findCollectionById(podcast.collectionId);
+    if (col) {
+      const color = normalizeCollectionColor(col.color);
+      dom.btnAssignCurrentCollection.classList.add('is-assigned');
+      dom.btnAssignCurrentCollection.dataset.collectionColor = color;
+      dom.currentCollectionDot.className = `collection-dot is-${color}`;
+      dom.currentCollectionLabel.textContent = col.name;
+      dom.btnAssignCurrentCollection.title = `当前所属合集：${col.name}（点击切换）`;
+    } else {
+      dom.btnAssignCurrentCollection.classList.remove('is-assigned');
+      dom.btnAssignCurrentCollection.removeAttribute('data-collection-color');
+      dom.currentCollectionDot.className = 'collection-dot hidden';
+      dom.currentCollectionLabel.textContent = '归入合集';
+      dom.btnAssignCurrentCollection.title = '将该期播客归入合集';
+    }
+  }
+
   async function loadHistoryList() {
     try {
-      const data = await apiJson('/api/podcasts');
-      state.historyItems = Array.isArray(data?.items) ? data.items : [];
+      const [podcastData] = await Promise.all([
+        apiJson('/api/podcasts'),
+        loadCollections({ render: false }),
+      ]);
+      state.historyItems = Array.isArray(podcastData?.items) ? podcastData.items : [];
+      if (state.currentPodcast) {
+        const matched = state.historyItems.find((item) => item.id === state.currentPodcast.id);
+        if (matched) {
+          state.currentPodcast.collectionId = matched.collectionId ?? null;
+        }
+      }
+      renderCollectionFilterBar();
+      renderCollectionHeaderCard();
+      renderCurrentPodcastCollectionTrigger();
       renderHistoryList();
     } catch {
       dom.historyList.textContent = '';
@@ -1949,6 +2279,7 @@
     state.currentMetaBaseText = '尚无已选播客';
     dom.currentPodcastMeta.textContent = state.currentMetaBaseText;
     renderCurrentPodcastBadges(null);
+    renderCurrentPodcastCollectionTrigger();
     dom.currentPodcastSummary.textContent = '';
     dom.currentPodcastSummary.classList.add('hidden');
 
@@ -2016,8 +2347,30 @@
       state.pendingDeleteId = null;
       state.deletingPodcastId = null;
       if (deletedActive) resetPlayerToEmptyState();
+      if (state.activeCollectionDetail) {
+        const remainingHighlights = Array.isArray(state.activeCollectionDetail.highlights)
+          ? state.activeCollectionDetail.highlights.filter((hl) => hl?.podcastId !== podcastId)
+          : [];
+        const remainingPodcasts = Array.isArray(state.activeCollectionDetail.podcasts)
+          ? state.activeCollectionDetail.podcasts.filter((p) => p?.id !== podcastId)
+          : [];
+        state.activeCollectionDetail = {
+          ...state.activeCollectionDetail,
+          podcasts: remainingPodcasts,
+          podcastCount: remainingPodcasts.length,
+          highlights: remainingHighlights,
+          highlightCount: remainingHighlights.length,
+        };
+      }
+      applyCollectionCountsFromLocalHistory();
+      renderCollectionFilterBar();
+      renderCollectionHeaderCard();
       renderHistoryList();
       showToast('已删除该期本地播客');
+      await loadCollections();
+      if (state.selectedCollectionFilter !== 'all' && state.selectedCollectionFilter !== 'unassigned') {
+        loadCollectionDetail(state.selectedCollectionFilter);
+      }
       if (deletedActive && state.historyItems.length > 0) {
         await handleSelectHistory(state.historyItems[0].id);
       }
@@ -2053,26 +2406,48 @@
     }
   }
 
+  function getFilteredHistoryItems() {
+    const items = state.historyItems;
+    const filter = state.selectedCollectionFilter;
+    if (filter === 'all') return items;
+    const validIds = new Set(state.collections.map((c) => c.id));
+    if (filter === 'unassigned') {
+      return items.filter((item) => !item.collectionId || !validIds.has(item.collectionId));
+    }
+    return items.filter((item) => item.collectionId === filter);
+  }
+
   function renderHistoryList() {
     const items = state.historyItems;
-    dom.historyCount.textContent = `${items.length} 集`;
+    const filtered = getFilteredHistoryItems();
+    const isFiltered = state.selectedCollectionFilter !== 'all';
+    dom.historyCount.textContent = isFiltered ? `${filtered.length} / ${items.length} 集` : `${items.length} 集`;
     dom.historyList.textContent = '';
 
-    if (items.length === 0) {
+    if (filtered.length === 0) {
       const empty = document.createElement('p');
       empty.className = 'history-empty';
-      empty.textContent = '还没有已完成的本地播客，导入第一篇文章试试看。';
+      if (items.length === 0) {
+        empty.textContent = '还没有已完成的本地播客，导入第一篇文章试试看。';
+      } else if (state.selectedCollectionFilter === 'unassigned') {
+        empty.textContent = '当前所有播客均已归入合集，没有未归类的单集。';
+      } else {
+        empty.textContent = '该合集下暂无播客，可从「全部」或右侧播放器将播客归入此合集。';
+      }
       dom.historyList.appendChild(empty);
       return;
     }
 
     const fragment = document.createDocumentFragment();
-    items.forEach((item) => {
+    filtered.forEach((item) => {
       const row = document.createElement('div');
       row.className = 'history-row';
       row.dataset.podcastId = item.id;
       const isCurrent = state.currentPodcast?.id === item.id;
       if (isCurrent) row.classList.add('is-active');
+
+      const cardBody = document.createElement('div');
+      cardBody.className = 'history-card-body';
 
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -2111,7 +2486,34 @@
       meta.appendChild(textSpan);
 
       btn.append(title, meta);
-      row.appendChild(btn);
+
+      const chipRow = document.createElement('div');
+      chipRow.className = 'history-card-collection-row';
+      const col = findCollectionById(item.collectionId);
+      const colChip = document.createElement('button');
+      colChip.type = 'button';
+      colChip.className = `history-collection-chip${col ? '' : ' is-unassigned'}`;
+      colChip.dataset.action = 'assign-collection';
+      colChip.dataset.podcastId = item.id;
+      if (col) {
+        const color = normalizeCollectionColor(col.color);
+        colChip.dataset.collectionColor = color;
+        colChip.title = `合集：${col.name}（点击切换或移出）`;
+        const dot = document.createElement('span');
+        dot.className = `collection-dot is-${color}`;
+        dot.setAttribute('aria-hidden', 'true');
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'history-collection-chip-name';
+        nameSpan.textContent = col.name;
+        colChip.append(dot, nameSpan);
+      } else {
+        colChip.title = '将该播客归入合集';
+        colChip.textContent = '+ 归入合集';
+      }
+      chipRow.appendChild(colChip);
+
+      cardBody.append(btn, chipRow);
+      row.appendChild(cardBody);
 
       if (state.pendingDeleteId === item.id) {
         const confirmGroup = document.createElement('div');
@@ -2202,6 +2604,7 @@
     state.currentMetaBaseText = `共 ${sentences.length} 句对话 · 全长 ${formatTime(podcast.totalDuration || 0)}`;
     dom.currentPodcastMeta.textContent = state.currentMetaBaseText;
     renderCurrentPodcastBadges(podcast);
+    renderCurrentPodcastCollectionTrigger();
 
     if (podcast.summary) {
       dom.currentPodcastSummary.textContent = podcast.summary;
@@ -3757,6 +4160,488 @@
     showToast(`配置已保存 · 语音：${TTS_SHORT_LABELS[tts.provider] || tts.provider}`);
   }
 
+  function setCollectionModalColor(color) {
+    const normalized = normalizeCollectionColor(color);
+    state.collectionModal.color = normalized;
+    dom.collectionColorSwatches?.forEach((btn) => {
+      const active = btn.dataset.collectionColor === normalized;
+      btn.classList.toggle('is-active', active);
+      btn.setAttribute('aria-checked', String(active));
+    });
+  }
+
+  function showCollectionModalError(msg) {
+    if (!dom.collectionModalError) return;
+    if (msg) {
+      dom.collectionModalError.textContent = msg;
+      dom.collectionModalError.classList.remove('hidden');
+    } else {
+      dom.collectionModalError.textContent = '';
+      dom.collectionModalError.classList.add('hidden');
+    }
+  }
+
+  function openCollectionModal({ mode = 'create', collection = null } = {}) {
+    if (!dom.collectionModal) return;
+    state.collectionModal.mode = mode;
+    state.collectionModal.collectionId = collection?.id || null;
+    state.collectionModal.submitting = false;
+
+    const isEdit = mode === 'edit' && Boolean(collection);
+    dom.collectionModalTitle.textContent = isEdit ? '编辑合集' : '新建合集';
+    dom.collectionModalSubtitle.textContent = isEdit ? '修改合集名称、简介或色标印记' : '按主题整理已生成的双人播客';
+    dom.btnSaveCollectionModal.textContent = isEdit ? '保存修改' : '创建合集';
+    dom.btnSaveCollectionModal.disabled = false;
+
+    dom.collectionNameInput.value = isEdit ? (collection.name || '') : '';
+    dom.collectionDescInput.value = isEdit ? (collection.description || '') : '';
+    setCollectionModalColor(isEdit ? collection.color : pickNextCollectionColor());
+    showCollectionModalError('');
+
+    dom.collectionModal.classList.remove('hidden');
+    window.setTimeout(() => dom.collectionNameInput.focus(), 20);
+  }
+
+  function closeCollectionModal() {
+    if (!dom.collectionModal) return;
+    dom.collectionModal.classList.add('hidden');
+    state.collectionModal.submitting = false;
+  }
+
+  async function handleSaveCollectionModal(e) {
+    e.preventDefault();
+    if (state.collectionModal.submitting) return;
+    const name = dom.collectionNameInput.value.trim();
+    const description = dom.collectionDescInput.value.trim();
+    const color = normalizeCollectionColor(state.collectionModal.color);
+
+    if (!name) {
+      showCollectionModalError('请输入合集名称');
+      dom.collectionNameInput.focus();
+      return;
+    }
+    if (codePointLength(name) > 30) {
+      showCollectionModalError('合集名称最多 30 个字');
+      dom.collectionNameInput.focus();
+      return;
+    }
+    if (codePointLength(description) > 120) {
+      showCollectionModalError('合集简介最多 120 个字');
+      dom.collectionDescInput.focus();
+      return;
+    }
+    if (containsClientSecretOrPath(name) || containsClientSecretOrPath(description)) {
+      showCollectionModalError('合集内容不能包含本机已保存的 API 密钥、接口地址或本地路径');
+      return;
+    }
+
+    state.collectionModal.submitting = true;
+    dom.btnSaveCollectionModal.disabled = true;
+    showCollectionModalError('');
+
+    const isEdit = state.collectionModal.mode === 'edit' && Boolean(state.collectionModal.collectionId);
+    const editId = isEdit ? state.collectionModal.collectionId : null;
+    try {
+      if (isEdit) {
+        await apiJson(`/api/collections/${encodeURIComponent(editId)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, description, color }),
+        });
+        showToast(`已更新合集「${name}」`);
+      } else {
+        await apiJson('/api/collections', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, description, color }),
+        });
+        showToast(`已创建合集「${name}」`);
+      }
+      closeCollectionModal();
+      await loadCollections();
+      if (editId && state.selectedCollectionFilter === editId) {
+        loadCollectionDetail(editId);
+      }
+      renderHistoryList();
+    } catch (err) {
+      showCollectionModalError(err.message || '保存合集失败');
+    } finally {
+      state.collectionModal.submitting = false;
+      dom.btnSaveCollectionModal.disabled = false;
+    }
+  }
+
+  async function handleConfirmDeleteCollection() {
+    const colId = state.collectionDeleteConfirmId;
+    if (!colId) return;
+    dom.btnConfirmDeleteCollection.disabled = true;
+    try {
+      await apiJson(`/api/collections/${encodeURIComponent(colId)}`, { method: 'DELETE' });
+      state.collectionDeleteConfirmId = null;
+      state.collectionHighlightsExpanded = false;
+      state.activeCollectionDetail = null;
+      state.historyItems = state.historyItems.map((item) => (
+        item.collectionId === colId ? { ...item, collectionId: null } : item
+      ));
+      if (state.currentPodcast?.collectionId === colId) {
+        state.currentPodcast.collectionId = null;
+      }
+      if (state.selectedCollectionFilter === colId) {
+        state.selectedCollectionFilter = 'all';
+      }
+      await loadCollections();
+      renderHistoryList();
+      showToast('已删除合集，原有播客已保留为未归类');
+    } catch (err) {
+      showToast(err.message || '删除合集失败');
+    } finally {
+      dom.btnConfirmDeleteCollection.disabled = false;
+    }
+  }
+
+  function findPodcastSummary(podcastId) {
+    if (state.currentPodcast?.id === podcastId) return state.currentPodcast;
+    return state.historyItems.find((item) => item.id === podcastId) || null;
+  }
+
+  function renderAssignCollectionOptions() {
+    if (!dom.assignCollectionList) return;
+    const podcast = findPodcastSummary(state.assignModal.podcastId);
+    const currentColId = podcast?.collectionId && findCollectionById(podcast.collectionId)
+      ? podcast.collectionId
+      : null;
+
+    dom.assignCollectionList.textContent = '';
+    const fragment = document.createDocumentFragment();
+
+    const makeOption = ({ id, name, color, countText, selected }) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `assign-collection-option${selected ? ' is-selected' : ''}`;
+      btn.setAttribute('role', 'radio');
+      btn.setAttribute('aria-checked', String(selected));
+      btn.dataset.targetCollectionId = id || '';
+      btn.disabled = state.assignModal.submitting;
+
+      const main = document.createElement('span');
+      main.className = 'assign-option-main';
+      if (color) {
+        const dot = document.createElement('span');
+        dot.className = `collection-dot is-${normalizeCollectionColor(color)}`;
+        dot.setAttribute('aria-hidden', 'true');
+        main.appendChild(dot);
+      }
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'assign-option-name';
+      nameSpan.textContent = name;
+      main.appendChild(nameSpan);
+
+      const metaSpan = document.createElement('span');
+      metaSpan.className = 'assign-option-meta';
+      metaSpan.textContent = selected ? '当前所属' : countText;
+
+      btn.append(main, metaSpan);
+      return btn;
+    };
+
+    fragment.appendChild(makeOption({
+      id: '',
+      name: '未归类（移出合集）',
+      color: null,
+      countText: '移出',
+      selected: currentColId === null,
+    }));
+
+    state.collections.forEach((col) => {
+      fragment.appendChild(makeOption({
+        id: col.id,
+        name: col.name,
+        color: col.color,
+        countText: `${col.podcastCount || 0} 集`,
+        selected: currentColId === col.id,
+      }));
+    });
+
+    dom.assignCollectionList.appendChild(fragment);
+  }
+
+  function renderAiSuggestionBox() {
+    if (!dom.aiSuggestResult || !dom.btnSuggestCollection) return;
+    const btnSpan = dom.btnSuggestCollection.querySelector('span');
+    dom.btnSuggestCollection.disabled = state.assignModal.suggesting || state.assignModal.submitting;
+    if (btnSpan) {
+      btnSpan.textContent = state.assignModal.suggesting ? '分析中…' : '✨ AI 建议分类';
+    }
+
+    dom.aiSuggestResult.textContent = '';
+    dom.aiSuggestResult.classList.remove('is-error');
+
+    if (state.assignModal.suggesting) {
+      dom.aiSuggestResult.classList.remove('hidden');
+      const p = document.createElement('p');
+      p.className = 'ai-suggest-reason';
+      p.textContent = 'AI 正在阅读本期标题、摘要与前几句台词…';
+      dom.aiSuggestResult.appendChild(p);
+      return;
+    }
+
+    if (state.assignModal.suggestionError) {
+      dom.aiSuggestResult.classList.remove('hidden');
+      dom.aiSuggestResult.classList.add('is-error');
+      const errInfo = state.assignModal.suggestionError;
+      const p = document.createElement('p');
+      p.className = 'ai-suggest-reason';
+      p.textContent = errInfo.message;
+      dom.aiSuggestResult.appendChild(p);
+      if (errInfo.needsConfig) {
+        const actions = document.createElement('div');
+        actions.className = 'ai-suggest-actions';
+        const cfgBtn = createActionBtn('去配置模型', 'btn btn-primary btn-sm', () => {
+          closeAssignCollectionModal();
+          openSettingsModal('llm');
+        });
+        actions.appendChild(cfgBtn);
+        dom.aiSuggestResult.appendChild(actions);
+      }
+      return;
+    }
+
+    const sug = state.assignModal.suggestion;
+    if (!sug) {
+      dom.aiSuggestResult.classList.add('hidden');
+      return;
+    }
+
+    dom.aiSuggestResult.classList.remove('hidden');
+    const top = document.createElement('div');
+    top.className = 'ai-suggest-result-top';
+    const badge = document.createElement('span');
+    badge.className = 'ai-suggest-badge';
+    badge.textContent = sug.action === 'existing' ? '匹配已有合集' : '建议新建合集';
+    const nameEl = document.createElement('span');
+    nameEl.className = 'ai-suggest-name';
+    nameEl.textContent = sug.suggestedName;
+    top.append(nameEl, badge);
+    dom.aiSuggestResult.appendChild(top);
+
+    if (sug.reason) {
+      const reasonEl = document.createElement('p');
+      reasonEl.className = 'ai-suggest-reason';
+      reasonEl.textContent = sug.reason;
+      dom.aiSuggestResult.appendChild(reasonEl);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'ai-suggest-actions';
+    const acceptBtn = createActionBtn(
+      sug.action === 'existing' ? '采纳并归入' : '创建并归入',
+      'btn btn-primary btn-sm',
+      handleAcceptSuggestedCollection
+    );
+    acceptBtn.disabled = state.assignModal.submitting;
+    actions.appendChild(acceptBtn);
+    dom.aiSuggestResult.appendChild(actions);
+  }
+
+  function openAssignCollectionModal(podcastId) {
+    if (!dom.assignCollectionModal || !podcastId) return;
+    const podcast = findPodcastSummary(podcastId);
+    if (!podcast) return;
+
+    state.assignModal.sessionSeq += 1;
+    state.assignModal.suggestSeq += 1;
+    state.assignModal.suggestAbortController?.abort();
+    state.assignModal.suggestAbortController = null;
+    state.assignModal.podcastId = podcastId;
+    state.assignModal.submitting = false;
+    state.assignModal.suggesting = false;
+    state.assignModal.suggestion = null;
+    state.assignModal.suggestionError = null;
+
+    dom.assignCollectionPodcastTitle.textContent = podcast.podcastTitle || '未命名播客';
+    if (dom.quickCollectionNameInput) dom.quickCollectionNameInput.value = '';
+    if (dom.btnQuickCreateCollection) dom.btnQuickCreateCollection.disabled = false;
+    renderAssignCollectionOptions();
+    renderAiSuggestionBox();
+    dom.assignCollectionModal.classList.remove('hidden');
+  }
+
+  function closeAssignCollectionModal() {
+    if (!dom.assignCollectionModal) return;
+    state.assignModal.sessionSeq += 1;
+    state.assignModal.suggestSeq += 1;
+    state.assignModal.suggestAbortController?.abort();
+    state.assignModal.suggestAbortController = null;
+    state.assignModal.suggesting = false;
+    state.assignModal.submitting = false;
+    state.assignModal.podcastId = null;
+    dom.assignCollectionModal.classList.add('hidden');
+  }
+
+  async function assignPodcastToCollection(podcastId, collectionId, { closeModal = true } = {}) {
+    if (!podcastId || state.assignModal.submitting) return;
+    const sessionSeq = state.assignModal.sessionSeq;
+    const normalizedId = collectionId || null;
+    state.assignModal.submitting = true;
+    renderAssignCollectionOptions();
+    renderAiSuggestionBox();
+
+    try {
+      await apiJson(`/api/podcasts/${encodeURIComponent(podcastId)}/collection`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collectionId: normalizedId }),
+      });
+
+      state.historyItems = state.historyItems.map((item) => (
+        item.id === podcastId ? { ...item, collectionId: normalizedId } : item
+      ));
+      if (state.currentPodcast?.id === podcastId) {
+        state.currentPodcast.collectionId = normalizedId;
+      }
+
+      if (closeModal && state.assignModal.sessionSeq === sessionSeq) {
+        closeAssignCollectionModal();
+      } else if (state.assignModal.sessionSeq === sessionSeq) {
+        state.assignModal.submitting = false;
+        renderAssignCollectionOptions();
+        renderAiSuggestionBox();
+      }
+
+      await loadCollections();
+      if (state.selectedCollectionFilter !== 'all' && state.selectedCollectionFilter !== 'unassigned') {
+        loadCollectionDetail(state.selectedCollectionFilter);
+      }
+      renderHistoryList();
+      const targetCol = findCollectionById(normalizedId);
+      showToast(targetCol ? `已归入合集「${targetCol.name}」` : '已从合集移出');
+    } catch (err) {
+      showToast(err.message || '设置合集归属失败');
+      if (state.assignModal.sessionSeq === sessionSeq) {
+        state.assignModal.submitting = false;
+        renderAssignCollectionOptions();
+        renderAiSuggestionBox();
+      }
+    }
+  }
+
+  async function handleSuggestCollection() {
+    const podcastId = state.assignModal.podcastId;
+    if (!podcastId || state.assignModal.suggesting) return;
+
+    const sessionSeq = state.assignModal.sessionSeq;
+    const suggestSeq = ++state.assignModal.suggestSeq;
+    state.assignModal.suggestAbortController?.abort();
+    const controller = new AbortController();
+    state.assignModal.suggestAbortController = controller;
+    state.assignModal.suggesting = true;
+    state.assignModal.suggestion = null;
+    state.assignModal.suggestionError = null;
+    renderAiSuggestionBox();
+
+    try {
+      const result = await apiJson('/api/collections/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          podcastId,
+          ...buildCredsPayload(),
+        }),
+      });
+      if (state.assignModal.sessionSeq !== sessionSeq || state.assignModal.suggestSeq !== suggestSeq) return;
+      state.assignModal.suggestion = result;
+    } catch (err) {
+      if (err.name === 'AbortError' ||
+          state.assignModal.sessionSeq !== sessionSeq ||
+          state.assignModal.suggestSeq !== suggestSeq) {
+        return;
+      }
+      const msg = err.message || '智能分类建议失败，请稍后重试';
+      const missingKey = err.status === 400 && /请先配置.*API Key|尚未配置.*API Key/i.test(msg);
+      const needsConfig = err.status === 400 && /API Key|模型|接口地址/i.test(msg);
+      state.assignModal.suggestionError = {
+        needsConfig,
+        message: missingKey ? '尚未配置大模型 API Key，请先到「模型与语音」设置后再试。' : msg,
+      };
+    } finally {
+      if (state.assignModal.sessionSeq === sessionSeq && state.assignModal.suggestSeq === suggestSeq) {
+        if (state.assignModal.suggestAbortController === controller) {
+          state.assignModal.suggestAbortController = null;
+        }
+        state.assignModal.suggesting = false;
+        renderAiSuggestionBox();
+      }
+    }
+  }
+
+  async function createCollectionAndAssign(podcastId, name) {
+    const cleanName = String(name || '').trim();
+    if (!cleanName) {
+      showToast('请输入新合集名称');
+      dom.quickCollectionNameInput?.focus();
+      return;
+    }
+    if (codePointLength(cleanName) > 30) {
+      showToast('合集名称最多 30 个字');
+      return;
+    }
+    if (containsClientSecretOrPath(cleanName)) {
+      showToast('合集名称不能包含本机已保存的 API 密钥、接口地址或本地路径');
+      return;
+    }
+
+    const existing = state.collections.find((c) => c.name.trim().toLowerCase() === cleanName.toLowerCase());
+    if (existing) {
+      await assignPodcastToCollection(podcastId, existing.id);
+      return;
+    }
+
+    const sessionSeq = state.assignModal.sessionSeq;
+    state.assignModal.submitting = true;
+    renderAssignCollectionOptions();
+    renderAiSuggestionBox();
+    if (dom.btnQuickCreateCollection) dom.btnQuickCreateCollection.disabled = true;
+
+    try {
+      const created = await apiJson('/api/collections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: cleanName,
+          description: '',
+          color: pickNextCollectionColor(),
+        }),
+      });
+      state.collections = [...state.collections, created];
+      if (state.assignModal.sessionSeq !== sessionSeq) return;
+      state.assignModal.submitting = false;
+      await assignPodcastToCollection(podcastId, created.id);
+    } catch (err) {
+      showToast(err.message || '创建合集失败');
+      if (state.assignModal.sessionSeq === sessionSeq) {
+        state.assignModal.submitting = false;
+        renderAssignCollectionOptions();
+        renderAiSuggestionBox();
+      }
+    } finally {
+      if (state.assignModal.sessionSeq === sessionSeq && dom.btnQuickCreateCollection) {
+        dom.btnQuickCreateCollection.disabled = false;
+      }
+    }
+  }
+
+  async function handleAcceptSuggestedCollection() {
+    const podcastId = state.assignModal.podcastId;
+    const sug = state.assignModal.suggestion;
+    if (!podcastId || !sug) return;
+    if (sug.action === 'existing' && sug.collectionId) {
+      await assignPodcastToCollection(podcastId, sug.collectionId);
+      return;
+    }
+    await createCollectionAndAssign(podcastId, sug.suggestedName);
+  }
+
   function bindPasswordToggle(inputEl, btnEl) {
     if (!inputEl || !btnEl) return;
     btnEl.addEventListener('click', () => {
@@ -3858,6 +4743,8 @@
 
     document.addEventListener('paste', (e) => {
       if (!dom.settingsModal.classList.contains('hidden')) return;
+      if (dom.collectionModal && !dom.collectionModal.classList.contains('hidden')) return;
+      if (dom.assignCollectionModal && !dom.assignCollectionModal.classList.contains('hidden')) return;
       const items = Array.from(e.clipboardData?.items || []);
       const imageFiles = items
         .filter((item) => item.kind === 'file' && /^image\//.test(item.type))
@@ -3922,6 +4809,9 @@
         state.pendingDeleteId = null;
         if (hadPending) renderHistoryList();
         handleSelectHistory(podcastId);
+      } else if (action === 'assign-collection') {
+        e.stopPropagation();
+        openAssignCollectionModal(podcastId);
       } else if (action === 'request-delete') {
         e.stopPropagation();
         state.pendingDeleteId = podcastId;
@@ -4157,6 +5047,7 @@
       state.extractAbortController?.abort();
       state.styleRecommendAbortController?.abort();
       state.polishAbortController?.abort();
+      state.assignModal.suggestAbortController?.abort();
       dom.mainAudio.pause();
       if (e.persisted) {
         state.audioEngine?.suspend?.();
@@ -4181,8 +5072,113 @@
     dom.settingsModal.addEventListener('click', (e) => {
       if (e.target === dom.settingsModal) closeSettingsModal();
     });
+
+    if (dom.btnNewCollection) {
+      dom.btnNewCollection.addEventListener('click', () => openCollectionModal({ mode: 'create' }));
+    }
+    if (dom.collectionFilterBar) {
+      dom.collectionFilterBar.addEventListener('click', (e) => {
+        const pill = e.target.closest('[data-filter-id]');
+        if (!pill || !dom.collectionFilterBar.contains(pill)) return;
+        const nextFilter = pill.dataset.filterId || 'all';
+        if (nextFilter === state.selectedCollectionFilter) return;
+        state.selectedCollectionFilter = nextFilter;
+        state.collectionDeleteConfirmId = null;
+        state.collectionHighlightsExpanded = false;
+        state.activeCollectionDetail = null;
+        renderCollectionFilterBar();
+        renderCollectionHeaderCard();
+        renderHistoryList();
+        if (nextFilter !== 'all' && nextFilter !== 'unassigned') {
+          loadCollectionDetail(nextFilter);
+        }
+      });
+    }
+    if (dom.btnEditCollection) {
+      dom.btnEditCollection.addEventListener('click', () => {
+        const col = findCollectionById(state.selectedCollectionFilter);
+        if (col) openCollectionModal({ mode: 'edit', collection: col });
+      });
+    }
+    if (dom.btnDeleteCollection) {
+      dom.btnDeleteCollection.addEventListener('click', () => {
+        const col = findCollectionById(state.selectedCollectionFilter);
+        if (!col) return;
+        state.collectionDeleteConfirmId = col.id;
+        renderCollectionHeaderCard();
+      });
+    }
+    if (dom.btnCancelDeleteCollection) {
+      dom.btnCancelDeleteCollection.addEventListener('click', () => {
+        state.collectionDeleteConfirmId = null;
+        renderCollectionHeaderCard();
+      });
+    }
+    if (dom.btnConfirmDeleteCollection) {
+      dom.btnConfirmDeleteCollection.addEventListener('click', handleConfirmDeleteCollection);
+    }
+    if (dom.btnToggleCollectionHighlights) {
+      dom.btnToggleCollectionHighlights.addEventListener('click', () => {
+        state.collectionHighlightsExpanded = !state.collectionHighlightsExpanded;
+        renderCollectionHeaderCard();
+        if (state.collectionHighlightsExpanded &&
+            state.selectedCollectionFilter !== 'all' &&
+            state.selectedCollectionFilter !== 'unassigned' &&
+            state.activeCollectionDetail?.id !== state.selectedCollectionFilter) {
+          loadCollectionDetail(state.selectedCollectionFilter);
+        }
+      });
+    }
+    if (dom.btnAssignCurrentCollection) {
+      dom.btnAssignCurrentCollection.addEventListener('click', () => {
+        if (state.currentPodcast?.id) openAssignCollectionModal(state.currentPodcast.id);
+      });
+    }
+
+    if (dom.btnCloseCollectionModal) dom.btnCloseCollectionModal.addEventListener('click', closeCollectionModal);
+    if (dom.btnCancelCollectionModal) dom.btnCancelCollectionModal.addEventListener('click', closeCollectionModal);
+    if (dom.collectionForm) dom.collectionForm.addEventListener('submit', handleSaveCollectionModal);
+    if (dom.collectionModal) {
+      dom.collectionModal.addEventListener('click', (e) => {
+        if (e.target === dom.collectionModal) closeCollectionModal();
+      });
+    }
+    dom.collectionColorSwatches?.forEach((btn) => {
+      btn.addEventListener('click', () => setCollectionModalColor(btn.dataset.collectionColor));
+    });
+
+    if (dom.btnCloseAssignModal) dom.btnCloseAssignModal.addEventListener('click', closeAssignCollectionModal);
+    if (dom.assignCollectionModal) {
+      dom.assignCollectionModal.addEventListener('click', (e) => {
+        if (e.target === dom.assignCollectionModal) closeAssignCollectionModal();
+      });
+    }
+    if (dom.btnSuggestCollection) dom.btnSuggestCollection.addEventListener('click', handleSuggestCollection);
+    if (dom.assignCollectionList) {
+      dom.assignCollectionList.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-target-collection-id]');
+        if (!btn || !dom.assignCollectionList.contains(btn)) return;
+        const podcastId = state.assignModal.podcastId;
+        if (!podcastId) return;
+        assignPodcastToCollection(podcastId, btn.dataset.targetCollectionId || null);
+      });
+    }
+    if (dom.quickCreateCollectionForm) {
+      dom.quickCreateCollectionForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const podcastId = state.assignModal.podcastId;
+        if (!podcastId) return;
+        createCollectionAndAssign(podcastId, dom.quickCollectionNameInput?.value || '');
+      });
+    }
+
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !dom.settingsModal.classList.contains('hidden')) {
+      if (e.key !== 'Escape') return;
+      if (dom.collectionModal && !dom.collectionModal.classList.contains('hidden')) {
+        closeCollectionModal();
+      } else if (dom.assignCollectionModal && !dom.assignCollectionModal.classList.contains('hidden')) {
+        closeAssignCollectionModal();
+      } else if (!dom.settingsModal.classList.contains('hidden')) {
         closeSettingsModal();
       }
     });

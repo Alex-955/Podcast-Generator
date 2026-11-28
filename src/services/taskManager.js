@@ -13,11 +13,10 @@ const { getTtsProvider, DEFAULT_PROVIDER_ID, resolveSpeechRate } = require('./tt
 const { SPEECH_SPEEDS, normalizeSpeechSpeed } = require('./speechNormalize');
 const { createTtsCache, speechAccountHash } = require('./ttsCache');
 const { concatenateAudioFiles } = require('./audioMerger');
-const { InputError, validateEditedDialogue, validateScriptRequest, filterSensitivePath, redactSecrets, ttsSecrets } = require('./validation');
+const { InputError, SAFE_ID, checkId, validateEditedDialogue, validateScriptRequest, filterSensitivePath, redactSecrets, ttsSecrets } = require('./validation');
 
 const { isSafeVersion, assertPodcastVersion, publishEditedPodcast, reconcilePendingPublications } = require('./podcastPublication');
 
-const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
 const SOURCE_TYPES = new Set(['url', 'text', 'image']);
 const STAGES = {
   extract: [1, '抓取正文'], script: [2, '剧本重构'], tts: [3, '语音合成'],
@@ -25,10 +24,6 @@ const STAGES = {
 };
 const now = () => new Date().toISOString();
 const httpError = (statusCode, message, code) => Object.assign(new Error(message), { statusCode, code });
-
-function checkId(id) {
-  if (typeof id !== 'string' || !SAFE_ID.test(id)) throw new InputError('无效的资源 ID');
-}
 
 function readDirectory(dir) {
   if (!fs.existsSync(dir)) return [];
@@ -49,9 +44,7 @@ function sameFileSystemResource(a, b) {
   return Boolean(realLeft && realLeft === realPathIfExists(b));
 }
 
-function readPodcastMetadata(dir, resolveTaskStatus) {
-  if (!fs.lstatSync(dir, { throwIfNoEntry: false })?.isDirectory()) return;
-  reconcilePendingPublications(dir, resolveTaskStatus);
+function readValidPodcastFiles(dir) {
   const audio = fs.lstatSync(path.join(dir, 'full_podcast.mp3'), { throwIfNoEntry: false });
   const metaFile = path.join(dir, 'meta.json');
   if (!audio?.isFile() || !audio.size || !fs.lstatSync(metaFile, { throwIfNoEntry: false })?.isFile()) return;
@@ -63,6 +56,20 @@ function readPodcastMetadata(dir, resolveTaskStatus) {
   } catch (error) {
     if (!(error instanceof SyntaxError) && error.code !== 'ENOENT') throw error;
   }
+}
+
+function hasPreparedTransaction(dir) {
+  return readDirectory(dir).some(entry =>
+    entry.isDirectory() && entry.name.startsWith('.tmp-publish-') &&
+    fs.lstatSync(path.join(dir, entry.name, 'prepared'), { throwIfNoEntry: false }) !== undefined);
+}
+
+function readPodcastMetadata(dir, resolveTaskStatus) {
+  if (!fs.lstatSync(dir, { throwIfNoEntry: false })?.isDirectory()) return;
+  const baseMeta = readValidPodcastFiles(dir);
+  if (!baseMeta && !hasPreparedTransaction(dir)) return;
+  reconcilePendingPublications(dir, resolveTaskStatus);
+  return readValidPodcastFiles(dir);
 }
 
 function assertNotRawUrl(content) {
@@ -222,7 +229,7 @@ function publicTtsSummary(meta, sensitive) {
 function createTaskManager({
   tasksDir, podcastsDir, cacheDir, extractor = extractArticle, scriptGenerator = generatePodcastScript,
   llmRequest, lookup, ttsSynthesizer = synthesizeDialogueScript, audioMerger = concatenateAudioFiles,
-  adminToken, ttsProvider, getTtsProviderById = getTtsProvider,
+  collectionStore, adminToken, ttsProvider, getTtsProviderById = getTtsProvider,
 }) {
   const cache = createTtsCache(cacheDir);
   const storedSecrets = [
@@ -349,7 +356,10 @@ function createTaskManager({
 
   function reconcilePodcast(id) {
     checkId(id);
-    reconcilePendingPublications(path.join(podcastsDir, id), resolvePublicationTask);
+    const dir = path.join(podcastsDir, id);
+    if (!fs.lstatSync(dir, { throwIfNoEntry: false })?.isDirectory()) return;
+    if (!readValidPodcastFiles(dir) && !hasPreparedTransaction(dir)) return;
+    reconcilePendingPublications(dir, resolvePublicationTask);
   }
 
   function getPodcast(id) {
@@ -359,7 +369,7 @@ function createTaskManager({
     try {
       const meta = readPodcastMetadata(dir, resolvePublicationTask);
       if (!meta) throw missing();
-      return podcastDTO(id, meta);
+      return podcastDTO(path.basename(fs.realpathSync.native(dir)), meta);
     } catch (error) {
       if (['ENOENT', 'ENOTDIR'].includes(error.code) || error instanceof SyntaxError || error instanceof TypeError) throw missing();
       throw error;
@@ -375,6 +385,8 @@ function createTaskManager({
     const podcastStyle = PODCAST_STYLES.includes(meta.podcastStyle) ? meta.podcastStyle : 'dialogue';
     const sourceType = SOURCE_TYPES.has(meta.sourceType) ? meta.sourceType : null;
     return {
+      collectionId: collectionStore?.getPodcastCollectionId(id) ?? null,
+      highlightCount: collectionStore?.getPodcastHighlightCount(id) ?? 0,
       id, podcastTitle: redactScriptField(podcastTitle, metaSensitive), summary: redactScriptField(summary, metaSensitive),
       podcastStyle, sourceType, sourceTruncated: Boolean(meta.sourceTruncated),
       createAt: publicDate(meta.createAt, metaSensitive), totalDuration: finiteNumber(meta.totalDuration),
@@ -390,9 +402,9 @@ function createTaskManager({
     for (const entry of readDirectory(podcastsDir)) {
       if (!entry.isDirectory() || !SAFE_ID.test(entry.name)) continue;
       try {
-        const { id, podcastTitle, summary, podcastStyle, sourceType, createAt, totalDuration, sentences, fullAudioUrl,
+        const { id, collectionId, highlightCount, podcastTitle, summary, podcastStyle, sourceType, createAt, totalDuration, sentences, fullAudioUrl,
           ttsProvider, ttsModel, voiceMapping, speechSpeed } = getPodcast(entry.name);
-        items.push({ id, podcastTitle, summary, podcastStyle, sourceType, createAt, totalDuration, sentenceCount: sentences.length, fullAudioUrl,
+        items.push({ id, collectionId, highlightCount, podcastTitle, summary, podcastStyle, sourceType, createAt, totalDuration, sentenceCount: sentences.length, fullAudioUrl,
           ...(ttsProvider && { ttsProvider }), ...(ttsModel && { ttsModel }), ...(voiceMapping && { voiceMapping }), speechSpeed });
       } catch (error) {
         if (error.statusCode === 404 || (error.statusCode === 503 && error.code === 'PODCAST_RECOVERY_FAILED')) continue;
@@ -417,12 +429,16 @@ function createTaskManager({
         throw httpError(409, '当前播客正在生成中，请先取消后再删除');
       }
     }
+    collectionStore?.assertWritable?.();
     const realDir = fs.lstatSync(dir, { throwIfNoEntry: false })?.isDirectory() && realPathIfExists(dir);
     const directory = realDir && ![tasksDir, cacheDir].some(storage => {
       const location = realPathIfExists(storage);
       return location && (location === realDir || location.startsWith(realDir + path.sep) || realDir.startsWith(location + path.sep));
     });
-    const hasValidPodcast = directory && Boolean(readPodcastMetadata(dir, resolvePublicationTask));
+    const hasBaseFiles = directory && Boolean(readValidPodcastFiles(dir));
+    const hasPendingPrepared = directory && hasPreparedTransaction(dir);
+    const hasValidPodcast = directory && (hasBaseFiles || hasPendingPrepared) &&
+      Boolean(readPodcastMetadata(dir, resolvePublicationTask));
     let hasValidTask = false;
     if (fs.lstatSync(taskFile, { throwIfNoEntry: false })?.isFile()) {
       try {
@@ -433,9 +449,12 @@ function createTaskManager({
         if (!(error instanceof SyntaxError) && error.code !== 'ENOENT') throw error;
       }
     }
-    if (!hasValidPodcast && !hasValidTask) throw httpError(404, '播客不存在');
-    if (directory) fs.rmSync(dir, { recursive: true });
+    const collectionPodcastId = realDir ? path.basename(realDir) : id;
+    const hasCollectionData = Boolean(collectionStore?.hasPodcastData?.(collectionPodcastId));
+    if (!hasValidPodcast && !hasValidTask && !hasCollectionData) throw httpError(404, '播客不存在');
+    if (directory && (hasValidPodcast || hasValidTask)) fs.rmSync(dir, { recursive: true });
     if (hasValidTask) fs.unlinkSync(taskFile);
+    collectionStore?.removePodcast(collectionPodcastId);
     return { id, deleted: true };
   }
 

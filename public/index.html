@@ -299,12 +299,62 @@
               <h2 class="rail-heading">最近播客</h2>
               <span id="historyCount" class="history-count">0 集</span>
             </div>
-            <button type="button" id="btnRefreshHistory" class="btn-icon-quiet" title="刷新历史列表" aria-label="刷新最近播客列表">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <polyline points="23 4 23 10 17 10"></polyline>
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-              </svg>
-            </button>
+            <div class="history-head-actions">
+              <button type="button" id="btnNewCollection" class="btn-collection-add" title="新建主题合集">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span>新建合集</span>
+              </button>
+              <button type="button" id="btnRefreshHistory" class="btn-icon-quiet" title="刷新历史列表" aria-label="刷新最近播客列表">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="23 4 23 10 17 10"></polyline>
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div id="collectionFilterBar" class="collection-filter-bar" role="tablist" aria-label="按合集筛选播客"></div>
+
+          <div id="collectionHeaderCard" class="collection-header-card hidden" aria-live="polite">
+            <div class="collection-header-top">
+              <div class="collection-header-title-row">
+                <span id="collectionHeaderDot" class="collection-dot" aria-hidden="true"></span>
+                <h3 id="collectionHeaderName" class="collection-header-name"></h3>
+                <span id="collectionHeaderCount" class="collection-header-count">0 集</span>
+              </div>
+              <div id="collectionHeaderActions" class="collection-header-actions">
+                <button type="button" id="btnEditCollection" class="btn-icon-quiet btn-collection-icon" title="编辑合集" aria-label="编辑合集">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 20h9"></path>
+                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                  </svg>
+                </button>
+                <button type="button" id="btnDeleteCollection" class="btn-icon-quiet btn-collection-icon is-danger" title="删除合集（仅解除归类，不删除播客）" aria-label="删除合集">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path>
+                  </svg>
+                </button>
+              </div>
+              <div id="collectionDeleteConfirm" class="collection-delete-confirm hidden">
+                <span class="collection-delete-hint">仅解除归类</span>
+                <button type="button" id="btnConfirmDeleteCollection" class="btn btn-danger-ghost btn-sm">确认删除</button>
+                <button type="button" id="btnCancelDeleteCollection" class="btn btn-ghost btn-sm">取消</button>
+              </div>
+            </div>
+            <p id="collectionHeaderDesc" class="collection-header-desc hidden"></p>
+            <div class="collection-highlights-wrap">
+              <button type="button" id="btnToggleCollectionHighlights" class="collection-highlights-toggle" aria-expanded="false" aria-controls="collectionHighlightsPanel">
+                <span id="collectionHighlightsLabel">合集金句（0 条）</span>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </button>
+              <div id="collectionHighlightsPanel" class="collection-highlights-panel hidden"></div>
+            </div>
           </div>
 
           <div id="historyList" class="history-list">
@@ -347,6 +397,10 @@
             <div class="episode-meta-row">
               <span id="currentPodcastMeta" class="episode-meta">尚无已选播客</span>
               <div id="currentPodcastBadges" class="episode-meta-badges hidden" aria-label="本集播客属性"></div>
+              <button type="button" id="btnAssignCurrentCollection" class="btn-collection-trigger hidden" aria-haspopup="dialog" aria-controls="assignCollectionModal">
+                <span id="currentCollectionDot" class="collection-dot hidden" aria-hidden="true"></span>
+                <span id="currentCollectionLabel">归入合集</span>
+              </button>
             </div>
             <h2 id="currentPodcastTitle" class="episode-title">导入一篇文章，或从左侧选择一期播客开始收听</h2>
             <p id="currentPodcastSummary" class="episode-summary hidden"></p>
@@ -741,6 +795,117 @@
             <button type="submit" id="btnSaveSettings" class="btn btn-primary">保存配置</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- 新建 / 编辑合集弹窗 -->
+    <div id="collectionModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="collectionModalTitle">
+      <div class="modal-sheet modal-sheet-sm">
+        <div class="modal-head">
+          <div>
+            <h2 id="collectionModalTitle" class="modal-title">新建合集</h2>
+            <p id="collectionModalSubtitle" class="modal-subtitle">按主题整理已生成的双人播客</p>
+          </div>
+          <button type="button" id="btnCloseCollectionModal" class="btn-icon-quiet" aria-label="关闭合集弹窗">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+
+        <form id="collectionForm" class="modal-form" novalidate>
+          <div class="modal-scroll">
+            <div class="form-field">
+              <label for="collectionNameInput" class="form-label">合集名称</label>
+              <input type="text" id="collectionNameInput" class="field-input" placeholder="例如：技术播客、商业思考、人物长谈" autocomplete="off" spellcheck="false">
+              <p class="form-help">1~30 字，不可与已有合集重名。</p>
+            </div>
+
+            <div class="form-field">
+              <label for="collectionDescInput" class="form-label">合集简介（可选）</label>
+              <textarea id="collectionDescInput" class="field-textarea collection-desc-input" rows="2" placeholder="记录这个合集的主题方向或筛选标准（最多 120 字）"></textarea>
+            </div>
+
+            <div class="form-field">
+              <span class="form-label">色标印记</span>
+              <div id="collectionColorPicker" class="collection-color-picker" role="radiogroup" aria-label="选择合集色标">
+                <button type="button" class="color-swatch-pill is-active" data-collection-color="ink" role="radio" aria-checked="true">
+                  <span class="collection-dot is-ink" aria-hidden="true"></span><span>墨黑</span>
+                </button>
+                <button type="button" class="color-swatch-pill" data-collection-color="vermilion" role="radio" aria-checked="false">
+                  <span class="collection-dot is-vermilion" aria-hidden="true"></span><span>朱砂</span>
+                </button>
+                <button type="button" class="color-swatch-pill" data-collection-color="indigo" role="radio" aria-checked="false">
+                  <span class="collection-dot is-indigo" aria-hidden="true"></span><span>靛青</span>
+                </button>
+                <button type="button" class="color-swatch-pill" data-collection-color="jade" role="radio" aria-checked="false">
+                  <span class="collection-dot is-jade" aria-hidden="true"></span><span>翠竹</span>
+                </button>
+                <button type="button" class="color-swatch-pill" data-collection-color="amber" role="radio" aria-checked="false">
+                  <span class="collection-dot is-amber" aria-hidden="true"></span><span>琥珀</span>
+                </button>
+                <button type="button" class="color-swatch-pill" data-collection-color="plum" role="radio" aria-checked="false">
+                  <span class="collection-dot is-plum" aria-hidden="true"></span><span>绛梅</span>
+                </button>
+              </div>
+            </div>
+
+            <p id="collectionModalError" class="collection-inline-error hidden" role="alert"></p>
+          </div>
+
+          <div class="modal-foot">
+            <button type="button" id="btnCancelCollectionModal" class="btn btn-subtle">取消</button>
+            <button type="submit" id="btnSaveCollectionModal" class="btn btn-primary">创建合集</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 播客归入合集浮层弹窗 -->
+    <div id="assignCollectionModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="assignCollectionTitle">
+      <div class="modal-sheet modal-sheet-sm">
+        <div class="modal-head">
+          <div class="assign-modal-head-copy">
+            <h2 id="assignCollectionTitle" class="modal-title">归入合集</h2>
+            <p id="assignCollectionPodcastTitle" class="modal-subtitle assign-podcast-subtitle"></p>
+          </div>
+          <button type="button" id="btnCloseAssignModal" class="btn-icon-quiet" aria-label="关闭归类弹窗">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-scroll">
+          <!-- AI 建议分类区 -->
+          <div class="ai-suggest-box">
+            <div class="ai-suggest-head">
+              <div class="ai-suggest-copy">
+                <span class="ai-suggest-title">智能分类建议</span>
+                <span class="ai-suggest-sub">结合单集标题、摘要与前几句台词推荐合适主题</span>
+              </div>
+              <button type="button" id="btnSuggestCollection" class="btn btn-subtle btn-sm">
+                <span>✨ AI 建议分类</span>
+              </button>
+            </div>
+            <div id="aiSuggestResult" class="ai-suggest-result hidden" aria-live="polite"></div>
+          </div>
+
+          <!-- 已有合集选择列表 -->
+          <div class="form-field">
+            <span class="form-label">选择所属合集</span>
+            <div id="assignCollectionList" class="assign-collection-list" role="radiogroup" aria-label="合集归属列表"></div>
+          </div>
+
+          <!-- 快捷新建并归入 -->
+          <form id="quickCreateCollectionForm" class="quick-create-collection" novalidate>
+            <label for="quickCollectionNameInput" class="sr-only">新合集名称</label>
+            <input type="text" id="quickCollectionNameInput" class="field-input" placeholder="输入新合集名称直接创建并归入…" autocomplete="off" spellcheck="false">
+            <button type="submit" id="btnQuickCreateCollection" class="btn btn-primary btn-sm">新建并归入</button>
+          </form>
+        </div>
       </div>
     </div>
 
