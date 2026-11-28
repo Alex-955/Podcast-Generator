@@ -1,18 +1,31 @@
 (function (global) {
   'use strict';
 
+  const FALLBACK_BY_OS = {
+    mac: {
+      filename: 'InkCast-v1.1.0-mac-arm64.dmg',
+      directUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/download/v1.1.0/InkCast-v1.1.0-mac-arm64.dmg',
+      sha256: 'shasum -a 256 InkCast-v1.1.0-mac-*.dmg',
+    },
+    win: {
+      filename: 'InkCast-v1.1.0-win-x64-setup.exe',
+      directUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/download/v1.1.0/InkCast-v1.1.0-win-x64-setup.exe',
+      sha256: 'certutil -hashfile InkCast-v1.1.0-win-x64-setup.exe SHA256',
+    },
+  };
+
   const FALLBACK_CONFIG = {
-    filename: 'InkCast-v1.0.1-mac-arm64.dmg',
-    directUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/download/v1.0.1/InkCast-v1.0.1-mac-arm64.dmg',
-    githubReleasesUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.1',
+    filename: FALLBACK_BY_OS.mac.filename,
+    directUrl: FALLBACK_BY_OS.mac.directUrl,
+    githubReleasesUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.1.0',
     githubRepoUrl: 'https://github.com/Alex-955/Podcast-Generator',
-    sha256: 'shasum -a 256 InkCast-v1.0.1-mac-*.dmg',
+    sha256: FALLBACK_BY_OS.mac.sha256,
     requireNodeNotice: false,
   };
 
   const PREVIEW_ASSETS = {
     desktop: {
-      src: './assets/images/studio-desktop.png?v=1.0.1b',
+      src: './assets/images/studio-desktop.png?v=1.1.0',
       alt: '拾声集（InkCast）双栏桌面工作台实景截图',
       caption: '双栏桌面工作台 · 导入文稿、确认预览与同步放音同屏完成',
     },
@@ -83,8 +96,9 @@
       cfg[os] ||
       {};
 
-    const filename = osBucket.filename || cfg.filename || FALLBACK_CONFIG.filename;
-    const directUrl = osBucket.directUrl || cfg.directUrl || FALLBACK_CONFIG.directUrl;
+    const osFallback = FALLBACK_BY_OS[os] || FALLBACK_BY_OS.mac;
+    const filename = osBucket.filename || cfg.filename || osFallback.filename;
+    const directUrl = osBucket.directUrl || cfg.directUrl || osFallback.directUrl;
     const githubAssetUrl =
       osBucket.githubAssetUrl ||
       cfg.githubAssetUrl ||
@@ -93,7 +107,7 @@
       (cfg.links && cfg.links.githubReleases) ||
       cfg.githubReleases ||
       FALLBACK_CONFIG.githubReleasesUrl;
-    const sha256 = osBucket.shaCommand || osBucket.sha256 || cfg.sha256 || FALLBACK_CONFIG.sha256;
+    const sha256 = osBucket.shaCommand || osBucket.sha256 || cfg.sha256 || osFallback.sha256;
 
     return {
       filename,
@@ -101,8 +115,8 @@
       githubAssetUrl,
       sha256,
       directLabel: osBucket.directLabel || (os === 'win' ? '下载 Windows 64 位安装版 (.exe)' : '下载 Apple Silicon (.dmg)'),
-      secondaryLabel: osBucket.secondaryLabel || (os === 'win' ? '前往 GitHub Releases v1.0.1' : '下载 Intel 芯片 (.dmg)'),
-      heroLabel: osBucket.heroButtonLabel || osBucket.heroLabel || (os === 'win' ? '下载 Windows 安装版（v1.0.1）' : '下载 macOS 桌面版（v1.0.1）'),
+      secondaryLabel: osBucket.secondaryLabel || (os === 'win' ? '前往 GitHub Releases v1.1.0' : '下载 Intel 芯片 (.dmg)'),
+      heroLabel: osBucket.heroButtonLabel || osBucket.heroLabel || (os === 'win' ? '下载 Windows 安装版（v1.1.0）' : '下载 macOS 桌面版（v1.1.0）'),
       switchLabel: osBucket.switchButtonLabel || osBucket.switchLabel || (os === 'win' ? '切到 macOS 版' : '切到 Windows 版'),
     };
   }

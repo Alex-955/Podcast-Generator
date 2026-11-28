@@ -1,12 +1,13 @@
 {
-  "version": "1.0.1",
+  "version": "1.1.0",
   "releaseDate": "2026-11-28",
   "notes": [
-    "修复豆包火山方舟（/api/v3 等版本化路径）Base URL 被错误拼接 /v1 的问题",
-    "修复 macOS 从「应用程序」启动时误将根目录 / 视为敏感路径导致含斜杠内容被拦截的问题",
-    "同步优化 macOS Gatekeeper 首次打开指引与官网一键复制体验"
+    "新增合集管理与 AI 建议分类，播客库整理更有序",
+    "新增手机同 Wi-Fi 随身听，桌面端生成二维码扫码即听",
+    "新增轻量联网更新提醒，新版本发布一键直达下载",
+    "升级双印章欢迎舞台与路径/凭据安全加固"
   ],
   "downloadPageUrl": "https://podcast.ai955.xyz/#onboarding",
-  "releaseUrl": "https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.0.1",
+  "releaseUrl": "https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.1.0",
   "guideUrl": "https://podcast.ai955.xyz/guide.html"
 }
