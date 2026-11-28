@@ -43,6 +43,28 @@ test('官网更新仅发送固定 GET，清理文本、凭据和多余字段', a
   });
 });
 
+test('两个更新来源的日期、HTML 和 Markdown 文本脱敏本机路径，并保留公开链接', async () => {
+  const date = '<i>2026-11-28</i> 来自/Users/someone/发布/release';
+  const notes = ['<b>位置/Users/someone/secret/path</b>', String.raw`[位置C:\Users\someone\文档\path](https://example.invalid/guide)`,
+    '说明 https://example.invalid/releases/v1.2.0 和 https://example.invalid/测试/v1.2.0/发布',
+    '`/Users/someone/secret/path` 和 `C:\\Users\\someone\\path` 和 "/Users/my name/secret/file" 和 \'C:\\Program Files\\My App\\secret\' 和 保存在/用户/someone/secret',
+    String.raw`file:///Users/someone/secret/path 和 file:///C:/Users/someone/path 和 ~/private/path 和 \\server\share\path`,
+    'https://example.invalid/测试/release/notes?%2FUsers%2Fsomeone%2Fpath=1&file=%2FUsers%2Fsomeone%2Fpath&path=/Users/someone/path 和 https://example.invalid/%2FUsers%2Fsomeone%2Fsecret 和 https://example.invalid/C%3A%5CUsers%5Csecret 和 https://example.invalid/%5C%5Cserver%5Cshare%5Cpath'];
+  for (const source of ['official', 'github']) {
+    const result = await check(url => {
+      if (source === 'official') return { version: '1.2.0', releaseDate: date, notes };
+      if (url === official) return {};
+      return { tag_name: 'v1.2.0', published_at: date, body: notes.join('\n') };
+    });
+    assert.equal(result.source, source);
+    assert.equal(result.latestVersion, '1.2.0');
+    assert.equal(result.releaseDate, '2026-11-28 来自***');
+    assert.deepEqual(result.notes, ['位置***', '位置***', '说明 https://example.invalid/releases/v1.2.0 和 https://example.invalid/测试/v1.2.0/发布',
+      '`***` 和 `***` 和 "***" 和 \'***\' 和 保存在***', '*** 和 *** 和 *** 和 ***',
+      'https://example.invalid/测试/release/notes?***=1&file=***&path=*** 和 *** 和 *** 和 ***']);
+  }
+});
+
 test('版本按核心数字、预发布标识符和稳定版排序，忽略构建标识', async () => {
   for (const [local, remote, hasUpdate] of [
     ['1.2.0', 'v1.10.0', true], ['2.0.0', '1.99.99', false],
@@ -108,6 +130,21 @@ test('所有外部跳转均受协议、来源和仓库路径限制', async () =>
   const result = await check(() => ({ version: '1.1.0', downloadPageUrl: repo, releaseUrl: repo + '/tags' }));
   assert.equal(result.downloadPageUrl, repo);
   assert.equal(result.releaseUrl, repo + '/tags');
+});
+
+test('官网和 GitHub 的跳转链接遇到查询参数、编码路径或敏感片段时回退', async () => {
+  for (const suffix of ['?token=secret', '?apiKey=sk-123', '?lang=zh', '#sk-secret', '#/Users/someone/path',
+    '/%2FUsers%2Fsomeone%2Fsecret', '/sk%2Dsecret123', '#%2FUsers%2Fsomeone%2Fpath', '#sk%2Dsecret123']) {
+    const download = 'https://podcast.ai955.xyz/download' + suffix;
+    const release = 'https://github.com/Alex-955/Podcast-Generator/releases/tag/v1.2.0' + suffix;
+    const manifest = await check(() => ({ version: '1.2.0', downloadPageUrl: download, releaseUrl: release }));
+    assert.equal(manifest.source, 'official');
+    assert.equal(manifest.downloadPageUrl, downloadPageUrl, suffix);
+    assert.equal(manifest.releaseUrl, releaseUrl, suffix);
+    const backup = await check(url => url === official ? {} : { tag_name: 'v1.2.0', html_url: release });
+    assert.equal(backup.source, 'github');
+    assert.equal(backup.releaseUrl, releaseUrl, suffix);
+  }
 });
 
 test('成功缓存六小时，强制检查间隔十秒，均从获取完成时起算', async () => {

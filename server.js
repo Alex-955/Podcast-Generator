@@ -87,7 +87,8 @@ function createApp({ desktopSessionToken, ...options } = {}, ownerToken) {
   });
   const lanCompanion = options.lanCompanion || createLanCompanion({
     manager: taskManager || companionCatalog, collectionStore, publicDir, podcastsDir,
-    getLanInterfaces: options.getLanInterfaces, sensitive: [desktopSessionToken, adminToken, dataDir, podcastsDir],
+    getLanInterfaces: options.getLanInterfaces,
+    sensitive: [desktopSessionToken, adminToken, dataDir, podcastsDir],
   });
   appStartup.set(app, { dataDir, initializeManager });
   const requests = new Set();

@@ -4,7 +4,7 @@ const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
-const { isIPv4 } = require('node:net');
+const { isIPv4, isIPv6, SocketAddress } = require('node:net');
 const { randomBytes, createHash, createHmac, timingSafeEqual } = require('node:crypto');
 const { Readable, pipeline } = require('node:stream');
 const { promisify } = require('node:util');
@@ -19,7 +19,7 @@ function discoverLanCandidates(interfaces = os.networkInterfaces()) {
   const ranks = [];
   for (const [interfaceName, entries] of Object.entries(interfaces)) {
     for (const { address, family, internal } of entries || []) {
-      if (internal || !['IPv4', 4].includes(family) || !isIPv4(address)) continue;
+      if (internal || !['IPv4', 4].includes(family) || !isIPv4(address) || address === '0.0.0.0') continue;
       const [a, b] = address.split('.').map(Number);
       let rank = 3;
       if (a === 192 && b === 168) rank = 0;
@@ -131,8 +131,25 @@ function serveAudio(req, res, readPodcast, podcastsDir, sensitive) {
   if (!fs.lstatSync(dir).isDirectory()) return res.sendStatus(404);
   const realDir = fs.realpathSync(dir);
   if (path.dirname(realDir) !== root) return res.sendStatus(404);
+
+  let podcast;
+  try {
+    podcast = readPodcast(id);
+  } catch (error) {
+    if (error.code === 'PODCAST_RECOVERY_FAILED') return res.sendStatus(404);
+    throw error;
+  }
+  if (!podcast) return res.sendStatus(404);
+  // name is already a safe basename. Compare it verbatim so foreign URLs,
+  // nested paths and encoded separators cannot authorize a different file.
+  const mediaPath = `/podcasts/${id}/${name}`;
+  const matchesUrl = url => typeof url === 'string' && url.split(/[?#]/, 1)[0] === mediaPath;
+  if (name !== 'full_podcast.mp3' && !matchesUrl(podcast.fullAudioUrl) &&
+      !podcast.sentences?.some(sentence => sentence?.fileName === name || matchesUrl(sentence?.audioUrl))) {
+    return res.sendStatus(404);
+  }
   const file = fs.realpathSync(path.join(realDir, name));
-  if (path.dirname(file) !== realDir || path.extname(file) !== '.mp3') return res.sendStatus(404);
+  if (file !== path.join(realDir, name)) return res.sendStatus(404);
 
   const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
   let stream;
@@ -145,8 +162,7 @@ function serveAudio(req, res, readPodcast, podcastsDir, sensitive) {
     const ranges = partial ? byteRanges(req.headers.range, size) : [{ start: 0, end: size - 1 }];
     if (!ranges.length) return res.set('Content-Range', 'bytes */' + size).status(416).end();
     if (req.query.download === '1') {
-      let title;
-      try { title = readPodcast(id)?.podcastTitle; } catch {}
+      const title = podcast.podcastTitle;
       res.set('Content-Disposition', attachment(typeof title === 'string' && redactCollectionText(title, sensitive), id));
     }
     if (partial) res.status(206);
@@ -195,7 +211,13 @@ function hasDiskMetadata(podcastsDir, id) {
 }
 
 function createLanCompanion({ manager, getManager = () => manager, collectionStore, publicDir, podcastsDir,
-  getLanInterfaces = os.networkInterfaces, bindHost = '0.0.0.0', sensitive = [] }) {
+  getLanInterfaces = os.networkInterfaces, bindHost, sensitive = [] }) {
+  if (bindHost !== undefined) {
+    const address = isIPv6(bindHost) ? new SocketAddress({ address: bindHost, family: 'ipv6' }).address : bindHost;
+    if ((!isIPv4(bindHost) && !isIPv6(bindHost)) || ['0.0.0.0', '::', '::ffff:0.0.0.0'].includes(address)) {
+      throw new InputError('监听地址必须是具体的 IP 地址');
+    }
+  }
   const catalog = podcastsDir ? createPodcastCatalog({ podcastsDir, collectionStore, extraSecrets: sensitive }) : null;
   function readList() {
     const mgr = getManager();
@@ -218,7 +240,7 @@ function createLanCompanion({ manager, getManager = () => manager, collectionSto
     }
   }
   let current = null;
-  const closing = new Set();
+  let pending = Promise.resolve();
 
   function credentials(state) {
     state.pairToken = randomBytes(32).toString('hex');
@@ -230,7 +252,7 @@ function createLanCompanion({ manager, getManager = () => manager, collectionSto
 
   function status() {
     const hosts = candidates();
-    if (!current?.server.listening) return { running: false, port: null, activeHost: null, candidates: hosts,
+    if (!current?.server?.listening) return { running: false, port: null, activeHost: null, candidates: hosts,
       url: null, qrSvg: null, connectedHint: '' };
     const port = current.server.address().port;
     const url = `http://${current.host}:${port}/listen?t=${current.pairToken}`;
@@ -324,17 +346,7 @@ function createLanCompanion({ manager, getManager = () => manager, collectionSto
     return app;
   }
 
-  async function start({ host, port = 0 } = {}) {
-    if (current) {
-      const state = current;
-      if (host !== undefined) state.host = chooseHost(host);
-      await state.ready;
-      if (current !== state) throw notRunning();
-      return status();
-    }
-    if (!Number.isInteger(port) || port < 0 || port > 65535) throw new InputError('端口无效');
-    const state = { host: chooseHost(host), connectSockets: new Set() };
-    credentials(state);
+  function createCompanionServer(state) {
     const server = http.createServer(companionApp(state));
     // Node dispatches CONNECT outside the ordinary request listener.
     server.on('connect', (req, socket) => {
@@ -348,54 +360,113 @@ function createLanCompanion({ manager, getManager = () => manager, collectionSto
       res.writeHead(405, { ...HEADERS, Allow: 'GET, HEAD', Connection: 'close', 'Content-Length': 0 });
       res.end();
     });
-    state.server = server;
-    current = state;
-    state.ready = new Promise((resolve, reject) => {
+    return server;
+  }
+
+  async function bind(state, host, port) {
+    const server = createCompanionServer(state);
+    await new Promise((resolve, reject) => {
       server.once('error', reject);
-      server.listen(port, bindHost, resolve);
+      server.listen(port, bindHost ?? host, () => {
+        server.removeListener('error', reject);
+        resolve();
+      });
     });
+    state.server = server;
+    state.host = host;
+  }
+
+  async function closeServer(state) {
+    const server = state.server;
+    if (!server?.listening) return;
+    await new Promise(resolve => {
+      server.close(resolve);
+      for (const socket of state.connectSockets) socket.destroy();
+      server.closeAllConnections();
+    });
+  }
+
+  function revoke(state) {
+    if (current === state) current = null;
+    state.pairToken = state.qrSvg = state.url = null;
+    state.sessionSecret.fill(0);
+  }
+
+  function enqueue(action) {
+    const result = pending.then(action);
+    pending = result.catch(() => {});
+    return result;
+  }
+
+  // Keep listener changes ordered, while letting stop revoke a session immediately.
+  function whileCurrent(state, action) {
+    return enqueue(async () => {
+      if (!state || current !== state) throw notRunning();
+      await action();
+      if (current !== state) throw notRunning();
+      return status();
+    });
+  }
+
+  async function rebind(state, nextHost) {
+    const host = chooseHost(nextHost);
+    const prevHost = state.host;
+    if (host === prevHost) return;
+    const port = state.server.address().port;
+    await closeServer(state);
+    if (current !== state) throw notRunning();
     try {
-      await state.ready;
+      await bind(state, host, port);
     } catch (error) {
-      if (current === state) current = null;
+      if (current === state) {
+        try { await bind(state, prevHost, port); }
+        catch { revoke(state); }
+      }
       throw error;
     }
-    if (current !== state) throw notRunning();
-    return status();
+  }
+
+  async function start({ host, port = 0 } = {}) {
+    if (current) {
+      const state = current;
+      return whileCurrent(state, () => {
+        if (host !== undefined) return rebind(state, host);
+      });
+    }
+    if (!Number.isInteger(port) || port < 0 || port > 65535) throw new InputError('端口无效');
+    const state = { host: chooseHost(host), connectSockets: new Set() };
+    credentials(state);
+    current = state;
+    return whileCurrent(state, async () => {
+      try { await bind(state, state.host, port); }
+      catch (error) { revoke(state); throw error; }
+    });
   }
 
   function stop() {
     const state = current;
-    current = null;
-    if (state) {
-      state.pairToken = state.qrSvg = state.url = null;
-      state.sessionSecret.fill(0);
-      const close = () => new Promise(resolve => {
-        server.close(resolve);
-        for (const socket of state.connectSockets) socket.destroy();
-        server.closeAllConnections();
-      });
-      const server = state.server;
-      const closed = server.listening ? close() : state.ready.then(close, () => {});
-      closing.add(closed);
-      closed.then(() => closing.delete(closed));
-    }
-    const stopped = status();
-    return Promise.all(closing).then(() => stopped);
+    if (state) revoke(state);
+    return enqueue(async () => {
+      if (state) await closeServer(state);
+      return status();
+    });
   }
 
   function rotate() {
-    if (!current?.server.listening) throw notRunning();
-    credentials(current);
-    current.server.closeAllConnections();
-    return status();
+    const state = current;
+    return whileCurrent(state, () => {
+      state.sessionSecret.fill(0);
+      credentials(state);
+      state.server.closeAllConnections();
+    });
   }
 
   function selectHost(host) {
-    if (!current?.server.listening) throw notRunning();
-    if (host === undefined) throw new InputError('请选择网卡地址');
-    current.host = chooseHost(host);
-    return status();
+    const state = current;
+    return whileCurrent(state, () => {
+      if (host === undefined) throw new InputError('请选择网卡地址');
+      return rebind(state, host);
+    });
   }
 
   return { status, start, stop, rotate, selectHost };

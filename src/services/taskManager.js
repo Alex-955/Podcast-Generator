@@ -13,9 +13,9 @@ const { getTtsProvider, DEFAULT_PROVIDER_ID, resolveSpeechRate } = require('./tt
 const { SPEECH_SPEEDS, normalizeSpeechSpeed } = require('./speechNormalize');
 const { createTtsCache, speechAccountHash } = require('./ttsCache');
 const { concatenateAudioFiles } = require('./audioMerger');
-const { InputError, SAFE_ID, checkId, validateEditedDialogue, validateScriptRequest, filterSensitivePath, redactSecrets, ttsSecrets } = require('./validation');
+const { InputError, MAX_DIALOGUE_LINES, SAFE_ID, checkId, validateEditedDialogue, validateScriptRequest, filterSensitivePath, redactSecrets, ttsSecrets } = require('./validation');
 
-const { isSafeVersion, assertPodcastVersion, publishEditedPodcast, reconcilePendingPublications } = require('./podcastPublication');
+const { isSafeVersion, assertPodcastVersion, publishEditedPodcast, reconcilePendingPublications, verifyOriginals } = require('./podcastPublication');
 
 const SOURCE_TYPES = new Set(['url', 'text', 'image']);
 const STAGES = {
@@ -64,10 +64,38 @@ function hasPreparedTransaction(dir) {
     fs.lstatSync(path.join(dir, entry.name, 'prepared'), { throwIfNoEntry: false }) !== undefined);
 }
 
+function publicationsCommitted(dir, current) {
+  const prefix = '.tmp-publish-';
+  try {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.name.startsWith(prefix)) continue;
+      const taskId = entry.name.slice(prefix.length);
+      if (!entry.isDirectory() || !SAFE_ID.test(taskId)) return false;
+      const marker = path.join(dir, entry.name, 'prepared');
+      const stat = fs.lstatSync(marker, { throwIfNoEntry: false });
+      if (!stat) continue;
+      if (!stat.isFile()) return false;
+      const info = JSON.parse(fs.readFileSync(marker, 'utf8'));
+      verifyOriginals(path.join(dir, entry.name, 'originals'), info?.originals);
+      if (info?.taskId !== taskId || !isSafeVersion(info.targetVersion) ||
+          (info.previousVersion !== null && !isSafeVersion(info.previousVersion))) return false;
+      if (!Number.isSafeInteger(info.dialogueCount) || info.dialogueCount < 1 || info.dialogueCount > MAX_DIALOGUE_LINES) return false;
+      // Metadata is committed last. A later publication also supersedes this marker.
+      if (!isSafeVersion(current) || (current !== info.targetVersion && current === info.previousVersion)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function readPodcastMetadata(dir, resolveTaskStatus, { reconcile = true } = {}) {
   if (!fs.lstatSync(dir, { throwIfNoEntry: false })?.isDirectory()) return;
   const baseMeta = readValidPodcastFiles(dir);
-  if (!reconcile) return baseMeta;
+  if (!reconcile) {
+    if (baseMeta && publicationsCommitted(dir, baseMeta.audioVersion ?? null)) return baseMeta;
+    return;
+  }
   if (!baseMeta && !hasPreparedTransaction(dir)) return;
   reconcilePendingPublications(dir, resolveTaskStatus);
   return readValidPodcastFiles(dir);
@@ -202,7 +230,8 @@ function sanitizeTaskScript(task, sensitive) {
 // Only expose public dialogue fields, including when reading older metadata.
 function publicSentences(id, sentences, sensitive, query = '') {
   return sentences.map(({ index, speaker, text, emotion, startTime, endTime, duration, fileName }) => {
-    const basename = typeof fileName === 'string' && path.basename(fileName);
+    const basename = typeof fileName === 'string' && /^[a-zA-Z0-9_.-]+\.mp3$/.test(fileName) && !fileName.startsWith('.')
+      ? fileName : null;
     return {
       index: finiteNumber(index), speaker: redactScriptField(speaker, sensitive), text: redactScriptField(text, sensitive),
       emotion: redactScriptField(emotion, sensitive), startTime: finiteNumber(startTime),

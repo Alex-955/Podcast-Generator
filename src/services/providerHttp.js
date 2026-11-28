@@ -122,12 +122,18 @@ function checkChatCompletion(data, action) {
   if (reason === 'content_filter') throw upstreamError(`${action}结果因服务商内容过滤而中断，请检查材料后重试`, false);
 }
 
+// Match a public URL before its non-ASCII path segments can be mistaken for local paths.
+// Stop at the query so local paths in parameter values are still redacted.
+const providerPaths = new RegExp([
+  /(https?:\/\/[^\s"'`<>),\]，。）】》」』；、?]+)/.source,
+  /(['"`])(?:file:(?:\/\/)?\/?|~[\\/]|\\\\|\/[^/\r\n"'`<>]+\/|[a-z]:(?!\/\/)[\\/])[^"'`\r\n<>]*\2/.source,
+  /\bfile:(?:\/\/)?\/?[^\s"'`<>),\]，。）】》」』；、]+/.source,
+  /(^|[\s"'`=(\[:]|[^\x00-\x7f])(?:~[\\/]|\\\\|\/[^/\s"'`<>),\]，。）】》」』；、?]+\/|[a-z]:(?!\/\/)[\\/])[^\s"'`<>),\]，。）】》」』；、]*/.source,
+].join('|'), 'giu');
+
 function redactProviderDetail(text, sensitive) {
-  // Non-ASCII characters also delimit paths in prose without spaces, such as Chinese.
-  return redactSecrets(text, sensitive).replace(
-    /(^|[\s"'=(\[:]|[^\x00-\x7f])(?:\/[\w.~@%+-]+\/[^\s"'<>),\]，。）】》」』；、]*|[a-z]:(?!\/\/)[\\/][^\s"'<>),\]，。）】》」』；、]+)/giu,
-    '$1***'
-  );
+  return redactSecrets(text, sensitive).replace(providerPaths,
+    (match, publicUrl, quote, boundary) => publicUrl ?? (quote ? `${quote}***${quote}` : (boundary ?? '') + '***'));
 }
 
 async function withProviderResponse(endpoint, request, {

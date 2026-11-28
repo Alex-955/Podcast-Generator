@@ -191,4 +191,4 @@ function publishEditedPodcast(target, work, baseVersion, meta, taskId, finish, r
   }
 }
 
-module.exports = { isSafeVersion, assertPodcastVersion, publishEditedPodcast, reconcilePendingPublications };
+module.exports = { isSafeVersion, assertPodcastVersion, publishEditedPodcast, reconcilePendingPublications, verifyOriginals };
