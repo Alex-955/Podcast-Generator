@@ -20,7 +20,7 @@ const SOURCE_FILES = Object.freeze([
   'src/services/podcastPublication.js', 'src/services/providerHttp.js', 'src/services/scriptEngine.js',
   'src/services/speechNormalize.js', 'src/services/styleRecommender.js', 'src/services/taskManager.js',
   'src/services/textPolisher.js', 'src/services/ttsCache.js', 'src/services/ttsCredentials.js',
-  'src/services/ttsProvider.js', 'src/services/ttsService.js', 'src/services/validation.js',
+  'src/services/ttsProvider.js', 'src/services/ttsService.js', 'src/services/updateChecker.js', 'src/services/validation.js',
   'src/services/volcengineTtsProvider.js',
 ]);
 const PUBLIC_FILES = ['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js', 'mobile.html', 'mobile.css', 'mobile.js', 'icon.png'].map(file => 'public/' + file);

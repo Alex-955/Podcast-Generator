@@ -22,6 +22,7 @@ const { suggestCollection } = require('./src/services/collectionSuggester');
 const { llmSecrets } = require('./src/services/llmCredentials');
 const { createTaskManager, createPodcastCatalog } = require('./src/services/taskManager');
 const { checkId, InputError, ttsSecrets } = require('./src/services/validation');
+const { createUpdateChecker, offlineResult } = require('./src/services/updateChecker');
 const { redactProviderDetail } = require('./src/services/providerHttp');
 
 const { getPublicTtsProviders, resolveDefaultProviderId } = require('./src/services/ttsProvider');
@@ -70,6 +71,7 @@ function createApp({ desktopSessionToken, ...options } = {}, ownerToken) {
   const publicDir = path.resolve(options.publicDir || PUBLIC_DIR);
   const dataDir = resolveDataDir(options.dataDir);
   const podcastsDir = path.resolve(options.podcastsDir || process.env.PODCASTS_DIR || path.join(publicDir, 'podcasts'));
+  const updateChecker = options.updateChecker || createUpdateChecker({ fetcher: options.updateFetcher });
   const extractor = options.extractor || extractArticle;
   const { taskManager } = options;
   const collectionStore = options.collectionStore || createCollectionStore({ dataDir, podcastsDir, adminToken, desktopSessionToken });
@@ -156,6 +158,18 @@ function createApp({ desktopSessionToken, ...options } = {}, ownerToken) {
   }
   app.use('/api', checkAvailable);
   if (origins?.length) app.options(/^\/api\//, withManagerAccess, (req, res) => res.sendStatus(204));
+  app.get('/api/update-check', async (req, res) => {
+    const force = req.query?.force === '1' || req.query?.force === 'true';
+    let data;
+    try {
+      data = typeof updateChecker === 'function'
+        ? await updateChecker({ force })
+        : await updateChecker.checkForUpdates({ force });
+    } catch {
+      data = offlineResult();
+    }
+    res.set('Cache-Control', 'no-store').json({ success: true, data });
+  });
   const cancelOnDisconnect = handler => async (req, res) => {
     if (res.destroyed) return;
     if (shutdown) return unavailable(req, res);

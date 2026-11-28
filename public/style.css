@@ -262,6 +262,42 @@ button {
   border-color: rgba(27, 94, 66, 0.28);
 }
 
+/* 顶栏轻量更新提醒徽标（克制暖纸风） */
+.btn-update-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 5px 11px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-surface);
+  border: 1px solid rgba(176, 62, 36, 0.28);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+  transition: transform 180ms var(--ease-snap), background-color 180ms ease, border-color 180ms ease;
+}
+
+.btn-update-badge:hover {
+  background: #FFFFFF;
+  border-color: rgba(176, 62, 36, 0.5);
+  transform: translateY(-1px);
+}
+
+.btn-update-badge:active {
+  transform: scale(0.97);
+}
+
+.update-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  flex-shrink: 0;
+}
+
 /* 主工作区网格 */
 .workspace {
   max-width: 1440px;
@@ -3926,5 +3962,387 @@ button {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .wl-float,
+  .wl-bar {
+    animation: none;
+  }
+}
+
+/* ===== v1.1.0：方案 B 双印章欢迎空状态 + 设置聚焦光晕 + 更新弹窗 ===== */
+.listening-stage:has(.subtitles-empty.is-welcome) .player-deck,
+.listening-stage:has(.subtitles-empty.is-welcome) .transcript-header {
+  display: none;
+}
+
+.listening-stage:has(.subtitles-empty.is-welcome) .transcript-area {
+  justify-content: center;
+}
+
+.listening-stage:has(.subtitles-empty.is-welcome) .subtitles-list {
+  padding: 0 28px;
+}
+
+/* 右栏显示欢迎空状态时，自动隐藏左栏重复的内置试听示例胶囊 */
+.workspace:has(.subtitles-empty.is-welcome) .samples-block {
+  display: none;
+}
+
+.subtitles-empty.is-welcome {
+  max-width: 600px;
+  width: 100%;
+  padding: 24px 8px 40px;
+  gap: 0;
+  color: var(--ink-primary);
+}
+
+.wl-art {
+  width: min(380px, 84%);
+  height: auto;
+  margin-bottom: 8px;
+  overflow: visible;
+}
+
+.wl-title {
+  margin: 10px 0 8px;
+  font-family: var(--font-serif);
+  font-size: clamp(1.5rem, 2.4vw, 1.9rem);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: var(--ink-primary);
+}
+
+.subtitles-empty.is-welcome .wl-sub {
+  font-size: 15px;
+  color: var(--ink-secondary);
+}
+
+.wl-host {
+  color: var(--host);
+}
+
+.wl-guest {
+  color: var(--guest);
+}
+
+.wl-steps {
+  list-style: none;
+  margin: 20px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 18px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.wl-steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.wl-steps i {
+  font-style: normal;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  background: var(--bg-subtle);
+  color: var(--ink-secondary);
+}
+
+.wl-samples-head {
+  margin: 30px 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+}
+
+.wl-samples {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+
+.wl-sample {
+  position: relative;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 13px 14px 14px;
+  background: #FFFFFF;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(26, 25, 22, 0.04);
+  transition: transform 180ms var(--ease-snap), box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.wl-sample:hover {
+  transform: translateY(-2px);
+  border-color: rgba(176, 62, 36, 0.4);
+  box-shadow: 0 14px 24px -16px rgba(26, 25, 22, 0.35);
+}
+
+.wl-sample:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.wl-sample:focus-visible {
+  outline: none;
+  border-color: rgba(176, 62, 36, 0.55);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.wl-sample-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.wl-sample-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink-primary);
+  line-height: 1.35;
+  padding-right: 18px;
+}
+
+.wl-sample-go {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  color: var(--ink-muted);
+  transition: transform 180ms var(--ease-snap), color 180ms ease;
+}
+
+.wl-sample:hover .wl-sample-go {
+  transform: translateX(3px);
+  color: var(--accent);
+}
+
+.wl-float {
+  animation: wlFloat 5.5s ease-in-out infinite alternate;
+}
+
+.wl-float-2 {
+  animation-delay: -2.7s;
+}
+
+@keyframes wlFloat {
+  from { transform: translateY(-3px); }
+  to { transform: translateY(3px); }
+}
+
+.wl-bar {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scaleY(var(--s, 0.6));
+  animation: wlBar 1.2s ease-in-out var(--d, 0ms) infinite alternate;
+}
+
+@keyframes wlBar {
+  from { transform: scaleY(0.35); }
+  to { transform: scaleY(1); }
+}
+
+/* 设置弹窗输入框：聚焦改为淡朱砂边框 + 柔和光晕 */
+.modal-sheet .field-input:focus,
+.modal-sheet .field-textarea:focus,
+.modal-sheet .field-select:focus,
+.modal-sheet input:not([type="checkbox"]):not([type="radio"]):focus,
+.modal-sheet textarea:focus,
+.modal-sheet select:focus {
+  outline: none;
+  border-color: rgba(176, 62, 36, 0.55);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* 设置弹窗底部轻量版本与更新行 */
+.settings-version-bar {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-version-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.settings-version-label {
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+}
+
+.settings-version-label strong {
+  color: var(--ink-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.version-auto-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.version-auto-check input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.settings-version-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.version-check-status {
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+  line-height: 1.45;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.version-check-status.is-ok {
+  color: var(--ok);
+  font-weight: 500;
+}
+
+.version-check-status.is-update {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.version-check-status.is-offline {
+  color: var(--ink-muted);
+}
+
+.version-inline-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* 版本更新详情轻弹窗 */
+.update-modal-sheet {
+  max-width: 440px;
+}
+
+.update-modal-scroll {
+  padding-top: 8px;
+  gap: 14px;
+}
+
+.update-version-compare {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.update-version-arrow {
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+
+.meta-pill.is-update-target {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.update-release-date {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.update-notes-card {
+  border-radius: var(--radius-md);
+  background: var(--bg-canvas);
+  border: 1px solid var(--hairline);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.update-notes-heading {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.update-notes-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-primary);
+}
+
+.update-links-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.update-modal-foot {
+  justify-content: space-between;
+}
+
+@media (max-width: 900px) {
+  .listening-stage:has(.subtitles-empty.is-welcome) .subtitles-list {
+    padding: 0 16px 28px;
+  }
+
+  .wl-samples {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .btn-update-badge {
+    padding: 4px 8px;
+    font-size: 11.5px;
+    gap: 5px;
   }
 }

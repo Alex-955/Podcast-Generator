@@ -24,7 +24,18 @@
     ttsConfig: 'ai_podcast_tts_config',
     podcastStyle: 'ai_podcast_script_style',
     activeTaskId: 'ai_podcast_active_task_id',
+    autoCheckUpdates: 'ai_podcast_auto_check_updates',
+    ignoredUpdateVersion: 'ai_podcast_ignored_update_version',
   };
+
+  const DEFAULT_APP_VERSION = '1.1.0';
+  const OFFICIAL_DOWNLOAD_URL = 'https://podcast.ai955.xyz/#onboarding';
+  const OFFICIAL_RELEASE_URL = 'https://github.com/Alex-955/Podcast-Generator/releases/latest';
+  const WELCOME_SAMPLE_META = [
+    { key: 'ai', tag: '技术长文', label: 'AI 智能体工作流' },
+    { key: 'deepseek', tag: '深度拆解', label: 'DeepSeek 技术剖析' },
+    { key: 'work', tag: '生活方式', label: '数字游民的自律' },
+  ];
 
   const PODCAST_STYLE_DESCS = {
     deep_dive: '7:3 主讲拆解 + 主持追问 · 沉浸式深度拆解',
@@ -321,6 +332,13 @@
       connectedHint: '',
       busy: false,
     },
+    updateCheck: {
+      currentVersion: DEFAULT_APP_VERSION,
+      checking: false,
+      result: null,
+      startupTimer: null,
+      lastTriggerEl: null,
+    },
     pendingDeleteId: null,
     deletingPodcastId: null,
     historySelectSeq: 0,
@@ -349,6 +367,8 @@
   };
 
   const dom = {
+    btnUpdateBadge: document.getElementById('btnUpdateBadge'),
+    updateBadgeText: document.getElementById('updateBadgeText'),
     btnLanCompanion: document.getElementById('btnLanCompanion'),
     lanCompanionStatusDot: document.getElementById('lanCompanionStatusDot'),
     btnSettings: document.getElementById('btnSettings'),
@@ -551,6 +571,20 @@
     lanCompanionHostSelect: document.getElementById('lanCompanionHostSelect'),
     btnRotateLanCompanion: document.getElementById('btnRotateLanCompanion'),
     btnStopLanCompanion: document.getElementById('btnStopLanCompanion'),
+    settingsCurrentVersion: document.getElementById('settingsCurrentVersion'),
+    settingAutoCheckUpdates: document.getElementById('settingAutoCheckUpdates'),
+    btnCheckUpdatesNow: document.getElementById('btnCheckUpdatesNow'),
+    updateCheckInlineStatus: document.getElementById('updateCheckInlineStatus'),
+    updateModal: document.getElementById('updateModal'),
+    btnCloseUpdateModal: document.getElementById('btnCloseUpdateModal'),
+    updateCurrentVersionBadge: document.getElementById('updateCurrentVersionBadge'),
+    updateLatestVersionBadge: document.getElementById('updateLatestVersionBadge'),
+    updateReleaseDate: document.getElementById('updateReleaseDate'),
+    updateNotesList: document.getElementById('updateNotesList'),
+    btnUpdateDownloadOfficial: document.getElementById('btnUpdateDownloadOfficial'),
+    btnUpdateGithubRelease: document.getElementById('btnUpdateGithubRelease'),
+    btnIgnoreUpdateVersion: document.getElementById('btnIgnoreUpdateVersion'),
+    btnDismissUpdateModal: document.getElementById('btnDismissUpdateModal'),
     currentPodcastTitle: document.getElementById('currentPodcastTitle'),
     currentPodcastSummary: document.getElementById('currentPodcastSummary'),
     currentTime: document.getElementById('currentTime'),
@@ -2288,6 +2322,140 @@
     dom.currentPodcastBadges.classList.toggle('hidden', pills.length === 0);
   }
 
+  function svgEl(tag, attrs = {}, children = []) {
+    const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    Object.entries(attrs).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) node.setAttribute(k, String(v));
+    });
+    children.forEach((child) => {
+      if (typeof child === 'string') node.appendChild(document.createTextNode(child));
+      else if (child) node.appendChild(child);
+    });
+    return node;
+  }
+
+  function loadSampleDraft(sampleKey) {
+    const sample = SAMPLES[sampleKey];
+    if (!sample) return;
+    switchTab('text');
+    dom.inputTitle.value = sample.title;
+    dom.inputText.value = sample.content;
+    updateTextCounter();
+    confirmTextDraft();
+  }
+
+  function createWelcomeArtSvg() {
+    const bars = [14, 26, 18, 40, 52, 30, 20, 44, 56, 34, 22, 46, 38, 26, 50, 32, 18];
+    const barNodes = bars.map((h, i) => svgEl('rect', {
+      class: 'wl-bar',
+      style: `--d:${(i * 90) % 700}ms;--s:${(0.35 + (h / 56) * 0.65).toFixed(2)}`,
+      x: 82 + i * 12,
+      y: 212 - h / 2,
+      width: 6,
+      height: h,
+      rx: 3,
+      fill: i < 8 ? '#1C5A73' : '#B03E24',
+    }));
+
+    return svgEl('svg', {
+      class: 'wl-art wl-art-geo',
+      viewBox: '0 0 360 240',
+      'aria-hidden': 'true',
+    }, [
+      svgEl('circle', { cx: 180, cy: 112, r: 104, fill: '#ECE7DC' }),
+      svgEl('circle', { cx: 292, cy: 40, r: 9, fill: '#B03E24', opacity: '.85' }),
+      svgEl('circle', { cx: 62, cy: 168, r: 6, fill: '#1C5A73', opacity: '.85' }),
+      svgEl('rect', {
+        x: 98, y: 36, width: 164, height: 132, rx: 16,
+        fill: '#FDFCF9', stroke: 'rgba(26,25,22,.1)', transform: 'rotate(-7 180 102)',
+      }),
+      svgEl('g', { fill: '#E3DDD0', transform: 'rotate(-7 180 102)' }, [
+        svgEl('rect', { x: 118, y: 56, width: 82, height: 7, rx: 3.5 }),
+        svgEl('rect', { x: 118, y: 72, width: 120, height: 7, rx: 3.5 }),
+        svgEl('rect', { x: 118, y: 88, width: 96, height: 7, rx: 3.5 }),
+      ]),
+      svgEl('g', { class: 'wl-float wl-float-1' }, [
+        svgEl('circle', { cx: 138, cy: 122, r: 46, fill: '#1C5A73' }),
+        svgEl('text', {
+          x: 138, y: 137, 'text-anchor': 'middle', 'font-size': 40, 'font-weight': 700,
+          fill: '#fff', 'font-family': 'Songti SC, Noto Serif SC, Noto Serif CJK SC, serif',
+        }, ['泽']),
+      ]),
+      svgEl('g', { class: 'wl-float wl-float-2' }, [
+        svgEl('circle', { cx: 224, cy: 122, r: 46, fill: '#B03E24', stroke: '#FDFCF9', 'stroke-width': 4 }),
+        svgEl('text', {
+          x: 224, y: 137, 'text-anchor': 'middle', 'font-size': 40, 'font-weight': 700,
+          fill: '#fff', 'font-family': 'Songti SC, Noto Serif SC, Noto Serif CJK SC, serif',
+        }, ['晓']),
+      ]),
+      ...barNodes,
+    ]);
+  }
+
+  function createWelcomeEmptyElement() {
+    const empty = document.createElement('div');
+    empty.className = 'subtitles-empty is-welcome';
+
+    const title = document.createElement('h2');
+    title.className = 'wl-title';
+    title.textContent = '粘贴一篇文章，生成你的第一期';
+
+    const sub = document.createElement('p');
+    sub.className = 'wl-sub';
+    sub.append('几分钟，在本机变成');
+    const host = document.createElement('b');
+    host.className = 'wl-host';
+    host.textContent = '阿泽';
+    const guest = document.createElement('b');
+    guest.className = 'wl-guest';
+    guest.textContent = '小晓';
+    sub.append(host, ' × ', guest, '的双人对话播客');
+
+    const steps = document.createElement('ol');
+    steps.className = 'wl-steps';
+    ['粘贴链接或正文', '选择对话风格', '生成并收听'].forEach((label, idx) => {
+      const li = document.createElement('li');
+      const num = document.createElement('i');
+      num.textContent = String(idx + 1);
+      li.append(num, label);
+      steps.appendChild(li);
+    });
+
+    const samplesHead = document.createElement('div');
+    samplesHead.className = 'wl-samples-head';
+    samplesHead.textContent = '或者先试试内置示例';
+
+    const samplesGrid = document.createElement('div');
+    samplesGrid.className = 'wl-samples';
+    WELCOME_SAMPLE_META.forEach((item) => {
+      if (!SAMPLES[item.key]) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'wl-sample';
+      btn.dataset.sample = item.key;
+
+      const tag = document.createElement('span');
+      tag.className = 'wl-sample-tag';
+      tag.textContent = item.tag;
+
+      const name = document.createElement('span');
+      name.className = 'wl-sample-name';
+      name.textContent = item.label;
+
+      const go = document.createElement('span');
+      go.className = 'wl-sample-go';
+      go.setAttribute('aria-hidden', 'true');
+      go.textContent = '→';
+
+      btn.append(tag, name, go);
+      btn.addEventListener('click', () => loadSampleDraft(item.key));
+      samplesGrid.appendChild(btn);
+    });
+
+    empty.append(createWelcomeArtSvg(), title, sub, steps, samplesHead, samplesGrid);
+    return empty;
+  }
+
   function resetPlayerToEmptyState() {
     exitScriptEditMode({ rerender: false });
     cancelScheduledSubtitleScroll();
@@ -2335,12 +2503,7 @@
 
     dom.subtitlesList.textContent = '';
     state.subtitleElements = [];
-    const empty = document.createElement('div');
-    empty.className = 'subtitles-empty';
-    const p = document.createElement('p');
-    p.textContent = '还没有已选播客，从左侧导入一篇文章即可生成双人对话播客。';
-    empty.appendChild(p);
-    dom.subtitlesList.appendChild(empty);
+    dom.subtitlesList.appendChild(createWelcomeEmptyElement());
   }
 
   function createDeleteIconSvg() {
@@ -4098,6 +4261,10 @@
     selectTtsProviderInModal(resolveEffectiveTtsProviderId());
     state.modalTtsSpeedChanged = false;
     selectTtsSpeedInModal(state.ttsConfig.speechSpeed || 'relaxed');
+    if (dom.settingAutoCheckUpdates) {
+      dom.settingAutoCheckUpdates.checked = isAutoUpdateCheckEnabled();
+    }
+    renderSettingsVersionBar();
 
     dom.settingsModal.classList.remove('hidden');
     switchSettingsTab(initialTab === 'tts' ? 'tts' : 'llm', { immediateIndicator: true });
@@ -4844,6 +5011,195 @@
     dom.btnLanCompanion?.focus();
   }
 
+  function isAutoUpdateCheckEnabled() {
+    const raw = readStorage(STORAGE_KEYS.autoCheckUpdates);
+    return raw !== '0' && raw !== 'false';
+  }
+
+  function getIgnoredUpdateVersion() {
+    return readStorage(STORAGE_KEYS.ignoredUpdateVersion).trim();
+  }
+
+  function sanitizeOfficialUpdateUrl(rawUrl, fallbackUrl) {
+    if (typeof rawUrl !== 'string' || !rawUrl.trim()) return fallbackUrl;
+    try {
+      const parsed = new URL(rawUrl.trim());
+      if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return fallbackUrl;
+      if (parsed.origin === 'https://podcast.ai955.xyz') return parsed.href;
+      if (parsed.origin === 'https://github.com' && /^\/Alex-955\/Podcast-Generator(?:\/|$)/.test(parsed.pathname)) {
+        return parsed.href;
+      }
+      return fallbackUrl;
+    } catch {
+      return fallbackUrl;
+    }
+  }
+
+  function formatVersionLabel(ver) {
+    const clean = String(ver || '').trim().replace(/^v/i, '');
+    return clean ? `v${clean}` : `v${DEFAULT_APP_VERSION}`;
+  }
+
+  function renderUpdateBadge() {
+    if (!dom.btnUpdateBadge) return;
+    const res = state.updateCheck.result;
+    const ignored = getIgnoredUpdateVersion();
+    const shouldShow = Boolean(
+      res &&
+      res.checked &&
+      res.hasUpdate &&
+      res.latestVersion &&
+      res.latestVersion !== ignored
+    );
+    dom.btnUpdateBadge.classList.toggle('hidden', !shouldShow);
+    if (shouldShow && dom.updateBadgeText) {
+      dom.updateBadgeText.textContent = `发现 ${formatVersionLabel(res.latestVersion)}`;
+    }
+  }
+
+  function renderSettingsVersionBar() {
+    if (dom.settingsCurrentVersion) {
+      dom.settingsCurrentVersion.textContent = formatVersionLabel(state.updateCheck.currentVersion);
+    }
+    if (!dom.updateCheckInlineStatus) return;
+    const statusEl = dom.updateCheckInlineStatus;
+    statusEl.replaceChildren();
+    statusEl.className = 'version-check-status';
+
+    if (state.updateCheck.checking) {
+      statusEl.textContent = '正在检查更新…';
+      return;
+    }
+
+    const res = state.updateCheck.result;
+    if (!res) return;
+
+    if (res.offline || !res.checked) {
+      statusEl.classList.add('is-offline');
+      statusEl.textContent = res.message || '暂无法连接更新服务，请稍后重试';
+      return;
+    }
+
+    if (res.hasUpdate && res.latestVersion) {
+      statusEl.classList.add('is-update');
+      const text = document.createTextNode(`发现 ${formatVersionLabel(res.latestVersion)}`);
+      const detailBtn = document.createElement('button');
+      detailBtn.type = 'button';
+      detailBtn.className = 'version-inline-link';
+      detailBtn.textContent = '查看详情';
+      detailBtn.addEventListener('click', () => {
+        openUpdateModal(detailBtn);
+      });
+      statusEl.append(text, detailBtn);
+      return;
+    }
+
+    statusEl.classList.add('is-ok');
+    statusEl.textContent = `已是最新版（${formatVersionLabel(res.currentVersion || state.updateCheck.currentVersion)}）`;
+  }
+
+  function renderUpdateModal() {
+    const res = state.updateCheck.result;
+    if (!res) return;
+    if (dom.updateCurrentVersionBadge) {
+      dom.updateCurrentVersionBadge.textContent = `当前 ${formatVersionLabel(res.currentVersion || state.updateCheck.currentVersion)}`;
+    }
+    if (dom.updateLatestVersionBadge) {
+      dom.updateLatestVersionBadge.textContent = `最新 ${formatVersionLabel(res.latestVersion)}`;
+    }
+    if (dom.updateReleaseDate) {
+      const dateStr = typeof res.releaseDate === 'string' ? res.releaseDate.trim() : '';
+      dom.updateReleaseDate.textContent = dateStr;
+      dom.updateReleaseDate.classList.toggle('hidden', !dateStr);
+    }
+    if (dom.updateNotesList) {
+      dom.updateNotesList.replaceChildren();
+      const notes = Array.isArray(res.notes) && res.notes.length > 0
+        ? res.notes
+        : ['包含体验优化与稳定性修复，欢迎前往官网或 GitHub Release 查看详情。'];
+      notes.forEach((line) => {
+        const li = document.createElement('li');
+        li.textContent = String(line);
+        dom.updateNotesList.appendChild(li);
+      });
+    }
+    if (dom.btnUpdateDownloadOfficial) {
+      dom.btnUpdateDownloadOfficial.href = sanitizeOfficialUpdateUrl(res.downloadPageUrl, OFFICIAL_DOWNLOAD_URL);
+    }
+    if (dom.btnUpdateGithubRelease) {
+      dom.btnUpdateGithubRelease.href = sanitizeOfficialUpdateUrl(res.releaseUrl, OFFICIAL_RELEASE_URL);
+    }
+  }
+
+  function openUpdateModal(triggerEl = null) {
+    if (!dom.updateModal || !state.updateCheck.result?.hasUpdate) return;
+    state.updateCheck.lastTriggerEl = triggerEl instanceof HTMLElement
+      ? triggerEl
+      : (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    renderUpdateModal();
+    dom.updateModal.classList.remove('hidden');
+    window.setTimeout(() => {
+      if (dom.updateModal && !dom.updateModal.classList.contains('hidden')) {
+        (dom.btnUpdateDownloadOfficial || dom.btnCloseUpdateModal)?.focus();
+      }
+    }, 20);
+  }
+
+  function closeUpdateModal({ returnFocus = true } = {}) {
+    if (!dom.updateModal) return;
+    dom.updateModal.classList.add('hidden');
+    const triggerEl = state.updateCheck.lastTriggerEl;
+    state.updateCheck.lastTriggerEl = null;
+    if (!returnFocus) return;
+    if (triggerEl && triggerEl.isConnected && !triggerEl.classList.contains('hidden') && !triggerEl.closest('.hidden')) {
+      triggerEl.focus();
+      return;
+    }
+    if (dom.settingsModal && !dom.settingsModal.classList.contains('hidden')) {
+      dom.btnCheckUpdatesNow?.focus();
+      return;
+    }
+    if (dom.btnUpdateBadge && !dom.btnUpdateBadge.classList.contains('hidden')) {
+      dom.btnUpdateBadge.focus();
+    }
+  }
+
+  async function checkForUpdates({ force = false, silent = true } = {}) {
+    if (state.updateCheck.checking) return;
+    state.updateCheck.checking = true;
+    if (dom.btnCheckUpdatesNow) dom.btnCheckUpdatesNow.disabled = true;
+    if (!silent) renderSettingsVersionBar();
+
+    try {
+      const url = force ? '/api/update-check?force=1' : '/api/update-check';
+      const data = await apiJson(url);
+      if (data?.currentVersion) {
+        state.updateCheck.currentVersion = data.currentVersion;
+      }
+      state.updateCheck.result = data || null;
+      if (force && data?.hasUpdate && data?.latestVersion && getIgnoredUpdateVersion() === data.latestVersion) {
+        writeStorage(STORAGE_KEYS.ignoredUpdateVersion, '');
+      }
+    } catch {
+      if (!silent) {
+        state.updateCheck.result = {
+          currentVersion: state.updateCheck.currentVersion,
+          checked: false,
+          hasUpdate: false,
+          offline: true,
+          message: '暂无法连接更新服务，请稍后重试',
+        };
+      }
+    } finally {
+      state.updateCheck.checking = false;
+      if (dom.btnCheckUpdatesNow) dom.btnCheckUpdatesNow.disabled = false;
+      renderUpdateBadge();
+      if (!silent || (dom.settingsModal && !dom.settingsModal.classList.contains('hidden'))) {
+        renderSettingsVersionBar();
+      }
+    }
+  }
+
   async function handleStartLanCompanion() {
     if (state.lanCompanion.busy) return;
     state.lanCompanion.busy = true;
@@ -5066,15 +5422,7 @@
     });
 
     dom.samplePills.forEach((pill) => {
-      pill.addEventListener('click', () => {
-        const sample = SAMPLES[pill.dataset.sample];
-        if (!sample) return;
-        switchTab('text');
-        dom.inputTitle.value = sample.title;
-        dom.inputText.value = sample.content;
-        updateTextCounter();
-        confirmTextDraft();
-      });
+      pill.addEventListener('click', () => loadSampleDraft(pill.dataset.sample));
     });
 
     dom.btnToggleFullPreview.addEventListener('click', () => {
@@ -5351,6 +5699,10 @@
         window.clearInterval(state.polishTimer);
         state.polishTimer = null;
       }
+      if (state.updateCheck.startupTimer) {
+        window.clearTimeout(state.updateCheck.startupTimer);
+        state.updateCheck.startupTimer = null;
+      }
       state.extractAbortController?.abort();
       state.styleRecommendAbortController?.abort();
       state.polishAbortController?.abort();
@@ -5373,6 +5725,41 @@
     });
 
     dom.btnSettings.addEventListener('click', () => openSettingsModal('llm'));
+    if (dom.btnUpdateBadge) dom.btnUpdateBadge.addEventListener('click', () => openUpdateModal(dom.btnUpdateBadge));
+    if (dom.btnCloseUpdateModal) dom.btnCloseUpdateModal.addEventListener('click', () => closeUpdateModal());
+    if (dom.btnDismissUpdateModal) dom.btnDismissUpdateModal.addEventListener('click', () => closeUpdateModal());
+    if (dom.btnIgnoreUpdateVersion) {
+      dom.btnIgnoreUpdateVersion.addEventListener('click', () => {
+        const latest = state.updateCheck.result?.latestVersion;
+        if (latest) {
+          writeStorage(STORAGE_KEYS.ignoredUpdateVersion, latest);
+        }
+        renderUpdateBadge();
+        const openedFromSettings = Boolean(dom.settingsModal && !dom.settingsModal.classList.contains('hidden'));
+        closeUpdateModal({ returnFocus: openedFromSettings });
+        showToast(latest ? `已忽略 ${formatVersionLabel(latest)} 更新提醒` : '已忽略当前版本提醒');
+      });
+    }
+    if (dom.updateModal) {
+      dom.updateModal.addEventListener('click', (e) => {
+        if (e.target === dom.updateModal) closeUpdateModal();
+      });
+    }
+    if (dom.settingAutoCheckUpdates) {
+      dom.settingAutoCheckUpdates.addEventListener('change', () => {
+        const enabled = Boolean(dom.settingAutoCheckUpdates.checked);
+        writeStorage(STORAGE_KEYS.autoCheckUpdates, enabled ? '1' : '0');
+        if (!enabled && state.updateCheck.startupTimer) {
+          window.clearTimeout(state.updateCheck.startupTimer);
+          state.updateCheck.startupTimer = null;
+        }
+      });
+    }
+    if (dom.btnCheckUpdatesNow) {
+      dom.btnCheckUpdatesNow.addEventListener('click', () => {
+        checkForUpdates({ force: true, silent: false });
+      });
+    }
     if (dom.btnLanCompanion) dom.btnLanCompanion.addEventListener('click', openLanCompanionModal);
     if (dom.btnCloseLanCompanionModal) dom.btnCloseLanCompanionModal.addEventListener('click', closeLanCompanionModal);
     if (dom.lanCompanionModal) {
@@ -5493,7 +5880,9 @@
 
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
-      if (dom.lanCompanionModal && !dom.lanCompanionModal.classList.contains('hidden')) {
+      if (dom.updateModal && !dom.updateModal.classList.contains('hidden')) {
+        closeUpdateModal();
+      } else if (dom.lanCompanionModal && !dom.lanCompanionModal.classList.contains('hidden')) {
         closeLanCompanionModal();
       } else if (dom.collectionModal && !dom.collectionModal.classList.contains('hidden')) {
         closeCollectionModal();
@@ -5662,6 +6051,17 @@
 
     if (!state.currentPodcast && state.historyItems.length > 0) {
       await handleSelectHistory(state.historyItems[0].id);
+    }
+    if (!state.currentPodcast) {
+      resetPlayerToEmptyState();
+    }
+
+    if (isAutoUpdateCheckEnabled()) {
+      state.updateCheck.startupTimer = window.setTimeout(() => {
+        state.updateCheck.startupTimer = null;
+        if (!isAutoUpdateCheckEnabled()) return;
+        checkForUpdates({ force: false, silent: true });
+      }, 1500);
     }
   }
 

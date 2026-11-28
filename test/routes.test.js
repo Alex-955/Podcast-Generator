@@ -89,6 +89,67 @@ async function request(route, status, body, method = body === undefined ? 'GET' 
   return json;
 }
 
+async function updateEndpoint(t, options) {
+  const app = require('../server').createApp({
+    ...options, dataDir: path.join(root, 'update-check'), publicDir,
+  });
+  const listener = app.listen(0, '127.0.0.1');
+  await once(listener, 'listening');
+  t.after(() => new Promise(resolve => listener.close(resolve)));
+  return 'http://127.0.0.1:' + listener.address().port + '/api/update-check';
+}
+
+test('更新路由只解析明确的 force 值，检查器异常时仍返回 HTTP 200', async t => {
+  const calls = [];
+  const endpoint = await updateEndpoint(t, { updateChecker(options) {
+    calls.push(options);
+    throw new Error('private upstream detail');
+  } });
+  for (const [query, force] of [['', false], ['?force=1', true], ['?force=true', true],
+    ['?force=0', false], ['?force=yes', false], ['?force=1&force=true', false]]) {
+    const res = await fetch(endpoint + query);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {
+      success: true, data: {
+        currentVersion: '1.1.0', checked: false, hasUpdate: false, offline: true,
+        message: '暂无法连接更新服务，请稍后重试', downloadPageUrl: 'https://podcast.ai955.xyz/#onboarding',
+        releaseUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/latest', notes: [],
+      },
+    });
+    assert.deepEqual(calls.at(-1), { force });
+  }
+});
+
+test('更新路由使用注入的传输，离线重试可恢复，后续强制请求受节流', async t => {
+  const calls = [];
+  let online = false;
+  const endpoint = await updateEndpoint(t, { updateFetcher(url, options) {
+    calls.push([url, options]);
+    if (!online) throw new Error('DNS failure');
+    return { version: '1.2.0', notes: ['更新说明'] };
+  } });
+  async function query(suffix = '') {
+    const res = await fetch(endpoint + suffix, { headers: { Authorization: 'Bearer private-value' } });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    const { success, data } = await res.json();
+    assert.equal(success, true);
+    return data;
+  }
+  assert.equal((await query()).offline, true);
+  online = true;
+  const result = await query('?podcast=private-value');
+  assert.deepEqual(result, {
+    currentVersion: '1.1.0', latestVersion: '1.2.0', checked: true, hasUpdate: true, offline: false,
+    source: 'official', notes: ['更新说明'], releaseDate: '', checkedAt: new Date(result.checkedAt).toISOString(),
+    downloadPageUrl: 'https://podcast.ai955.xyz/#onboarding',
+    releaseUrl: 'https://github.com/Alex-955/Podcast-Generator/releases/latest',
+  });
+  assert.deepEqual(await query('?force=1'), result);
+  assert.equal(calls.length, 3);
+  assert.equal(JSON.stringify(calls).includes('private-value'), false);
+});
+
 test('监听端口在未设置或空白时取 3456，保留显式的 0 和指定端口', () => {
   const { parsePort } = require('../server');
   for (const value of [undefined, '', '   ']) assert.equal(parsePort(value), 3456);
