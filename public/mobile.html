@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#F5F2EB">
+  <title>拾声集 · 手机随身听</title>
+  <link rel="icon" type="image/png" href="/icon.png">
+  <link rel="stylesheet" href="/mobile.css">
+</head>
+<body>
+  <div id="mApp" class="m-shell">
+    <!-- 顶部单行导航 -->
+    <header class="m-header">
+      <div class="m-brand">
+        <img class="m-brand-mark" src="/icon.png" width="24" height="24" alt="" aria-hidden="true">
+        <span class="m-brand-title">拾声集</span>
+        <span class="m-brand-badge">随身听</span>
+      </div>
+
+      <nav class="m-view-switch" role="tablist" aria-label="视图切换">
+        <button type="button" id="mTabLibrary" class="m-view-tab is-active" role="tab" aria-selected="true" aria-controls="mViewLibrary">节目单</button>
+        <button type="button" id="mTabPlayer" class="m-view-tab" role="tab" aria-selected="false" aria-controls="mViewPlayer">正在听</button>
+      </nav>
+    </header>
+
+    <!-- 视图一：合集筛选 + 播客节目单 -->
+    <main id="mViewLibrary" class="m-main" role="tabpanel" aria-labelledby="mTabLibrary">
+      <section class="m-filter-section" aria-label="按合集筛选">
+        <div id="mCollectionBar" class="m-collection-bar" role="tablist" aria-label="合集列表"></div>
+      </section>
+
+      <section class="m-library-section" aria-label="播客单集列表">
+        <div class="m-section-head">
+          <h1 id="mLibraryHeading" class="m-section-title">全部播客</h1>
+          <span id="mLibraryCount" class="m-section-count">0 期</span>
+        </div>
+        <div id="mEpisodeList" class="m-episode-list" role="list"></div>
+      </section>
+    </main>
+
+    <!-- 视图二：当前播放详情 + 金句 + 同步台词 -->
+    <section id="mViewPlayer" class="m-main m-player-view hidden" role="tabpanel" aria-labelledby="mTabPlayer">
+      <div class="m-detail-bar">
+        <button type="button" id="mBtnBackLibrary" class="m-back-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+          <span>节目单</span>
+        </button>
+
+        <a id="mBtnSaveMp3" class="m-save-btn is-disabled" href="#" download aria-disabled="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span>保存音频</span>
+        </a>
+      </div>
+
+      <article class="m-hero-card">
+        <div id="mDetailBadges" class="m-badges-row"></div>
+        <h2 id="mDetailTitle" class="m-detail-title">选择一期播客开始收听</h2>
+        <p id="mDetailSummary" class="m-detail-summary"></p>
+        <div class="m-detail-hosts">
+          <span class="m-host-chip is-host"><span class="m-dot"></span>阿泽</span>
+          <span class="m-host-chip is-guest"><span class="m-dot"></span>小晓</span>
+          <span id="mDetailMeta" class="m-detail-meta"></span>
+        </div>
+      </article>
+
+      <!-- 金句摘录（如有） -->
+      <section id="mHighlightsCard" class="m-highlights-card hidden" aria-label="本期金句摘录">
+        <div class="m-highlights-head">
+          <h3 id="mHighlightsHeading" class="m-highlights-title">本期金句</h3>
+          <span class="m-highlights-hint">轻触可跳播</span>
+        </div>
+        <ul id="mHighlightsList" class="m-highlights-list"></ul>
+      </section>
+
+      <!-- 同步对话字幕流 -->
+      <section class="m-transcript-section" aria-label="同步对话台词">
+        <div class="m-transcript-head">
+          <h3 class="m-transcript-title">同步对话台词</h3>
+          <span class="m-transcript-hint">点击任意一句跳播</span>
+        </div>
+        <div id="mTranscriptList" class="m-transcript-list"></div>
+      </section>
+    </section>
+
+    <!-- 吸底大号拇指播控台 -->
+    <footer id="mPlayerDock" class="m-dock" data-playing="false" data-speaker="none" aria-label="随身听播控台">
+      <button type="button" id="mDockEpisodeBtn" class="m-dock-episode" aria-label="查看当前播客台词与详情">
+        <span class="m-dock-speaker-dot" aria-hidden="true"></span>
+        <span id="mDockTitle" class="m-dock-title">拾声集 · 尚未选择播客</span>
+        <span id="mDockSpeakerName" class="m-dock-speaker">就绪</span>
+        <span id="mDockExpandHint" class="m-dock-expand">台词 ›</span>
+      </button>
+
+      <div class="m-progress-row">
+        <span id="mCurrentTime" class="m-time">00:00</span>
+        <input type="range" id="mSeekSlider" class="m-seek-slider" min="0" max="100" step="0.1" value="0" aria-label="播放进度" disabled>
+        <span id="mTotalTime" class="m-time">00:00</span>
+      </div>
+
+      <div class="m-controls-row">
+        <button type="button" id="mBtnSpeed" class="m-ctrl-pill" aria-label="切换播放倍速" disabled>1.0x</button>
+
+        <button type="button" id="mBtnBack15" class="m-ctrl-btn" aria-label="后退 15 秒" disabled>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 12a9 9 0 1 0 3-6.7L3 8"></path>
+            <path d="M3 3v5h5"></path>
+          </svg>
+          <span class="m-ctrl-badge">15</span>
+        </button>
+
+        <button type="button" id="mBtnPlayPause" class="m-play-btn" aria-label="播放或暂停" disabled>
+          <svg class="m-icon-play" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M7.5 5.25a.75.75 0 0 1 1.14-.64l10.5 6.75a.75.75 0 0 1 0 1.28l-10.5 6.75a.75.75 0 0 1-1.14-.64V5.25z"/>
+          </svg>
+          <svg class="m-icon-pause" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <rect x="6.5" y="5" width="3.8" height="14" rx="1.2"></rect>
+            <rect x="13.7" y="5" width="3.8" height="14" rx="1.2"></rect>
+          </svg>
+        </button>
+
+        <button type="button" id="mBtnFwd15" class="m-ctrl-btn" aria-label="快进 15 秒" disabled>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-3-6.7L21 8"></path>
+            <path d="M21 3v5h-5"></path>
+          </svg>
+          <span class="m-ctrl-badge">15</span>
+        </button>
+
+        <button type="button" id="mBtnNext" class="m-ctrl-btn" aria-label="播放下一集" disabled>
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polygon points="5 5 15 12 5 19 5 5" fill="currentColor" stroke="none"></polygon>
+            <line x1="19" y1="5" x2="19" y2="19"></line>
+          </svg>
+        </button>
+      </div>
+    </footer>
+
+    <!-- 断连 / 失效温和提示浮层 -->
+    <div id="mAuthOverlay" class="m-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="mOverlayTitle">
+      <div class="m-overlay-card">
+        <div class="m-overlay-mark" aria-hidden="true">
+          <img src="/icon.png" width="36" height="36" alt="">
+        </div>
+        <h2 id="mOverlayTitle" class="m-overlay-title">随身听连接已断开</h2>
+        <p id="mOverlayMsg" class="m-overlay-msg">电脑端已关闭随身听或刷新了配对二维码。请在电脑端「拾声集 → 手机随身听」重新扫码连接。</p>
+        <button type="button" id="mBtnRetryConnect" class="m-overlay-btn">重新检查连接</button>
+      </div>
+    </div>
+
+    <div id="mToastStack" class="m-toast-stack" aria-live="polite"></div>
+    <audio id="mAudio" preload="metadata" playsinline></audio>
+  </div>
+
+  <script src="/mobile.js" defer></script>
+</body>
+</html>

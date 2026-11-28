@@ -13,6 +13,7 @@ const ROOT_FILES = ['server.js', 'package.json', 'package-lock.json', 'README.md
 const SOURCE_FILES = Object.freeze([
   'src/services/atomicWrite.js', 'src/services/audioMerger.js', 'src/services/collectionStore.js',
   'src/services/collectionSuggester.js', 'src/services/connectionTests.js',
+  'src/services/lanCompanion.js', 'src/services/qrSvg.js',
   'src/services/edgeTtsAdapter.js', 'src/services/extractor.js', 'src/services/httpTts.js',
   'src/services/imageExtractor.js', 'src/services/instanceLock.js', 'src/services/llmCredentials.js',
   'src/services/llmModels.js', 'src/services/minimaxTtsProvider.js', 'src/services/mp3Utils.js',
@@ -22,7 +23,7 @@ const SOURCE_FILES = Object.freeze([
   'src/services/ttsProvider.js', 'src/services/ttsService.js', 'src/services/validation.js',
   'src/services/volcengineTtsProvider.js',
 ]);
-const PUBLIC_FILES = ['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js', 'icon.png'].map(file => 'public/' + file);
+const PUBLIC_FILES = ['index.html', 'style.css', 'app.js', 'inputSource.js', 'audioEngine.js', 'mobile.html', 'mobile.css', 'mobile.js', 'icon.png'].map(file => 'public/' + file);
 const SCRIPTS = ['scripts/start-portable.js', 'scripts/build-mac-launcher.sh'];
 const PLACEHOLDERS = ['public/podcasts/.gitkeep', 'data/.gitkeep'];
 const LAUNCHERS = {

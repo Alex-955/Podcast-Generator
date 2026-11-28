@@ -10,6 +10,7 @@ const applicationFiles = new Set([
   'package.json', 'server.js', 'LICENSE', 'TRADEMARK.md',
   'electron/main.js', 'electron/preload.js', 'electron/windowState.js', 'electron/navigationGuard.js', 'electron/migration.js',
   'public/index.html', 'public/style.css', 'public/app.js', 'public/inputSource.js', 'public/audioEngine.js', 'public/icon.png',
+  'public/mobile.html', 'public/mobile.css', 'public/mobile.js',
   ...SOURCE_FILES,
 ]);
 const applicationDirs = new Set(['electron', 'public', 'src', 'src/services']);

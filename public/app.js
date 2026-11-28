@@ -311,6 +311,16 @@
       suggestionError: null,
       suggestAbortController: null,
     },
+    lanCompanion: {
+      running: false,
+      port: null,
+      activeHost: null,
+      candidates: [],
+      url: null,
+      qrSvg: null,
+      connectedHint: '',
+      busy: false,
+    },
     pendingDeleteId: null,
     deletingPodcastId: null,
     historySelectSeq: 0,
@@ -339,6 +349,8 @@
   };
 
   const dom = {
+    btnLanCompanion: document.getElementById('btnLanCompanion'),
+    lanCompanionStatusDot: document.getElementById('lanCompanionStatusDot'),
     btnSettings: document.getElementById('btnSettings'),
     apiKeyStatusDot: document.getElementById('apiKeyStatusDot'),
     settingsModal: document.getElementById('settingsModal'),
@@ -523,6 +535,22 @@
     quickCreateCollectionForm: document.getElementById('quickCreateCollectionForm'),
     quickCollectionNameInput: document.getElementById('quickCollectionNameInput'),
     btnQuickCreateCollection: document.getElementById('btnQuickCreateCollection'),
+
+    lanCompanionModal: document.getElementById('lanCompanionModal'),
+    btnCloseLanCompanionModal: document.getElementById('btnCloseLanCompanionModal'),
+    lanCompanionStoppedView: document.getElementById('lanCompanionStoppedView'),
+    lanCompanionRunningView: document.getElementById('lanCompanionRunningView'),
+    lanCompanionStoppedError: document.getElementById('lanCompanionStoppedError'),
+    lanCompanionRunningError: document.getElementById('lanCompanionRunningError'),
+    btnStartLanCompanion: document.getElementById('btnStartLanCompanion'),
+    lanCompanionPortBadge: document.getElementById('lanCompanionPortBadge'),
+    lanCompanionQrBox: document.getElementById('lanCompanionQrBox'),
+    lanCompanionUrlInput: document.getElementById('lanCompanionUrlInput'),
+    btnCopyLanCompanionUrl: document.getElementById('btnCopyLanCompanionUrl'),
+    lanCompanionHostWrap: document.getElementById('lanCompanionHostWrap'),
+    lanCompanionHostSelect: document.getElementById('lanCompanionHostSelect'),
+    btnRotateLanCompanion: document.getElementById('btnRotateLanCompanion'),
+    btnStopLanCompanion: document.getElementById('btnStopLanCompanion'),
     currentPodcastTitle: document.getElementById('currentPodcastTitle'),
     currentPodcastSummary: document.getElementById('currentPodcastSummary'),
     currentTime: document.getElementById('currentTime'),
@@ -4642,6 +4670,285 @@
     await createCollectionAndAssign(podcastId, sug.suggestedName);
   }
 
+  function setLanCompanionError(msg) {
+    const running = Boolean(state.lanCompanion.running);
+    const activeEl = running ? dom.lanCompanionRunningError : dom.lanCompanionStoppedError;
+    const otherEl = running ? dom.lanCompanionStoppedError : dom.lanCompanionRunningError;
+    if (otherEl) {
+      otherEl.textContent = '';
+      otherEl.classList.add('hidden');
+    }
+    if (activeEl) {
+      if (msg) {
+        activeEl.textContent = msg;
+        activeEl.classList.remove('hidden');
+      } else {
+        activeEl.textContent = '';
+        activeEl.classList.add('hidden');
+      }
+    }
+  }
+
+  function renderSafeQrSvg(container, svgMarkup) {
+    if (!container) return;
+    container.replaceChildren();
+    if (!svgMarkup || typeof svgMarkup !== 'string') return;
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(svgMarkup, 'image/svg+xml');
+      const root = doc.documentElement;
+      if (!root || root.tagName.toLowerCase() !== 'svg' || doc.querySelector('parsererror')) return;
+
+      const viewBox = root.getAttribute('viewBox') || '';
+      if (!/^\d+\s+\d+\s+\d+\s+\d+$/.test(viewBox)) return;
+
+      const svgNS = 'http://www.w3.org/2000/svg';
+      const safeSvg = document.createElementNS(svgNS, 'svg');
+      safeSvg.setAttribute('viewBox', viewBox);
+      safeSvg.setAttribute('role', 'img');
+      safeSvg.setAttribute('aria-label', root.getAttribute('aria-label') || '手机随身听配对二维码');
+      safeSvg.setAttribute('shape-rendering', 'crispEdges');
+
+      const safeColor = (value, fallback) => (/^#[0-9a-fA-F]{3,8}$/.test(value || '') ? value : fallback);
+      const safeLength = (value) => (/^(?:\d+(?:\.\d+)?%?)$/.test(value || '') ? value : null);
+
+      for (const child of root.children) {
+        const tag = child.tagName.toLowerCase();
+        if (tag === 'rect') {
+          const rect = document.createElementNS(svgNS, 'rect');
+          const x = safeLength(child.getAttribute('x'));
+          const y = safeLength(child.getAttribute('y'));
+          const w = safeLength(child.getAttribute('width'));
+          const h = safeLength(child.getAttribute('height'));
+          if (x !== null) rect.setAttribute('x', x);
+          if (y !== null) rect.setAttribute('y', y);
+          if (w !== null) rect.setAttribute('width', w);
+          if (h !== null) rect.setAttribute('height', h);
+          rect.setAttribute('fill', safeColor(child.getAttribute('fill'), '#FFFFFF'));
+          safeSvg.appendChild(rect);
+        } else if (tag === 'path') {
+          const d = child.getAttribute('d') || '';
+          if (!/^[MmHhVvLlZz0-9.,\s-]+$/.test(d)) return;
+          const path = document.createElementNS(svgNS, 'path');
+          path.setAttribute('fill', safeColor(child.getAttribute('fill'), '#1A1916'));
+          path.setAttribute('d', d);
+          safeSvg.appendChild(path);
+        }
+      }
+
+      container.appendChild(safeSvg);
+    } catch {
+      // Ignore malformed SVG markup
+    }
+  }
+
+  function applyLanCompanionState(data) {
+    const prevRunning = state.lanCompanion.running;
+    const next = {
+      running: Boolean(data?.running),
+      port: Number.isFinite(data?.port) ? data.port : null,
+      activeHost: typeof data?.activeHost === 'string' ? data.activeHost : null,
+      candidates: Array.isArray(data?.candidates) ? data.candidates : [],
+      url: typeof data?.url === 'string' ? data.url : null,
+      qrSvg: typeof data?.qrSvg === 'string' ? data.qrSvg : null,
+      connectedHint: typeof data?.connectedHint === 'string' ? data.connectedHint : '',
+    };
+    Object.assign(state.lanCompanion, next);
+    renderLanCompanionModal();
+    if (prevRunning !== next.running && dom.btnLanCompanion) {
+      dom.btnLanCompanion.title = next.running
+        ? `手机随身听运行中（${next.activeHost || ''}:${next.port || ''}）`
+        : '手机同 Wi-Fi 扫码随身听';
+    }
+  }
+
+  function renderLanCompanionModal() {
+    const lan = state.lanCompanion;
+    const busy = Boolean(lan.busy);
+
+    if (dom.lanCompanionStatusDot) {
+      dom.lanCompanionStatusDot.classList.toggle('is-running', lan.running);
+    }
+    if (dom.btnLanCompanion) {
+      dom.btnLanCompanion.classList.toggle('is-running', lan.running);
+    }
+
+    if (dom.lanCompanionStoppedView) {
+      dom.lanCompanionStoppedView.classList.toggle('hidden', lan.running);
+    }
+    if (dom.lanCompanionRunningView) {
+      dom.lanCompanionRunningView.classList.toggle('hidden', !lan.running);
+    }
+
+    if (dom.btnStartLanCompanion) dom.btnStartLanCompanion.disabled = busy;
+    if (dom.btnRotateLanCompanion) dom.btnRotateLanCompanion.disabled = busy;
+    if (dom.btnStopLanCompanion) dom.btnStopLanCompanion.disabled = busy;
+    if (dom.lanCompanionHostSelect) dom.lanCompanionHostSelect.disabled = busy;
+
+    if (!lan.running) {
+      renderSafeQrSvg(dom.lanCompanionQrBox, '');
+      if (dom.lanCompanionUrlInput) dom.lanCompanionUrlInput.value = '';
+      return;
+    }
+
+    if (dom.lanCompanionPortBadge) {
+      dom.lanCompanionPortBadge.textContent = lan.port ? `端口 ${lan.port}` : '运行中';
+    }
+    if (dom.lanCompanionUrlInput) {
+      dom.lanCompanionUrlInput.value = lan.url || '';
+    }
+    renderSafeQrSvg(dom.lanCompanionQrBox, lan.qrSvg);
+
+    if (dom.lanCompanionHostWrap && dom.lanCompanionHostSelect) {
+      const candidates = lan.candidates || [];
+      const showSelect = candidates.length >= 2;
+      dom.lanCompanionHostWrap.classList.toggle('hidden', !showSelect);
+      if (showSelect) {
+        dom.lanCompanionHostSelect.replaceChildren();
+        candidates.forEach((item) => {
+          const opt = document.createElement('option');
+          opt.value = item.address;
+          const ifName = item.interfaceName ? ` · ${item.interfaceName}` : '';
+          const rec = item.preferred ? '（推荐）' : '';
+          opt.textContent = `${item.address}${ifName}${rec}`;
+          opt.selected = item.address === lan.activeHost;
+          dom.lanCompanionHostSelect.appendChild(opt);
+        });
+      }
+    }
+  }
+
+  async function refreshLanCompanionStatus({ silent = false } = {}) {
+    try {
+      const data = await apiJson('/api/lan-companion/status');
+      applyLanCompanionState(data);
+      if (!silent) setLanCompanionError('');
+    } catch (err) {
+      if (!silent) {
+        setLanCompanionError(err.message || '无法读取随身听状态');
+      }
+    }
+  }
+
+  function openLanCompanionModal() {
+    if (!dom.lanCompanionModal) return;
+    setLanCompanionError('');
+    renderLanCompanionModal();
+    dom.lanCompanionModal.classList.remove('hidden');
+    refreshLanCompanionStatus({ silent: false });
+  }
+
+  function closeLanCompanionModal() {
+    if (!dom.lanCompanionModal) return;
+    dom.lanCompanionModal.classList.add('hidden');
+    dom.btnLanCompanion?.focus();
+  }
+
+  async function handleStartLanCompanion() {
+    if (state.lanCompanion.busy) return;
+    state.lanCompanion.busy = true;
+    setLanCompanionError('');
+    renderLanCompanionModal();
+    try {
+      const data = await apiJson('/api/lan-companion/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      applyLanCompanionState(data);
+      showToast('已开启手机随身听，手机扫码即可收听');
+    } catch (err) {
+      setLanCompanionError(err.message || '开启手机随身听失败');
+    } finally {
+      state.lanCompanion.busy = false;
+      renderLanCompanionModal();
+    }
+  }
+
+  async function handleStopLanCompanion() {
+    if (state.lanCompanion.busy) return;
+    state.lanCompanion.busy = true;
+    setLanCompanionError('');
+    renderLanCompanionModal();
+    try {
+      const data = await apiJson('/api/lan-companion/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      applyLanCompanionState(data);
+      showToast('已关闭手机随身听');
+    } catch (err) {
+      setLanCompanionError(err.message || '关闭手机随身听失败');
+    } finally {
+      state.lanCompanion.busy = false;
+      renderLanCompanionModal();
+    }
+  }
+
+  async function handleRotateLanCompanion() {
+    if (state.lanCompanion.busy) return;
+    state.lanCompanion.busy = true;
+    setLanCompanionError('');
+    renderLanCompanionModal();
+    try {
+      const data = await apiJson('/api/lan-companion/rotate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      applyLanCompanionState(data);
+      showToast('已刷新配对二维码，旧连接已失效');
+    } catch (err) {
+      setLanCompanionError(err.message || '刷新二维码失败');
+    } finally {
+      state.lanCompanion.busy = false;
+      renderLanCompanionModal();
+    }
+  }
+
+  async function handleSelectLanCompanionHost() {
+    if (state.lanCompanion.busy || !dom.lanCompanionHostSelect) return;
+    const host = dom.lanCompanionHostSelect.value;
+    if (!host || host === state.lanCompanion.activeHost) return;
+    state.lanCompanion.busy = true;
+    setLanCompanionError('');
+    renderLanCompanionModal();
+    try {
+      const data = await apiJson('/api/lan-companion/select-host', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host }),
+      });
+      applyLanCompanionState(data);
+      showToast(`已切换局域网地址为 ${host}`);
+    } catch (err) {
+      setLanCompanionError(err.message || '切换局域网地址失败');
+    } finally {
+      state.lanCompanion.busy = false;
+      renderLanCompanionModal();
+    }
+  }
+
+  async function handleCopyLanCompanionUrl() {
+    const url = state.lanCompanion.url;
+    if (!url) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else if (dom.lanCompanionUrlInput) {
+        dom.lanCompanionUrlInput.select();
+        document.execCommand('copy');
+      }
+      showToast('已复制手机随身听链接');
+    } catch {
+      if (dom.lanCompanionUrlInput) {
+        dom.lanCompanionUrlInput.select();
+      }
+      showToast('请长按或 Ctrl/Cmd+C 复制上方链接');
+    }
+  }
+
   function bindPasswordToggle(inputEl, btnEl) {
     if (!inputEl || !btnEl) return;
     btnEl.addEventListener('click', () => {
@@ -5066,6 +5373,18 @@
     });
 
     dom.btnSettings.addEventListener('click', () => openSettingsModal('llm'));
+    if (dom.btnLanCompanion) dom.btnLanCompanion.addEventListener('click', openLanCompanionModal);
+    if (dom.btnCloseLanCompanionModal) dom.btnCloseLanCompanionModal.addEventListener('click', closeLanCompanionModal);
+    if (dom.lanCompanionModal) {
+      dom.lanCompanionModal.addEventListener('click', (e) => {
+        if (e.target === dom.lanCompanionModal) closeLanCompanionModal();
+      });
+    }
+    if (dom.btnStartLanCompanion) dom.btnStartLanCompanion.addEventListener('click', handleStartLanCompanion);
+    if (dom.btnStopLanCompanion) dom.btnStopLanCompanion.addEventListener('click', handleStopLanCompanion);
+    if (dom.btnRotateLanCompanion) dom.btnRotateLanCompanion.addEventListener('click', handleRotateLanCompanion);
+    if (dom.btnCopyLanCompanionUrl) dom.btnCopyLanCompanionUrl.addEventListener('click', handleCopyLanCompanionUrl);
+    if (dom.lanCompanionHostSelect) dom.lanCompanionHostSelect.addEventListener('change', handleSelectLanCompanionHost);
     dom.btnCloseSettings.addEventListener('click', closeSettingsModal);
     dom.btnCancelSettings.addEventListener('click', closeSettingsModal);
     dom.settingsForm.addEventListener('submit', saveSettings);
@@ -5174,7 +5493,9 @@
 
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
-      if (dom.collectionModal && !dom.collectionModal.classList.contains('hidden')) {
+      if (dom.lanCompanionModal && !dom.lanCompanionModal.classList.contains('hidden')) {
+        closeLanCompanionModal();
+      } else if (dom.collectionModal && !dom.collectionModal.classList.contains('hidden')) {
         closeCollectionModal();
       } else if (dom.assignCollectionModal && !dom.assignCollectionModal.classList.contains('hidden')) {
         closeAssignCollectionModal();
@@ -5336,7 +5657,7 @@
     bindEvents();
     positionTabIndicator(true);
 
-    await Promise.all([loadTtsProviders(), loadHistoryList()]);
+    await Promise.all([loadTtsProviders(), loadHistoryList(), refreshLanCompanionStatus({ silent: true })]);
     await restoreActiveTaskIfAny();
 
     if (!state.currentPodcast && state.historyItems.length > 0) {
